@@ -130,18 +130,53 @@ def next_link_api(
     chosen by ?page=, starting at 1.
     """
     items = _records(records)
+    return FakeApi(
+        lambda request: _next_link_page(request, items, page_size, results_key)
+    )
+
+
+def _next_link_page(
+    request: httpx2.Request, items: Sequence[Any], page_size: int, results_key: str
+) -> httpx2.Response:
+    """Answer `request` with its ?page= of `items`, in next_link_api's form."""
+    page = _query(request, "page", 1)
+    start = (page - 1) * page_size
+    more = start + page_size < len(items)
+    following = str(request.url.copy_set_param("page", page + 1)) if more else None
+    body = {
+        "count": len(items),
+        "next": following,
+        results_key: items[start : start + page_size],
+    }
+    return httpx2.Response(200, json=body)
+
+
+def changes_api(
+    records: list[dict[str, Any]],
+    *,
+    field: str = "updated_at",
+    param: str = "updated_since",
+    compare: Literal[">=", ">"] | None = ">=",
+    page_size: int = 100,
+) -> FakeApi:
+    """An API that filters by a field's value, for testing Incremental: next_link_api's pages.
+
+    ?`param`=value keeps the records whose `field` is >= value (or > value,
+    with compare=">"; compare=None ignores the filter, like an API without
+    one). Values compare as text, so give them one fixed format, such as
+    "2026-01-02T10:00:00Z". The fake reads `records` on every request, so a
+    test can add or change records between runs, as a real API's data does.
+    """
 
     def answer(request: httpx2.Request) -> httpx2.Response:
-        page = _query(request, "page", 1)
-        start = (page - 1) * page_size
-        more = start + page_size < len(items)
-        following = str(request.url.copy_set_param("page", page + 1)) if more else None
-        body = {
-            "count": len(items),
-            "next": following,
-            results_key: items[start : start + page_size],
-        }
-        return httpx2.Response(200, json=body)
+        since = request.url.params.get(param)
+        if since is None or compare is None:
+            chosen = list(records)
+        elif compare == ">=":
+            chosen = [r for r in records if r[field] >= since]
+        else:
+            chosen = [r for r in records if r[field] > since]
+        return _next_link_page(request, chosen, page_size, "results")
 
     return FakeApi(answer)
 

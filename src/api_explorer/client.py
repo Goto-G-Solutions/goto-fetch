@@ -13,6 +13,7 @@ import httpx2
 from .checks import ResponseCheck
 from .decode import Decoder, json_decoder
 from .errors import ApiError, Problem
+from .incremental import Incremental
 from .logs import client_context, log_event
 from .models import converter
 from .paging import (
@@ -268,6 +269,20 @@ class Client:
             )
             time.sleep(wait)
 
+    def _in_context(self, records: Iterator[Any]) -> Iterator[Any]:
+        """Yield from `records`, stamping their log lines with this client's name.
+
+        The name is set only while the next record is being found, not while
+        the caller holds it, so the caller's own log lines aren't stamped.
+        """
+        while True:
+            with client_context(self.name):
+                try:
+                    record = next(records)
+                except StopIteration:
+                    return
+            yield record
+
     def _problem(self, response: httpx2.Response) -> Problem | None:
         if self.check is None:
             return None
@@ -323,6 +338,7 @@ class Client:
         max_pages: int | None = None,
         model: Any = None,
         retry: bool | None = None,
+        incremental: Incremental | None = None,
     ) -> Iterator[Any]:
         """Yield every record from a paginated JSON endpoint.
 
@@ -344,6 +360,12 @@ class Client:
         change data, so pass retry=True for a search that only reads.
         `model` turns each record into a typed object (see converter): a
         pydantic model, msgspec Struct, dataclass or function.
+
+        `incremental` fetches only what changed since the last run: the
+        first request asks from its last value on, and records already
+        seen are passed over (see Incremental). Save incremental.state
+        after storing the records; it moves on only when every page has
+        been read.
 
         Each page logs a "page" event at INFO, such as "Page 44: 100 records
         in 0.62s, 4,400 so far of 61,203", and the end a "done" event, so a
@@ -397,6 +419,8 @@ class Client:
             return fetched
 
         start = PageRequest(str(url), method.upper(), json)
+        if incremental is not None:
+            start = incremental.apply(start)
         first, next_link = (paging or NextLink()).begin(start, read)
 
         def next_request(fetched: Fetched, request: PageRequest) -> PageRequest | None:
@@ -409,63 +433,69 @@ class Client:
                 return dataclasses.replace(request, url=urljoin(request.url, following))
             return following
 
-        received = 0
-        pages = 0
-        started = time.monotonic()
-        for number, fetched in enumerate(
-            paginate(fetch, first, next_request, max_pages=max_pages), start=1
-        ):
-            pages = number
+        def every_record() -> Iterator[Any]:
+            received = 0
+            pages = 0
+            started = time.monotonic()
+            for number, fetched in enumerate(
+                paginate(fetch, first, next_request, max_pages=max_pages), start=1
+            ):
+                pages = number
+                with client_context(self.name):
+                    items, total = read(fetched)
+                    received += len(items)
+                    of_total = "" if total is None else f" of {total:,}"
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        "page",
+                        "Page %d: %d records in %.2fs, %s so far%s",
+                        number,
+                        len(items),
+                        seconds,
+                        f"{received:,}",
+                        of_total,
+                        data={
+                            "page": number,
+                            "records_on_page": len(items),
+                            "records_so_far": received,
+                            "total": total,
+                            "seconds": seconds,
+                        },
+                    )
+                yield from items
             with client_context(self.name):
-                items, total = read(fetched)
-                received += len(items)
-                of_total = "" if total is None else f" of {total:,}"
+                if max_pages is not None and pages >= max_pages:
+                    log_event(
+                        logger,
+                        logging.DEBUG,
+                        "stop",
+                        "Stopped at max_pages=%d",
+                        max_pages,
+                        data={"reason": "max_pages"},
+                    )
+                elapsed = time.monotonic() - started
                 log_event(
                     logger,
                     logging.INFO,
-                    "page",
-                    "Page %d: %d records in %.2fs, %s so far%s",
-                    number,
-                    len(items),
-                    seconds,
+                    "done",
+                    "Done: %s records in %d pages, %.1fs",
                     f"{received:,}",
-                    of_total,
-                    data={
-                        "page": number,
-                        "records_on_page": len(items),
-                        "records_so_far": received,
-                        "total": total,
-                        "seconds": seconds,
-                    },
+                    pages,
+                    elapsed,
+                    data={"pages": pages, "records": received, "seconds": elapsed},
                 )
-            if convert is None:
-                yield from items
-                continue
-            for index, item in enumerate(items, start=received - len(items)):
-                try:
-                    yield convert(item)
-                except (ValueError, TypeError) as exc:
-                    raise ApiError(
-                        f"Record {index} doesn't fit {name}: {exc}", url=str(url)
-                    ) from exc
-        with client_context(self.name):
-            if max_pages is not None and pages >= max_pages:
-                log_event(
-                    logger,
-                    logging.DEBUG,
-                    "stop",
-                    "Stopped at max_pages=%d",
-                    max_pages,
-                    data={"reason": "max_pages"},
-                )
-            elapsed = time.monotonic() - started
-            log_event(
-                logger,
-                logging.INFO,
-                "done",
-                "Done: %s records in %d pages, %.1fs",
-                f"{received:,}",
-                pages,
-                elapsed,
-                data={"pages": pages, "records": received, "seconds": elapsed},
-            )
+
+        stream = every_record()
+        if incremental is not None:
+            stream = self._in_context(incremental.track(stream))
+        if convert is None:
+            yield from stream
+            return
+        for index, item in enumerate(stream):
+            try:
+                yield convert(item)
+            except (ValueError, TypeError) as exc:
+                raise ApiError(
+                    f"Record {index} doesn't fit {name}: {exc}", url=str(url)
+                ) from exc

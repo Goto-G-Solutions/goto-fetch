@@ -206,3 +206,46 @@ def test_cursor_paging_by_post_body_returns_every_page_in_order(sizes):
         paging=Cursor(send_in="body", stop_on_empty=False),
     )
     assert list(records) == list(range(sum(sizes)))
+
+
+@settings(deadline=None)
+@given(
+    batches=st.lists(
+        st.lists(st.tuples(st.integers(0, 5), st.integers(0, 1)), max_size=4),
+        min_size=1,
+        max_size=5,
+    ),
+    page_size=st.integers(1, 4),
+)
+def test_incremental_runs_never_lose_or_repeat_a_version_of_a_record(
+    batches, page_size
+):
+    # Between runs, a batch adds or edits records: (id, step), where step
+    # moves the clock on by 0 or 1 minute, so changes often share a time
+    # with the last run's newest. Each run must yield every version it
+    # hasn't yielded before, and none twice.
+    from api_explorer import Incremental
+    from api_explorer.testing import changes_api
+
+    data: dict[int, dict] = {}
+    rows: list[dict] = []
+    api = changes_api(rows, page_size=page_size)
+    clock, state, version = 0, None, 0
+    yielded: list[tuple[int, int]] = []
+    for batch in batches:
+        for id_, step in batch:
+            clock += step
+            version += 1
+            data[id_] = {
+                "id": id_,
+                "updated_at": f"2026-01-01T00:{clock:02d}:00Z",
+                "v": version,
+            }
+        rows[:] = list(data.values())
+        since = Incremental("updated_at", "updated_since", state=state)
+        got = list(api.client().records("/o/", incremental=since))
+        yielded += [(r["id"], r["v"]) for r in got]
+        state = since.state
+        latest = {(r["id"], r["v"]) for r in rows}
+        assert latest <= set(yielded)
+    assert len(yielded) == len(set(yielded))

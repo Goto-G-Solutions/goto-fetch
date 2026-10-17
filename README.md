@@ -63,6 +63,7 @@ Each piece works with no extra packages, and uses better ones when you have them
 | HTTP | an httpx2 client made for you | `Client(http=httpx2.Client(...))` for proxies, HTTP/2, certificates or event hooks |
 | Logging | silent | `enable_logging()`; every line is an event with data (`record.event`, `record.data`) |
 | Paging | next links (body or `Link` header), cursors, limit/offset, GET or POST | your own `Paging`: it sees each page's body and response; `with_query` sets a query parameter |
+| Incremental fetching | everything, every run | `records(incremental=Incremental(field, param))`; filters here when the API can't |
 | Errors in a 200 | trusted as data | `Client(check=error_at("error\|errors"))`, or your own check: a function from response to problem |
 | Auth | fixed tokens; access and refresh tokens, renewed safely across threads | log in with `PasswordLogin`, OAuth2 `ClientCredentials`, or your own `Login`; any `httpx2.Auth` |
 
@@ -90,6 +91,18 @@ client = Client(
     "https://api.example.com", check=error_at("error|errors", temporary=True)
 )
 ```
+
+To fetch only what changed since the last run, give `records` an `Incremental`: the field that grows when a record is added or changed, and the parameter the API filters by. Field and parameter names are settings, since APIs differ (`created_at` or `updated_at`; `updated_since`, `updated_at__gte` or a key in a POST body). Save its `state` after storing the records, and pass it back next time:
+
+```python
+from api_explorer import Incremental
+
+since = Incremental("updated_at", "updated_since", state=saved_state)
+store(client.records("/orders/", incremental=since))
+saved_state = since.state  # plain JSON; moves on only after a complete run
+```
+
+Two rules keep it from losing data. The state moves on only when a run has read every page, since records may come in any order and a failed run could have skipped older ones. And it asks from the last value itself, not after it, then passes over what it has already seen there, so records that share the last value aren't lost. `created_at` finds new records only; `updated_at` also finds edits, so a record can come back with new values, and storing must replace it by its id rather than add it again.
 
 The interfaces are Protocols: your pieces match their shape and never inherit from ours, and a type checker confirms they fit. `Paging`, `RetryPolicy`, `Login` and `ResolvesUrls` (an auth with URLs of its own) are the main ones; `check_paging` and `check_retry_policy` check behaviour the types can't.
 

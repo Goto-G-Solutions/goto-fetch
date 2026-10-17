@@ -6,7 +6,8 @@ The layers, each built only on the ones before it:
 - models, records, retry: typed records, reshaping lists of dicts, and
   the retry policy.
 - frames, paging: dataframes through narwhals, and the paging loop.
-- auth, client: Client fetches the records, page by page.
+- auth, incremental, client: Client fetches the records, page by page,
+  or only those changed since the last run.
 - plan: FetchPlan describes one fetch, and writes it as a script.
 
 Optional packages make it faster or richer when installed: msgspec parses
@@ -32,6 +33,7 @@ from .client import Client, ResolvesUrls
 from .decode import Decoder, json_decoder
 from .errors import ApiError, Problem, redact_url
 from .frames import default_backend, latest_per_key, to_frame
+from .incremental import Incremental
 from .logs import (
     ClientFilter,
     RedactFilter,
@@ -71,6 +73,7 @@ __all__ = [
     "FetchPlan",
     "Fetched",
     "HeaderLink",
+    "Incremental",
     "Login",
     "NextLink",
     "Offset",

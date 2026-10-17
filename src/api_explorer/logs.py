@@ -22,6 +22,7 @@ without reading the text:
 | renew       | DEBUG   | how ("refresh" or "login"), why                   |
 | no-count    | WARNING | count_key                                         |
 | no-next-key | WARNING | key                                               |
+| incremental | DEBUG   | kept, dropped, last                               |
 | count-short | WARNING | records, count                                    |
 | text        | WARNING | column, reason                                    |
 
