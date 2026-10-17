@@ -146,6 +146,50 @@ def test_my_pipeline_survives_a_capped_server_and_a_hiccup():
 
 Each returns a `FakeApi`, which remembers every request (`.calls`, `.paths`, `.queries`, `.bodies`). `.client()` gives a `Client` wired to it, whose retries don't wait.
 
+### Testing your own pieces
+
+Pieces you build on the package's interfaces test the same way: point them at a fake, and check what happened. Two checks cover the promises every retry policy and paging style must keep.
+
+```python
+import httpx2
+
+from api_explorer import Client, PageRequest, read_page
+from api_explorer.testing import check_paging, check_retry_policy, fetched, replies
+
+
+def test_my_paging_style():
+    # On its own: fetched() builds the page a style receives.
+    first, next_link = MyStyle().begin(PageRequest("http://api.test/api/items/"), read)
+    assert next_link(fetched({"links": {"next": "?page=2"}}), first) == "?page=2"
+    # End to end: every record, once each, and it stops.
+    check_paging(MyStyle(), my_fake_api, expected_records)
+
+
+def test_my_retry_policy():
+    check_retry_policy(MyPolicy())  # always gives up; no negative or endless waits
+    api = replies(503, 200)
+    api.client(retry=MyPolicy()).request("GET", "/items/")
+    assert len(api.calls) == 2
+
+
+def test_my_auth_signs_each_request():
+    api = replies(200)
+    api.client(auth=MyAuth()).request("GET", "/items/")
+    assert "X-Signature" in api.calls[0].headers
+
+
+def test_with_my_own_httpx2_client():
+    api = replies(httpx2.Response(200, json={"results": [1], "next": None}))
+    http = httpx2.Client(
+        base_url="http://api.test/api", transport=httpx2.MockTransport(api)
+    )
+    assert list(Client(http=http).records("/items/")) == [1]
+
+
+def read(page):
+    return read_page(page.body)
+```
+
 ## The explorer
 
 ```bash

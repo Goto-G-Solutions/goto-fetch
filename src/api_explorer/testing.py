@@ -1,4 +1,4 @@
-"""Fake APIs for tests: in-memory servers that page, fail and authenticate like real ones.
+"""Fake APIs for tests, and checks for pieces you build on this package's interfaces.
 
 Each builder returns a FakeApi: a handler for httpx2.MockTransport that also
 remembers every request it gets. fake.client() gives a Client wired to it,
@@ -10,16 +10,23 @@ framework is needed.
                                         paging=Offset(limit=1000)))
     assert records == list(range(250))
     assert len(api.calls) == 4                   # the 503, then 3 pages
+
+For pieces of your own: fetched() builds a page to test a paging style on
+its own, and check_retry_policy() and check_paging() check the promises
+every retry policy and paging style must keep.
 """
 
 import json
+import math
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Literal
 
 import httpx2
 
 from .client import Client
-from .retry import Retry
+from .errors import ApiError
+from .paging import Fetched, Paging
+from .retry import Failure, Retry, RetryPolicy
 
 Answer = Callable[[httpx2.Request], httpx2.Response]
 """Turns one request into a response, as httpx2.MockTransport expects."""
@@ -319,3 +326,127 @@ class TokenServer(FakeApi):
     def expire_access_tokens(self) -> None:
         """Make every access token stale, so the next request needs a new one."""
         self.access_tokens.clear()
+
+
+def fetched(
+    body: Any = None,
+    *,
+    status: int = 200,
+    headers: Mapping[str, str] | None = None,
+    url: str = "http://api.test/api/items/",
+) -> Fetched:
+    """Build the page a paging style receives, to test a style on its own.
+
+        first, next_link = MyStyle().begin(PageRequest(url), read)
+        assert next_link(fetched({"next": "?page=2"}), first) == "?page=2"
+
+    `body` is the parsed JSON; `headers` (such as a Link header) and
+    `status` go on the response, which came from GET `url`.
+    """
+    request = httpx2.Request("GET", url)
+    response = httpx2.Response(status, json=body, headers=headers, request=request)
+    return Fetched(body, response)
+
+
+def check_retry_policy(policy: RetryPolicy, *, max_attempts: int = 100) -> None:
+    """Check a retry policy keeps the promises every policy must keep.
+
+    The policy is shown failures that never go away, of each kind: a 503, a
+    429, a network error, and a POST answered with a 503. For each, it must
+    give up (return None, or raise ApiError) within `max_attempts` tries,
+    and every wait it asks for must be a number of seconds that is neither
+    negative nor endless. Nothing sleeps, so this is quick.
+
+    Raises AssertionError, saying which rule broke and how.
+    """
+    url = "http://api.test/api/items/"
+    kinds: dict[str, tuple[str, httpx2.Response | None, Exception | None]] = {
+        "a 503": ("GET", httpx2.Response(503), None),
+        "a 429": ("GET", httpx2.Response(429), None),
+        "a network error": ("GET", None, httpx2.ConnectError("refused")),
+        "a POST answered with 503": ("POST", httpx2.Response(503), None),
+    }
+    for kind, (method, response, error) in kinds.items():
+        for attempt in range(1, max_attempts + 1):
+            failure = Failure(attempt, method, url, response, error)
+            try:
+                wait = policy.wait(failure)
+            except ApiError:
+                break
+            if wait is None:
+                break
+            seconds = isinstance(wait, (int, float)) and not isinstance(wait, bool)
+            if not (seconds and 0 <= wait < math.inf):
+                raise AssertionError(
+                    f"after {kind}, the policy asked to wait {wait!r}; a wait must be "
+                    "a number of seconds, neither negative nor endless"
+                )
+        else:
+            raise AssertionError(
+                f"after {kind} that never goes away, the policy was still retrying "
+                f"after {max_attempts} tries; a policy must give up"
+            )
+
+
+def check_paging(
+    paging: Paging,
+    api: FakeApi,
+    expected: Sequence[Any],
+    *,
+    endpoint: str = "/items/",
+    results_key: str | None = "results",
+    count_key: str | None = None,
+    method: str = "GET",
+    json: Any = None,
+    max_requests: int | None = None,
+) -> None:
+    """Check a paging style gets every record from a fake API, once each, and stops.
+
+    Runs Client.records against `api` with this style, and checks that:
+
+    - it stops within `max_requests` requests (by default one per record,
+      plus two: enough for any style that moves on by at least one record
+      a page);
+    - it never asks for a page it already fetched;
+    - the records are exactly `expected`, in order, none missing and none
+      twice.
+
+    The remaining arguments go to Client.records. Raises AssertionError,
+    saying which rule broke and how.
+    """
+    limit = len(expected) + 2 if max_requests is None else max_requests
+    try:
+        records = list(
+            api.client().records(
+                endpoint,
+                method=method,
+                json=json,
+                results_key=results_key,
+                count_key=count_key,
+                paging=paging,
+                max_pages=limit + 1,
+            )
+        )
+    except ApiError as error:
+        if "Pagination loops" in str(error):
+            raise AssertionError(f"the paging style looped: {error}") from error
+        raise
+    if len(api.calls) > limit:
+        raise AssertionError(
+            f"the paging style didn't stop within {limit} requests "
+            f"(it made {len(api.calls)})"
+        )
+    if records != list(expected):
+        missing = [r for r in expected if r not in records]
+        extra = [r for r in records if r not in expected]
+        twice = [r for r in expected if records.count(r) > 1]
+        problems = [
+            f"missing {missing[:5]}" if missing else "",
+            f"unexpected {extra[:5]}" if extra else "",
+            f"repeated {twice[:5]}" if twice else "",
+            "out of order" if not (missing or extra or twice) else "",
+        ]
+        raise AssertionError(
+            "the paging style didn't fetch the expected records: "
+            + "; ".join(p for p in problems if p)
+        )

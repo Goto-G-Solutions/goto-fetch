@@ -15,4 +15,4 @@ The first release.
 - Building blocks for loops of your own: `paginate` (which pages by any request, such as a POST body, with loop protection by `request_key` or your own key), `read_page`, `Client.json_body`, `converter`, and progress data on each page's log record (`Progress`).
 - `FetchPlan`: describe a fetch once, run it, or write it as a script.
 - Scraping (the `scrape` extra), and the explorer notebook (the `explorer` extra).
-- `api_explorer.testing`: fake APIs for testing code that fetches from APIs (next link, limit/offset, cursor, Link header, a simplejwt-style token server, fixed pages and responses), `flaky` to inject failures, and `FakeApi`, which remembers every request.
+- `api_explorer.testing`: fake APIs for testing code that fetches from APIs (next link, limit/offset, cursor, Link header, a simplejwt-style token server, fixed pages and responses), `flaky` to inject failures, and `FakeApi`, which remembers every request. For pieces you build on the interfaces: `fetched` builds a page to test a paging style on its own, and `check_retry_policy` and `check_paging` check the promises every policy and style must keep.

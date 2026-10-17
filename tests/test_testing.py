@@ -3,19 +3,36 @@
 offset_api, TokenServer, json_pages and replies are exercised throughout
 test_paging, test_auth, test_client and test_retry, which check their
 options as they test the client. This file covers the rest: FakeApi's
-record of calls, flaky, and the builders the other tests don't use.
+record of calls, flaky, the builders the other tests don't use, and the
+helpers for testing pieces of your own (fetched and the two checks), on
+both sides: correct pieces pass, and each kind of broken piece is caught.
 """
+
+import re
 
 import httpx2
 import pytest
 
-from api_explorer import ApiError, Cursor, HeaderLink, Retry
+from api_explorer import (
+    ApiError,
+    Cursor,
+    HeaderLink,
+    NextLink,
+    Offset,
+    PageRequest,
+    Retry,
+    read_page,
+)
 from api_explorer.testing import (
     FakeApi,
+    check_paging,
+    check_retry_policy,
     cursor_api,
+    fetched,
     flaky,
     link_header_api,
     next_link_api,
+    offset_api,
     replies,
 )
 
@@ -93,3 +110,128 @@ def test_cursor_api_takes_its_cursor_where_it_is_told(send_in):
     assert list(records) == [0, 1, 2, 3, 4]
     sent = api.bodies if send_in == "body" else api.queries
     assert [s.get("cursor") for s in sent] == [None, "2", "4"]
+
+
+def test_fetched_builds_the_page_a_paging_style_receives():
+    page = fetched(
+        {"next": "?page=2"}, headers={"Link": '<http://h/x?page=2>; rel="next"'}
+    )
+    first = PageRequest("http://api.test/api/items/")
+    _, body_link = NextLink().begin(first, read_page_of)
+    _, header_link = HeaderLink().begin(first, read_page_of)
+    assert body_link(page, first) == "?page=2"
+    assert header_link(page, first) == "http://h/x?page=2"
+    assert (page.response.status_code, str(page.response.url)) == (200, first.url)
+
+
+def read_page_of(page):
+    return read_page(page.body)
+
+
+class Bounded:
+    """A custom policy that keeps the rules: a few short waits, then stop."""
+
+    def wait(self, failure):
+        return 0.1 if failure.attempt < 3 else None
+
+
+class Refusing:
+    """A custom policy that stops by raising ApiError, which also counts."""
+
+    def wait(self, failure):
+        raise ApiError("no retries here")
+
+
+@pytest.mark.parametrize(
+    "policy", [Retry(), Bounded(), Refusing()], ids=["Retry", "bounded", "raises"]
+)
+def test_check_retry_policy_passes_policies_that_keep_the_rules(policy):
+    check_retry_policy(policy)
+
+
+class Waits:
+    """A broken policy that always asks for the same wait."""
+
+    def __init__(self, seconds):
+        self.seconds = seconds
+
+    def wait(self, failure):
+        return self.seconds
+
+
+@pytest.mark.parametrize(
+    ("policy", "message"),
+    [
+        (
+            Waits(0.0),
+            "after a 503 that never goes away, the policy was still retrying after 100 tries",
+        ),
+        (Waits(-1.0), "after a 503, the policy asked to wait -1.0"),
+        (Waits(float("inf")), "asked to wait inf"),
+        (Waits(float("nan")), "asked to wait nan"),
+        (Waits(True), "asked to wait True"),
+    ],
+    ids=["never-stops", "negative", "endless", "nan", "not-seconds"],
+)
+def test_check_retry_policy_catches_a_broken_policy(policy, message):
+    with pytest.raises(AssertionError, match=re.escape(message)):
+        check_retry_policy(policy)
+
+
+@pytest.mark.parametrize(
+    ("paging", "api", "options"),
+    [
+        (NextLink(), next_link_api(250), {}),
+        (Offset(limit=40), offset_api(250, cap=25), {"results_key": "items"}),
+        (
+            Cursor(send_in="body"),
+            cursor_api(250, send_in="body"),
+            {"results_key": "data", "method": "POST", "json": {}},
+        ),
+    ],
+    ids=["next-link", "offset-with-cap", "post-cursor"],
+)
+def test_check_paging_passes_styles_that_get_every_record_once(paging, api, options):
+    check_paging(paging, api, list(range(250)), **options)
+
+
+class StopsEarly:
+    """A broken style that never asks for a second page."""
+
+    def begin(self, first, read):
+        return first, lambda fetched, request: None
+
+
+class SamePage:
+    """A broken style that asks for the page it just fetched."""
+
+    def begin(self, first, read):
+        return first, lambda fetched, request: request.url
+
+
+class NeverStops:
+    """A broken style that keeps asking for the next page number, past the end."""
+
+    def begin(self, first, read):
+        def next_link(fetched, request):
+            page = int(httpx2.URL(request.url).params.get("page", 1))
+            return f"?page={page + 1}"
+
+        return first, next_link
+
+
+@pytest.mark.parametrize(
+    ("paging", "message"),
+    [
+        (
+            StopsEarly(),
+            "didn't fetch the expected records: missing [100, 101, 102, 103, 104]",
+        ),
+        (SamePage(), "the paging style looped"),
+        (NeverStops(), "didn't stop within 252 requests"),
+    ],
+    ids=["stops-early", "loops", "never-stops"],
+)
+def test_check_paging_catches_a_broken_style(paging, message):
+    with pytest.raises(AssertionError, match=re.escape(message)):
+        check_paging(paging, next_link_api(250), list(range(250)))
