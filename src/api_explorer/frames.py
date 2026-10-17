@@ -42,15 +42,16 @@ def to_frame(records: Sequence[Any], backend: str | ModuleType | None = None) ->
     `backend` is a name such as "polars", "pandas" or "pyarrow", or the
     module itself; None picks one (see default_backend). The result is that
     library's own frame. Records can be dicts, or typed models (see
-    as_dict). Columns are every
-    key found in any record, in the order first seen, and a missing value is
-    null.
+    as_dict). Columns are every key found in any record, in the order first
+    seen, and a missing value is null.
 
     The libraries disagree about messy columns. polars rejects a value whose
     type first shows up after 100 nulls, and pyarrow rejects "123" next to
-    456. So types are evened out here first. A column whose values mix types
-    becomes text, and so do list elements of mixed types; a warning names the
-    column. Ints and floats count as one type, numbers.
+    456. So types are evened out here first, at every depth: the fields of
+    nested objects and the elements of lists are evened out the same way as
+    top-level columns. Values of mixed types become text, and a warning
+    names where, such as "meta.size" or "tags[*]". Ints and floats count as
+    one type, numbers.
     """
 
     def kinds(values: Iterable[Any]) -> set[type]:
@@ -71,21 +72,33 @@ def to_frame(records: Sequence[Any], backend: str | ModuleType | None = None) ->
             return json.dumps(value, default=str)
         return str(value)
 
-    def even_out(column: str, values: list) -> list:
+    def even_out(where: str, values: list) -> list:
         found = kinds(values)
         if found == {list}:
-            if len(kinds(x for v in values if v for x in v)) <= 1:
-                return values
-            logger.warning(
-                "Column %r has lists of mixed types; storing as text",
-                column,
-            )
-            return [None if v is None else [as_text(x) for x in v] for v in values]
+            # A list's elements, across all records, are one column of their own.
+            elements = [x for v in values if v is not None for x in v]
+            fixed = iter(even_out(f"{where}[*]", elements))
+            return [None if v is None else [next(fixed) for _ in v] for v in values]
+        if found == {dict}:
+            # So is each field of a nested object.
+            keys = dict.fromkeys(k for v in values if v is not None for k in v)
+            fields = {
+                k: iter(
+                    even_out(
+                        f"{where}.{k}",
+                        [v[k] for v in values if v is not None and k in v],
+                    )
+                )
+                for k in keys
+            }
+            return [
+                None if v is None else {k: next(fields[k]) for k in v} for v in values
+            ]
         if len(found) <= 1:
             return values
         # Ints and floats share one kind (float), so name it "number".
         names = ", ".join(sorted("number" if t is float else t.__name__ for t in found))
-        logger.warning("Column %r mixes %s; storing it as text", column, names)
+        logger.warning("Column %r mixes %s; storing it as text", where, names)
         return [as_text(v) for v in values]
 
     records = [as_dict(record) for record in records]

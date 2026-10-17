@@ -56,10 +56,34 @@ def test_to_frame_stores_a_column_of_mixed_types_as_text(backend, caplog):
     assert "Column 'value' mixes number, str; storing it as text" in caplog.messages
 
 
-def test_to_frame_stores_list_elements_of_mixed_types_as_text(backend):
+def test_to_frame_stores_list_elements_of_mixed_types_as_text(backend, caplog):
     records = [{"v": [1, 2]}, {"v": ["three"]}, {"v": []}]
     values = [list(r["v"]) for r in rows_of(to_frame(records, backend))]
     assert values == [["1", "2"], ["three"], []]
+    assert "Column 'v[*]' mixes number, str; storing it as text" in caplog.messages
+
+
+def test_to_frame_evens_out_the_fields_of_nested_objects(backend, caplog):
+    # Regression: types were evened out for top-level columns only, so
+    # polars and pyarrow failed on a nested field holding 1 here and "x" there.
+    records = [
+        {"meta": {"size": 1, "ok": True}},
+        {"meta": {"size": "x"}},
+        {"meta": None},
+    ]
+    frame = nw.from_native(to_frame(records, backend), eager_only=True)
+    sizes = frame["meta"].to_list()
+    assert [None if m is None else m["size"] for m in sizes] == ["1", "x", None]
+    assert "Column 'meta.size' mixes number, str; storing it as text" in caplog.messages
+
+
+def test_to_frame_evens_out_objects_inside_lists(backend):
+    # The same rule reaches objects nested in lists, at any depth.
+    records = [{"lines": [{"qty": 1}, {"qty": 2}]}, {"lines": [{"qty": "lots"}]}]
+    rows = nw.from_native(to_frame(records, backend), eager_only=True)[
+        "lines"
+    ].to_list()
+    assert [[line["qty"] for line in lines] for lines in rows] == [["1", "2"], ["lots"]]
 
 
 def test_latest_per_key_keeps_the_newest_row_of_each_key(backend):
