@@ -193,6 +193,20 @@ def test_without_a_key_a_record_is_recognised_by_its_content():
     assert run_one == [{"t": 5, "name": "a"}]
 
 
+def test_a_record_changed_back_at_the_same_time_comes_through():
+    # Regression: the list of records seen at the last value kept growing
+    # across runs, so a record edited back to an earlier version within
+    # the same instant matched that old version and was passed over. Now
+    # the state holds only what the last run saw there.
+    first = Incremental("t", state={"last": 5, "seen": []})
+    list(first.track([{"id": 1, "t": 5, "v": None}]))
+    second = Incremental("t", state=first.state)
+    list(second.track([{"id": 1, "t": 5, "v": 0}]))
+    third = Incremental("t", state=second.state)
+    reverted = {"id": 1, "t": 5, "v": None}
+    assert list(third.track([reverted])) == [reverted]
+
+
 def test_with_a_key_an_edit_at_the_last_value_is_passed_over():
     # The trade-off key= makes, shown on purpose: record 1 changes again in
     # the same instant as the last run's newest value, and only content
@@ -467,7 +481,7 @@ def test_keyset_on_its_own_yields_the_repeats_at_each_boundary():
 
 
 @pytest.mark.parametrize(
-    ("option", "value"), [("send_in", "header"), ("limit", 0)], ids=["send_in", "limit"]
+    ("option", "value"), [("send_in", "header"), ("limit", 1)], ids=["send_in", "limit"]
 )
 def test_keyset_refuses_unknown_settings(option, value):
     with pytest.raises(ValueError, match=option):

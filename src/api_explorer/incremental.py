@@ -217,7 +217,11 @@ class Incremental:
         in any order. If the loop stops early, by an error or a break,
         `state` stays as it was.
         """
-        highest, at_highest = self._last, set(self._seen)
+        # `observed` holds what this run saw at its highest value, repeats
+        # and records loaded last run included. Every record at that value
+        # comes back next run (the filter asks from it), so this, not an
+        # ever-growing list, is what the next run needs to recognise.
+        highest, observed = self._last, set()
         kept = dropped = 0
         for record in records:
             value = get_path(record, self.field, MISSING)
@@ -234,28 +238,26 @@ class Incremental:
                 kept += 1
                 yield record
                 continue
-            if self._last is not None:
-                if _greater(self._last, value, self.field):
-                    dropped += 1
-                    continue
-                if _same(value, self._last, self.field) and (
-                    self._identity(record) in self._seen
-                ):
-                    dropped += 1
-                    continue
+            if self._last is not None and _greater(self._last, value, self.field):
+                dropped += 1
+                continue
             if highest is None or _greater(value, highest, self.field):
-                highest, at_highest = value, set()
-            if _same(value, highest, self.field):
+                highest, observed = value, set()
+            at_last = self._last is not None and _same(value, self._last, self.field)
+            at_highest = _same(value, highest, self.field)
+            if at_last or at_highest:
                 identity = self._identity(record)
-                if identity in at_highest:
-                    # Already passed at the highest value: a repeat from
-                    # overlapping pages, or from the last run.
-                    dropped += 1
+                if at_highest:
+                    if identity in observed:
+                        dropped += 1  # a repeat this run: overlapping pages
+                        continue
+                    observed.add(identity)
+                if at_last and identity in self._seen:
+                    dropped += 1  # loaded by the last run
                     continue
-                at_highest.add(identity)
             kept += 1
             yield record
-        self._state = {"last": _send_form(highest), "seen": sorted(at_highest)}
+        self._state = {"last": _send_form(highest), "seen": sorted(observed)}
         log_event(
             logger,
             logging.DEBUG,
@@ -314,6 +316,7 @@ class Keyset:
       means "after this value" (>) would skip records that share a value.
     - `limit`, `limit_param`: the page size it asks for, and its name.
       Keyset needs it to tell the last page from a page full of one value.
+      At least 2, since each page repeats the last record of the one before.
     - `send_in`, `send_as`: where the parameters go, and the form of the
       value, as for Incremental.
 
@@ -335,8 +338,12 @@ class Keyset:
     def __post_init__(self) -> None:
         if self.send_in not in ("query", "body"):
             raise ValueError(f"send_in must be 'query' or 'body', got {self.send_in!r}")
-        if self.limit < 1:
-            raise ValueError(f"limit must be at least 1, got {self.limit}")
+        if self.limit < 2:
+            # Each page after the first starts with the last record of the
+            # one before, so a page of one could never move on.
+            raise ValueError(
+                f"limit must be at least 2 for keyset paging, got {self.limit}"
+            )
 
     def begin(
         self, first: PageRequest, read: Callable[[Fetched], Page]
