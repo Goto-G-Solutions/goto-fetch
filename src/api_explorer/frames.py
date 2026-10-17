@@ -15,6 +15,9 @@ from .models import as_dict
 logger = logging.getLogger(__name__)
 
 BACKENDS = ("polars", "pandas", "pyarrow")
+
+INT64 = range(-(2**63), 2**63)
+"""The integers every dataframe library can hold as integers."""
 """The dataframe libraries default_backend chooses from, in order."""
 
 
@@ -52,7 +55,8 @@ def to_frame(records: Sequence[Any], backend: str | ModuleType | None = None) ->
     nested objects and the elements of lists are evened out the same way as
     top-level columns. Values of mixed types become text, and a warning
     names where, such as "meta.size" or "tags[*]". Ints and floats count as
-    one type, numbers.
+    one type, numbers: ints beside floats become floats. Integers too large
+    for 64 bits become text, with a warning, so no digit is lost.
     """
 
     def kinds(values: Iterable[Any]) -> set[type]:
@@ -95,12 +99,31 @@ def to_frame(records: Sequence[Any], backend: str | ModuleType | None = None) ->
             return [
                 None if v is None else {k: next(fields[k]) for k in v} for v in values
             ]
-        if len(found) <= 1:
-            return values
-        # Ints and floats share one kind (float), so name it "number".
-        names = ", ".join(sorted("number" if t is float else t.__name__ for t in found))
-        logger.warning("Column %r mixes %s; storing it as text", where, names)
-        return [as_text(v) for v in values]
+        if len(found) > 1:
+            # Ints and floats share one kind (float), so name it "number".
+            names = ", ".join(
+                sorted("number" if t is float else t.__name__ for t in found)
+            )
+            logger.warning("Column %r mixes %s; storing it as text", where, names)
+            return [as_text(v) for v in values]
+        if found == {float}:
+            return even_out_numbers(where, values)
+        return values
+
+    def even_out_numbers(where: str, values: list) -> list:
+        ints = [v for v in values if isinstance(v, int)]
+        if any(v not in INT64 for v in ints):
+            # pyarrow can't hold these at all; text keeps every digit.
+            logger.warning(
+                "Column %r holds integers too large for 64 bits; storing it as text",
+                where,
+            )
+            return [as_text(v) for v in values]
+        if ints and len(ints) < sum(v is not None for v in values):
+            # Ints beside floats become floats, as the libraries do themselves;
+            # inside a list some of them refuse the mix.
+            return [float(v) if isinstance(v, int) else v for v in values]
+        return values
 
     records = [as_dict(record) for record in records]
     columns = list(dict.fromkeys(key for record in records for key in record))

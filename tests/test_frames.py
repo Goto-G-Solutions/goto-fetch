@@ -77,6 +77,26 @@ def test_to_frame_evens_out_the_fields_of_nested_objects(backend, caplog):
     assert "Column 'meta.size' mixes number, str; storing it as text" in caplog.messages
 
 
+def test_to_frame_turns_ints_beside_floats_into_floats(backend):
+    # Regression, found by the property tests: polars refused [0, 0.0]
+    # inside a list.
+    records = [{"v": [None, 0, 0.5]}, {"n": 1}, {"n": 2.5}]
+    rows = rows_of(to_frame(records, backend))
+    assert list(rows[0]["v"]) == [None, 0.0, 0.5]
+    assert [r["n"] for r in rows[1:]] == [1.0, 2.5]
+
+
+def test_to_frame_stores_integers_beyond_64_bits_as_text(backend, caplog):
+    # Regression: pyarrow raised OverflowError on these.
+    big = 2**70
+    rows = rows_of(to_frame([{"id": big}, {"id": 1}], backend))
+    assert [r["id"] for r in rows] == [str(big), "1"]
+    assert (
+        "Column 'id' holds integers too large for 64 bits; storing it as text"
+        in caplog.messages
+    )
+
+
 def test_to_frame_evens_out_objects_inside_lists(backend):
     # The same rule reaches objects nested in lists, at any depth.
     records = [{"lines": [{"qty": 1}, {"qty": 2}]}, {"lines": [{"qty": "lots"}]}]
