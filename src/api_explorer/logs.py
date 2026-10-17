@@ -26,6 +26,8 @@ without reading the text:
 | changes     | DEBUG   | new, changed, unchanged, deleted                  |
 | count-short | WARNING | records, count                                    |
 | text        | WARNING | column, reason                                    |
+| widen       | WARNING | table, column, type                               |
+| stored      | INFO    | table, records                                    |
 
 `record.client` is the name of the Client whose request was running when
 the record was logged (Client(name=...)), or None. The handlers that

@@ -16,6 +16,8 @@ JSON faster, pydantic or msgspec models type the records, and polars,
 pandas or pyarrow hold the frames.
 
 HTML scraping lives in api_explorer.scrape and needs the "scrape" extra.
+Storing records in DuckDB lives in api_explorer.warehouse and needs the
+"duckdb" extra.
 Fake APIs for testing your own code live in api_explorer.testing.
 
 The package logs nothing until asked: enable_logging() switches it on.

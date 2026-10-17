@@ -444,3 +444,84 @@ def test_keyset_runs_mirror_the_source_while_it_changes_mid_run(sizes, limit, da
             continue
         event("a run succeeded")
         assert warehouse == source
+
+
+@settings(deadline=None, max_examples=60, suppress_health_check=[HealthCheck.too_slow])
+@given(
+    batches=st.lists(
+        st.lists(
+            st.tuples(
+                st.integers(0, 5),
+                st.integers(0, 1),
+                st.booleans(),
+                st.none() | st.integers(-3, 3) | st.text(max_size=3),
+            ),
+            max_size=4,
+        ),
+        min_size=1,
+        max_size=4,
+    ),
+    tracker=st.sampled_from(["incremental", "changes"]),
+    data=st.data(),
+)
+def test_a_duckdb_warehouse_mirrors_the_source_despite_failures(batches, tracker, data):
+    # The warehouse property again, with the real thing: Warehouse.write
+    # inside tracked_run, through flaky requests, with values that change
+    # type between runs so columns widen. After every run that succeeds,
+    # the table must hold the source exactly (compared as text, since a
+    # widened column holds numbers as text); after a failed run, the
+    # table and the state must be as they were.
+    import tempfile
+    from pathlib import Path
+
+    duckdb = pytest.importorskip("duckdb")
+    from api_explorer import ApiError, Changes, Incremental, tracked_run
+    from api_explorer.warehouse import Warehouse
+
+    def text(value):
+        return None if value is None else str(value)
+
+    with tempfile.TemporaryDirectory() as folder:
+        shop = Warehouse(Path(folder) / "shop.duckdb")
+
+        def table() -> dict:
+            with duckdb.connect(str(shop.path)) as connection:
+                if ("orders",) not in connection.sql("SHOW TABLES").fetchall():
+                    return {}
+                found = connection.sql("SELECT id, v FROM orders").fetchall()
+            return {id_: text(v) for id_, v in found}
+
+        source: dict[int, dict] = {}
+        rows: list[dict] = []
+        clock = 0
+        for batch in batches:
+            for id_, step, delete, value in batch:
+                clock += step
+                if delete and tracker == "changes":
+                    source.pop(id_, None)
+                else:
+                    stamp = f"2026-01-01T00:{clock:02d}:00Z"
+                    source[id_] = {"id": id_, "updated_at": stamp, "v": value}
+            rows[:] = list(source.values())
+            if tracker == "incremental":
+                args, options = (Incremental, "updated_at", "updated_since"), {}
+            else:
+                args, options = (Changes,), {"key": "id"}
+            before_state, before_table = shop.get("orders"), table()
+            client = flaky_source(rows, data)
+            try:
+                with tracked_run(shop, "orders", *args, **options) as run:
+                    shop.write(
+                        "orders",
+                        client.records("/orders/", incremental=run),
+                        key="id",
+                        deleted_by=run if tracker == "changes" else None,
+                        batch_size=2,
+                    )
+            except ApiError:
+                event("a run failed")
+                assert shop.get("orders") == before_state
+                assert table() == before_table
+                continue
+            event("a run succeeded")
+            assert table() == {id_: text(r["v"]) for id_, r in source.items()}

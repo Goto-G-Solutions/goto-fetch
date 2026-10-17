@@ -21,6 +21,7 @@ The core needs only `httpx2` and `narwhals`. Optional extras add more:
 | `fast` | faster JSON parsing with msgspec, giving the same results |
 | `scrape` | HTML scraping with `api_explorer.scrape` (parsel) |
 | `explorer` | the explorer notebook (marimo) |
+| `duckdb` | storing records and run state in a DuckDB file with `api_explorer.warehouse` |
 
 ## Quick start
 
@@ -134,6 +135,19 @@ remove(changes.deleted)  # ids gone since the last run
 ```
 
 The state can live anywhere with `get(name)` and `put(name, value)`; `api_explorer.testing.check_state_store` checks such a store, and `MemoryState` keeps it in memory for tests.
+
+To keep the records too, a `Warehouse` (the `duckdb` extra) is a DuckDB file that holds both the tables and the state, so one file is all an analysis needs:
+
+```python
+from api_explorer.warehouse import Warehouse
+
+shop = Warehouse("shop.duckdb")
+with tracked_run(shop, "products", Changes, key="id") as changes:
+    records = client.records("/products/", incremental=changes)
+    shop.write("products", records, key="id", deleted_by=changes)
+```
+
+`write` stores a run all or nothing: it first copies the records to temporary files, so a failed request never touches the database, then makes one transaction of it. With a `key`, a record replaces the row with its key, which is what `updated_at` runs need; `deleted_by` removes the rows a `Changes` run lists as gone. Columns follow the records: nested objects and lists become JSON columns (`customer->>'name'` in SQL), text stays text, timestamps included, new fields add columns, and a column whose values change type is widened (integers beside floats to `DOUBLE`, anything else to text, with a warning), so no value is lost. Read it with DuckDB, or straight into a frame: `duckdb.connect("shop.duckdb").sql("SELECT * FROM products").pl()`.
 
 The interfaces are Protocols: your pieces match their shape and never inherit from ours, and a type checker confirms they fit. `Paging`, `RetryPolicy`, `Login` and `ResolvesUrls` (an auth with URLs of its own) are the main ones; `check_paging` and `check_retry_policy` check behaviour the types can't.
 
