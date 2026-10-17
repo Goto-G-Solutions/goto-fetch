@@ -18,7 +18,7 @@ _TOKEN = re.compile(
     | (?P<alternative>\|)
     | \.
     """,
-    re.VERBOSE,
+    re.VERBOSE | re.DOTALL,  # DOTALL: a quoted key may hold line breaks too
 )
 
 

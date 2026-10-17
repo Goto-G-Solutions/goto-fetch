@@ -10,6 +10,14 @@ import pytest
 
 from api_explorer import Client, Retry
 
+# A deeper search for the property tests, for occasional runs:
+#   uv run pytest tests/test_properties.py --hypothesis-profile=thorough
+# Hypothesis is a dev dependency, so the core-only run goes without it.
+if importlib.util.find_spec("hypothesis"):
+    from hypothesis import settings
+
+    settings.register_profile("thorough", max_examples=2000, deadline=None)
+
 # Frame tests run once per dataframe library installed. The dev group
 # installs polars and pandas, so both are always tried in development and CI.
 BACKENDS = [

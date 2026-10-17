@@ -43,7 +43,8 @@ def to_frame(records: Sequence[Any], backend: str | ModuleType | None = None) ->
     module itself; None picks one (see default_backend). The result is that
     library's own frame. Records can be dicts, or typed models (see
     as_dict). Columns are every key found in any record, in the order first
-    seen, and a missing value is null.
+    seen, and a missing value is null. If no record has any key at all,
+    the frame is empty: a frame can't hold rows without columns.
 
     The libraries disagree about messy columns. polars rejects a value whose
     type first shows up after 100 nulls, and pyarrow rejects "123" next to

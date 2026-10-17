@@ -269,6 +269,7 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 - **Reasonable.** Don't test what the language or a library already guarantees, such as a dataclass storing its fields.
 - **Dataframes.** Frame tests take the `backend` fixture, so they run once per installed library.
 - **Fakes.** Fake servers live in `tests/support.py`. Tests never touch the network.
+- **Properties.** `tests/test_properties.py` states rules that must hold for any input (any JSON, any page size, any server cap), and Hypothesis tries to break them. When it finds a failing input, fix the code and add the smallest failing input as a regression test with the example tests. Run a deeper search now and then: `uv run pytest tests/test_properties.py --hypothesis-profile=thorough`.
 
 **Writing.** Plain language, as at the top of this file. No em dashes, anywhere: code, comments, docs, commits, issues or pull requests.
 

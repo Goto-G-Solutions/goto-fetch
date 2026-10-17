@@ -29,6 +29,11 @@ def test_parse_path_refuses_what_it_cant_read(path):
         parse_path(path)
 
 
+def test_a_quoted_key_may_hold_a_line_break():
+    # Regression, found by the property tests: quoted keys stopped at "\n".
+    assert parse_path('["line\nbreak"]') == ["line\nbreak"]
+
+
 def test_a_key_holding_path_characters_is_reached_in_quotes():
     # Regression: a key such as "a.b" couldn't be reached at all.
     data = {"by_url": {"https://x.org/a.b": 3, "x|y": 4}}

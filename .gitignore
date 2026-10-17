@@ -5,3 +5,4 @@ __pycache__/
 __marimo__/
 dist/
 .env*
+.hypothesis/

@@ -42,6 +42,7 @@ explorer = ["marimo>=0.25.1"]
 # any frame is tried on more than one, plus every optional package an
 # adapter supports, so each adapter is tested.
 dev = [
+    "hypothesis>=6.150",
     "msgspec>=0.22",
     "orjson>=3.11",
     "pandas>=2.2",
