@@ -249,3 +249,26 @@ def test_incremental_runs_never_lose_or_repeat_a_version_of_a_record(
         latest = {(r["id"], r["v"]) for r in rows}
         assert latest <= set(yielded)
     assert len(yielded) == len(set(yielded))
+
+
+@given(
+    runs=st.lists(
+        st.dictionaries(st.integers(0, 6), st.integers(0, 2), max_size=6),
+        min_size=1,
+        max_size=5,
+    )
+)
+def test_changes_delivers_exactly_what_differs_from_the_last_run(runs):
+    # Each run is the whole source: {id: value}. Changes must pass on the
+    # records that are new or differ from the last run, and list as
+    # deleted the ids the last run had and this one lacks.
+    from api_explorer import Changes
+
+    state, before = None, {}
+    for source in runs:
+        changes = Changes("id", state=state)
+        records = [{"id": k, "v": v} for k, v in source.items()]
+        got = list(changes.track(records))
+        assert got == [r for r in records if before.get(r["id"]) != r["v"]]
+        assert sorted(changes.deleted) == sorted(set(before) - set(source))
+        state, before = changes.state, source

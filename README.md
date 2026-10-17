@@ -63,7 +63,7 @@ Each piece works with no extra packages, and uses better ones when you have them
 | HTTP | an httpx2 client made for you | `Client(http=httpx2.Client(...))` for proxies, HTTP/2, certificates or event hooks |
 | Logging | silent | `enable_logging()`; every line is an event with data (`record.event`, `record.data`) |
 | Paging | next links (body or `Link` header), cursors, limit/offset, GET or POST | your own `Paging`: it sees each page's body and response; `with_query` sets a query parameter |
-| Incremental fetching | everything, every run | `records(incremental=Incremental(field, param))`; filters here when the API can't |
+| Incremental fetching | everything, every run | `Incremental(field, param)` asks only for changes; `Changes(key)` passes on only changed records and lists deleted ones |
 | Errors in a 200 | trusted as data | `Client(check=error_at("error\|errors"))`, or your own check: a function from response to problem |
 | Auth | fixed tokens; access and refresh tokens, renewed safely across threads | log in with `PasswordLogin`, OAuth2 `ClientCredentials`, or your own `Login`; any `httpx2.Auth` |
 
@@ -92,30 +92,31 @@ client = Client(
 )
 ```
 
-To fetch only what changed since the last run, give `records` an `Incremental`: the field that grows when a record is added or changed, and the parameter the API filters by. Field and parameter names are settings, since APIs differ (`created_at` or `updated_at`; `updated_since`, `updated_at__gte` or a key in a POST body). Save its `state` after storing the records, and pass it back next time:
+To fetch only what changed since the last run, give `records` an `Incremental`: the field that grows when a record is added or changed, and the parameter the API filters by. Field and parameter names are settings, since APIs differ (`created_at` or `updated_at`; `updated_since`, `updated_at__gte` or a key in a POST body). `tracked_run` keeps its state in an SQLite file (Python's own `sqlite3`, so no extra package), and saves it only if the whole block worked, your storing included:
 
 ```python
-from api_explorer import Incremental
+from api_explorer import Incremental, SqliteState, tracked_run
 
-since = Incremental("updated_at", "updated_since", state=saved_state)
-store(client.records("/orders/", incremental=since))
-saved_state = since.state  # plain JSON; moves on only after a complete run
-```
-
-`tracked_run` does the saving for you, in an SQLite file (Python's own `sqlite3`, so no extra package). The state is saved only if the whole block worked, your storing included:
-
-```python
-from api_explorer import SqliteState, tracked_run
-
-with tracked_run(
-    SqliteState("state.db"), "orders", "updated_at", "updated_since"
-) as since:
+state = SqliteState("state.db")
+with tracked_run(state, "orders", Incremental, "updated_at", "updated_since") as since:
     store(client.records("/orders/", incremental=since))
 ```
 
-Any object with `get(name)` and `put(name, value)` can keep the state instead; `api_explorer.testing.check_state_store` checks one, and `MemoryState` keeps it in memory for tests.
-
 Two rules keep it from losing data. The state moves on only when a run has read every page, since records may come in any order and a failed run could have skipped older ones. And it asks from the last value itself, not after it, then passes over what it has already seen there, so records that share the last value aren't lost. `created_at` finds new records only; `updated_at` also finds edits, so a record can come back with new values, and storing must replace it by its id rather than add it again.
+
+When an API has no such field, or doesn't always update it, `Changes` fetches everything and passes on only new and changed records, by a fingerprint (a hash) of each. It also lists the records that disappeared, which a timestamp never shows. Leave out fields that change on every fetch, or every record looks changed:
+
+```python
+from api_explorer import Changes
+
+with tracked_run(
+    state, "products", Changes, key="id", ignore=["fetched_at"]
+) as changes:
+    store(client.records("/products/", incremental=changes))
+remove(changes.deleted)  # ids gone since the last run
+```
+
+The state can live anywhere with `get(name)` and `put(name, value)`; `api_explorer.testing.check_state_store` checks such a store, and `MemoryState` keeps it in memory for tests.
 
 The interfaces are Protocols: your pieces match their shape and never inherit from ours, and a type checker confirms they fit. `Paging`, `RetryPolicy`, `Login` and `ResolvesUrls` (an auth with URLs of its own) are the main ones; `check_paging` and `check_retry_policy` check behaviour the types can't.
 

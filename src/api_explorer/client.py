@@ -13,7 +13,7 @@ import httpx2
 from .checks import ResponseCheck
 from .decode import Decoder, json_decoder
 from .errors import ApiError, Problem
-from .incremental import Incremental
+from .incremental import Tracker
 from .logs import client_context, log_event
 from .models import converter
 from .paging import (
@@ -338,7 +338,7 @@ class Client:
         max_pages: int | None = None,
         model: Any = None,
         retry: bool | None = None,
-        incremental: Incremental | None = None,
+        incremental: Tracker | None = None,
     ) -> Iterator[Any]:
         """Yield every record from a paginated JSON endpoint.
 
@@ -361,11 +361,11 @@ class Client:
         `model` turns each record into a typed object (see converter): a
         pydantic model, msgspec Struct, dataclass or function.
 
-        `incremental` fetches only what changed since the last run: the
-        first request asks from its last value on, and records already
-        seen are passed over (see Incremental). Save incremental.state
-        after storing the records; it moves on only when every page has
-        been read.
+        `incremental` delivers only what changed since the last run: an
+        Incremental asks the API from its last value on, and Changes
+        fetches everything and passes on new and changed records. Save
+        its state after storing the records (tracked_run does both); it
+        moves on only when every page has been read.
 
         Each page logs a "page" event at INFO, such as "Page 44: 100 records
         in 0.62s, 4,400 so far of 61,203", and the end a "done" event, so a

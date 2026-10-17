@@ -1,4 +1,13 @@
-"""Fetch only what changed since the last run: a cursor field and its last value.
+"""Fetch or pass on only what changed since the last run.
+
+Two trackers share one shape (Tracker), so Client.records and
+tracked_run take either:
+
+- Incremental asks the API only for what changed, by a field that grows,
+  such as updated_at. It saves network time.
+- Changes fetches everything and passes on only new and changed records,
+  by a hash of each, and lists the ones that disappeared. It works when an
+  API has no such field, or can't be trusted to update it.
 
 An Incremental remembers the highest value of one field, such as
 updated_at, and asks the API next time only for records from that value
@@ -11,9 +20,9 @@ on. Two rules keep it from losing data:
   records it has already seen there. Asking after it would lose records
   that share the last value with one already loaded.
 
-It never saves anything itself: save Incremental.state once the records
-are stored, so a crash between the two can only repeat records, never
-skip them.
+Neither saves anything itself: save a tracker's state once the records
+are stored (tracked_run does both), so a crash between the two can only
+repeat records, never skip them.
 """
 
 import dataclasses
@@ -22,15 +31,48 @@ import json
 import logging
 from collections.abc import Callable, Iterable, Iterator
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from .errors import ApiError
 from .logs import log_event
 from .paging import PageRequest, with_query
-from .paths import MISSING, get_path
+from .paths import MISSING, get_path, parse_path
 from .records import parse_datetime
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class Tracker(Protocol):
+    """Something that follows a source across runs: Incremental or Changes.
+
+    `apply` may change the first request, `track` passes on the records
+    the run should deliver, and `state` is what to save, as plain JSON. A
+    tracker's state moves on only when `track` has seen every record.
+    """
+
+    @property
+    def state(self) -> dict[str, Any]:
+        """What to save for the next run, as plain JSON values."""
+        ...
+
+    def apply(self, request: PageRequest) -> PageRequest:
+        """Return the first request, changed as this tracker needs."""
+        ...
+
+    def track(self, records: Iterable[Any]) -> Iterator[Any]:
+        """Yield the records this run should deliver."""
+        ...
+
+
+def _digest(value: Any) -> str:
+    """A short, stable fingerprint of a JSON value: 128 bits of SHA-256.
+
+    Keys are sorted first, so the same record with its keys in another
+    order gives the same fingerprint. 1 and 1.0 give different ones.
+    """
+    text = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(text.encode()).hexdigest()[:32]
 
 
 def _send_form(value: Any) -> Any:
@@ -228,5 +270,134 @@ class Incremental:
             if found is MISSING:
                 raise ApiError(f"A record has no key {self.key!r}")
             return json.dumps(found, sort_keys=True, default=str)
-        whole = json.dumps(record, sort_keys=True, default=str).encode()
-        return hashlib.sha256(whole).hexdigest()[:32]
+        return _digest(record)
+
+
+def _without(value: Any, path: list[str]) -> Any:
+    """`value` without what `path` points to, copying only what changes.
+
+    Segments are dict keys, or "*" for every item of a list. A path that
+    leads nowhere leaves `value` as it was.
+    """
+    if not path:
+        return value
+    head, rest = path[0], path[1:]
+    if head == "*" and isinstance(value, list):
+        return [_without(item, rest) for item in value]
+    if not isinstance(value, dict) or head not in value:
+        return value
+    if not rest:
+        return {k: v for k, v in value.items() if k != head}
+    return {**value, head: _without(value[head], rest)}
+
+
+class Changes:
+    """Pass on only the records that are new or changed since the last run.
+
+    It keeps a fingerprint (a hash) of each record by its key, and passes
+    on a record whose key is new or whose fingerprint differs. Every run
+    must fetch everything, since a record can't be compared unless it is
+    fetched; what it saves is the work after the fetch, and it notices
+    records that disappeared (`deleted`), which a timestamp never shows.
+
+    Use one Changes per run, like Incremental: pass it to
+    Client.records(incremental=...) or to tracked_run.
+
+    - `key`: path to what identifies a record, such as "id". Required.
+    - `ignore`: paths to leave out of the fingerprint, such as
+      "fetched_at" or "stats.views": values that change on every fetch
+      would make every record look changed. "*" walks a list, as in
+      "items[*].stock".
+    - `state`: what `state` held after the last run.
+
+    Only for runs that fetch every record: with a filtered fetch (such as
+    Incremental's), the records not fetched would look deleted.
+    """
+
+    def __init__(
+        self,
+        key: str,
+        *,
+        ignore: Iterable[str] = (),
+        state: dict[str, Any] | None = None,
+    ) -> None:
+        self.key = key
+        self.ignore = [parse_path(path) for path in ignore]
+        self._hashes: dict[str, str] = dict((state or {}).get("hashes", {}))
+        self._state: dict[str, Any] = {"hashes": dict(self._hashes)}
+        self._deleted: list[Any] | None = None
+
+    @property
+    def state(self) -> dict[str, Any]:
+        """What to save for the next run: each key's fingerprint.
+
+        It moves on only when a run has seen every record; until then, and
+        after a failed run, it is the state this run began with.
+        """
+        return {"hashes": dict(self._state["hashes"])}
+
+    @property
+    def deleted(self) -> list[Any] | None:
+        """The keys of the last run's records that this run didn't see.
+
+        None until the run has seen every record, since only a complete
+        run can say what is gone.
+        """
+        return None if self._deleted is None else list(self._deleted)
+
+    def apply(self, request: PageRequest) -> PageRequest:
+        """Return the first request unchanged: Changes always fetches everything."""
+        return request
+
+    def track(self, records: Iterable[Any]) -> Iterator[Any]:
+        """Yield new and changed records, and move `state` on once all are seen.
+
+        A record seen twice in one run (pages that overlap) is passed on
+        once, unless it changed in between. If the loop stops early, by an
+        error or a break, `state` stays as it was and `deleted` stays None.
+        """
+        seen: dict[str, str] = {}
+        new = changed = unchanged = 0
+        for record in records:
+            found = get_path(record, self.key, MISSING)
+            if found is MISSING or found is None:
+                raise ApiError(
+                    f"A record has no key {self.key!r}: "
+                    f"{json.dumps(record, default=str)[:200]}"
+                )
+            name = json.dumps(found, sort_keys=True, default=str)
+            fingerprint = self._fingerprint(record)
+            before = seen.get(name, self._hashes.get(name))
+            seen[name] = fingerprint
+            if before == fingerprint:
+                unchanged += 1
+                continue
+            if before is None:
+                new += 1
+            else:
+                changed += 1
+            yield record
+        gone = [json.loads(name) for name in self._hashes if name not in seen]
+        self._state = {"hashes": seen}
+        self._deleted = gone
+        log_event(
+            logger,
+            logging.DEBUG,
+            "changes",
+            "%d new, %d changed, %d unchanged, %d gone",
+            new,
+            changed,
+            unchanged,
+            len(gone),
+            data={
+                "new": new,
+                "changed": changed,
+                "unchanged": unchanged,
+                "deleted": len(gone),
+            },
+        )
+
+    def _fingerprint(self, record: Any) -> str:
+        for path in self.ignore:
+            record = _without(record, path)
+        return _digest(record)

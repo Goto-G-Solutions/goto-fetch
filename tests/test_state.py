@@ -132,10 +132,14 @@ def test_without_sqlite3_the_error_says_what_is_missing(tmp_path, monkeypatch):
 def test_a_tracked_run_saves_its_place_and_the_next_run_starts_there(store):
     data = [rec(1, 1), rec(2, 2)]
     api = changes_api(data)
-    with tracked_run(store, "orders", "updated_at", "updated_since") as since:
+    with tracked_run(
+        store, "orders", Incremental, "updated_at", "updated_since"
+    ) as since:
         first = list(api.client().records("/orders/", incremental=since))
     data.append(rec(3, 3))
-    with tracked_run(store, "orders", "updated_at", "updated_since") as since:
+    with tracked_run(
+        store, "orders", Incremental, "updated_at", "updated_since"
+    ) as since:
         second = list(api.client().records("/orders/", incremental=since))
     assert [r["id"] for r in first] == [1, 2]
     assert [r["id"] for r in second] == [3]
@@ -149,12 +153,12 @@ def test_a_tracked_run_whose_storing_fails_saves_nothing():
     api = changes_api([rec(1, 1)])
     with (
         pytest.raises(OSError, match="disk full"),
-        tracked_run(store, "orders", "updated_at") as since,
+        tracked_run(store, "orders", Incremental, "updated_at") as since,
     ):
         list(api.client().records("/orders/", incremental=since))
         raise OSError("disk full")
     assert store.saves == 0
-    with tracked_run(store, "orders", "updated_at") as since:
+    with tracked_run(store, "orders", Incremental, "updated_at") as since:
         again = list(api.client().records("/orders/", incremental=since))
     assert again == [rec(1, 1)]
 
@@ -162,7 +166,7 @@ def test_a_tracked_run_whose_storing_fails_saves_nothing():
 def test_a_tracked_run_passes_its_options_to_incremental():
     store = MemoryState()
     with tracked_run(
-        store, "orders", "updated_at", key="id", start="2026-01-02"
+        store, "orders", Incremental, "updated_at", key="id", start="2026-01-02"
     ) as since:
         assert isinstance(since, Incremental)
         assert list(since.track([rec(1, 1), rec(2, 2)])) == [rec(2, 2)]
@@ -172,7 +176,7 @@ def test_a_tracked_run_passes_its_options_to_incremental():
 
 def test_a_tracked_run_that_stops_reading_early_keeps_its_old_place():
     store = MemoryState({"orders": {"last": "2026-01-01T00:00:00Z", "seen": []}})
-    with tracked_run(store, "orders", "updated_at") as since:
+    with tracked_run(store, "orders", Incremental, "updated_at") as since:
         records = since.track([rec(1, 2), rec(2, 3)])
         next(records)
         records.close()

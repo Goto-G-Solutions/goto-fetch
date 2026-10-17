@@ -34,7 +34,7 @@ from .client import Client, ResolvesUrls
 from .decode import Decoder, json_decoder
 from .errors import ApiError, Problem, redact_url
 from .frames import default_backend, latest_per_key, to_frame
-from .incremental import Incremental
+from .incremental import Changes, Incremental, Tracker
 from .logs import (
     ClientFilter,
     RedactFilter,
@@ -66,6 +66,7 @@ from .state import SqliteState, StateStore, tracked_run
 
 __all__ = [
     "ApiError",
+    "Changes",
     "Client",
     "ClientCredentials",
     "ClientFilter",
@@ -92,6 +93,7 @@ __all__ = [
     "SqliteState",
     "StateStore",
     "TokenRefresh",
+    "Tracker",
     "as_dict",
     "backoff_delay",
     "converter",

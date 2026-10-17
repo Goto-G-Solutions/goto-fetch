@@ -2,22 +2,24 @@
 
 A StateStore holds one JSON value per name, such as "orders". SqliteState
 keeps them in an SQLite file, using Python's own sqlite3 module, so it
-needs no extra package. tracked_run ties the steps of an incremental run
+needs no extra package. tracked_run ties the steps of a tracked run
 together, so the state is saved only when the run and the storing both
 succeed.
 """
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, runtime_checkable
 
-from .incremental import Incremental
+from .incremental import Tracker
 
 if TYPE_CHECKING:
     import sqlite3
+
+T = TypeVar("T", bound=Tracker)
 
 
 @runtime_checkable
@@ -127,22 +129,27 @@ class SqliteState:
 
 @contextmanager
 def tracked_run(
-    store: StateStore, name: str, field: str, param: str | None = None, **options: Any
-) -> Iterator[Incremental]:
-    """Run one incremental fetch, saving its state only if everything in the block worked.
+    store: StateStore,
+    name: str,
+    tracker: Callable[..., T],
+    *args: Any,
+    **options: Any,
+) -> Iterator[T]:
+    """Run one tracked fetch, saving its state only if everything in the block worked.
 
-    Gives an Incremental that starts from `store`'s state for `name` (the
-    other arguments are Incremental's). Fetch and store the records inside
-    the block; when the block ends without an error, the new state is
-    saved. An error anywhere, in the fetch or in your storing, leaves the
-    saved state as it was, so the next run fetches the same records again
-    rather than skip them:
+    Builds `tracker(*args, state=..., **options)` from `store`'s state for
+    `name`: Incremental, Changes, or any Tracker class that takes `state=`.
+    Fetch and store the records inside the block; when the block ends
+    without an error, the new state is saved. An error anywhere, in the
+    fetch or in your storing, leaves the saved state as it was, so the next
+    run fetches the same records again rather than skip them:
 
-        with tracked_run(SqliteState("state.db"), "orders", "updated_at",
+        store = SqliteState("state.db")
+        with tracked_run(store, "orders", Incremental, "updated_at",
                          "updated_since") as since:
-            store(client.records("/orders/", incremental=since))
+            save(client.records("/orders/", incremental=since))
     """
     _check_name(name)
-    since = Incremental(field, param, state=store.get(name), **options)
-    yield since
-    store.put(name, since.state)
+    made = tracker(*args, state=store.get(name), **options)
+    yield made
+    store.put(name, made.state)

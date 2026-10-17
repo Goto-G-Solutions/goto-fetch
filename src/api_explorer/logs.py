@@ -23,6 +23,7 @@ without reading the text:
 | no-count    | WARNING | count_key                                         |
 | no-next-key | WARNING | key                                               |
 | incremental | DEBUG   | kept, dropped, last                               |
+| changes     | DEBUG   | new, changed, unchanged, deleted                  |
 | count-short | WARNING | records, count                                    |
 | text        | WARNING | column, reason                                    |
 
