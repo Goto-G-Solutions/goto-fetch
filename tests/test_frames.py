@@ -106,6 +106,14 @@ def test_to_frame_evens_out_objects_inside_lists(backend):
     assert [[line["qty"] for line in lines] for lines in rows] == [["1", "2"], ["lots"]]
 
 
+def test_to_frame_takes_a_list_whose_first_inner_values_are_all_null(backend):
+    # Regression: polars typed the column by its first value, list[list[null]],
+    # then failed with an internal panic on [[True]]. Hypothesis found it.
+    records = [{"a": [[None]]}, {"a": [[True]]}]
+    column = nw.from_native(to_frame(records, backend), eager_only=True)["a"]
+    assert [list(map(list, v)) for v in column.to_list()] == [[[None]], [[True]]]
+
+
 def test_latest_per_key_keeps_the_newest_row_of_each_key(backend):
     records = [
         {"id": 1, "seen": parse_datetime("2024-01-02T10:00:00Z"), "v": "old"},

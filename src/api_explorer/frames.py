@@ -144,6 +144,14 @@ def to_frame(records: Sequence[Any], backend: str | ModuleType | None = None) ->
     # narwhals types `backend` with names of its own; any library name or
     # module it accepts is fine here, and it reports one it doesn't know.
     chosen = cast("Any", backend or default_backend())
+    if nw.Implementation.from_backend(chosen) is nw.Implementation.POLARS:
+        # polars types a list column by its first value, and fails with an
+        # internal panic when that value holds only nulls deeper down:
+        # [[None]] then [[True]]. strict=False lets it widen the type; the
+        # types were already evened out above, so nothing else is loosened.
+        import polars as pl
+
+        return pl.DataFrame(data, strict=False)
     return nw.from_dict(data, backend=chosen).to_native()
 
 
