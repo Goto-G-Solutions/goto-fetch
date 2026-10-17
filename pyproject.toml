@@ -6,11 +6,28 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Dario Clarke" }]
+keywords = ["api", "rest", "pagination", "json", "dataframe", "narwhals", "marimo"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Internet :: WWW/HTTP",
+    "Typing :: Typed",
+]
 requires-python = ">=3.11"
 dependencies = [
     "httpx2>=2.13.1",
     "narwhals>=2.27.1",
 ]
+
+[project.urls]
+Repository = "https://github.com/dario-j-c/api-explorer"
+Issues = "https://github.com/dario-j-c/api-explorer/issues"
+Changelog = "https://github.com/dario-j-c/api-explorer/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # Faster JSON parsing, with the same results (see json_decoder)

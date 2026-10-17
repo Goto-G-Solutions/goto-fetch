@@ -10,7 +10,8 @@ Pull data from paginated JSON APIs, and shape it for whichever dataframe library
 ## Install
 
 ```bash
-uv add "api-explorer @ git+https://github.com/OWNER/api-explorer"
+uv add api-explorer            # or: pip install api-explorer
+uv add "api-explorer[fast]"    # with an extra
 ```
 
 The core needs only `httpx2` and `narwhals`. Optional extras add more:
@@ -85,6 +86,8 @@ df = to_frame(items)
 ```bash
 uvx marimo edit --sandbox notebooks/explorer.py
 ```
+
+The notebook's header installs the package from this repo. To use the notebook on its own, outside a clone of the repo, delete its `[tool.uv.sources]` lines, and it installs `api-explorer` from PyPI instead.
 
 Fill in the API, press **Fetch**, and pick the columns you want. The **Code** tab then shows a script that repeats the fetch; `uv run` installs what it needs. Secrets come from `$API_TOKEN`, `$API_REFRESH_TOKEN`, `$API_USERNAME` and `$API_PASSWORD`, and never appear in the script.
 

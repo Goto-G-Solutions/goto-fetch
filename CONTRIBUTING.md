@@ -38,6 +38,24 @@ Writing these down is how we make sure the problem is understood before anyone w
 - Fill in the pull request template: what changed and why, what it touches, and which tests you ran and added.
 - Write it in plain language, without em dashes. Someone who hasn't read the code should follow it.
 
+## Releasing
+
+Releases go to PyPI from GitHub Actions (`.github/workflows/release.yml`), with trusted publishing, so no PyPI token is stored anywhere.
+
+**Each release:**
+
+1. Set the new version: `uv version --bump minor` (or `patch`, or `major`).
+2. Add the release to `CHANGELOG.md`: what changed for people using the package.
+3. Commit both as `chore(release): 0.2.0`, through a pull request like any other change.
+4. Tag the merged commit and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
+
+The workflow checks the tag matches the version, runs the tests, builds, and publishes.
+
+**Once, before the first release:**
+
+1. On PyPI, under your account's Publishing settings, add a pending trusted publisher: project `api-explorer`, owner `dario-j-c`, repository `api-explorer`, workflow `release.yml`, environment `pypi`.
+2. On GitHub, in the repository's Settings, create an environment named `pypi`. Adding yourself as a required reviewer there makes every release wait for your approval.
+
 ## Setting up
 
 You need [uv](https://docs.astral.sh/uv/). Then:
