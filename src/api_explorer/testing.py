@@ -12,8 +12,9 @@ framework is needed.
     assert len(api.calls) == 4                   # the 503, then 3 pages
 
 For pieces of your own: fetched() builds a page to test a paging style on
-its own, and check_retry_policy() and check_paging() check the promises
-every retry policy and paging style must keep.
+its own, and check_retry_policy(), check_paging() and check_state_store()
+check the promises every retry policy, paging style and state store must
+keep. MemoryState is a state store that never touches the disk.
 """
 
 import base64
@@ -28,6 +29,7 @@ from .client import Client
 from .errors import ApiError, Problem
 from .paging import Fetched, Paging
 from .retry import Failure, Retry, RetryPolicy
+from .state import StateStore
 
 Answer = Callable[[httpx2.Request], httpx2.Response]
 """Turns one request into a response, as httpx2.MockTransport expects."""
@@ -529,3 +531,58 @@ def check_paging(
             "the paging style didn't fetch the expected records: "
             + "; ".join(p for p in problems if p)
         )
+
+
+class MemoryState:
+    """A StateStore in memory, for tests: nothing touches the disk.
+
+    It keeps each value as JSON text, so like a real store it gives back
+    copies, and refuses values that aren't plain JSON. `saves` counts the
+    calls to put, so a test can check that a failed run saved nothing.
+    """
+
+    def __init__(self, values: Mapping[str, Any] | None = None) -> None:
+        self._text = {name: json.dumps(v) for name, v in (values or {}).items()}
+        self.saves = 0
+
+    def get(self, name: str) -> Any:
+        """The value last saved under `name`, or None."""
+        text = self._text.get(name)
+        return None if text is None else json.loads(text)
+
+    def put(self, name: str, value: Any) -> None:
+        """Save `value` under `name`, replacing what was there."""
+        self._text[name] = json.dumps(value, allow_nan=False)
+        self.saves += 1
+
+
+def check_state_store(store: StateStore) -> None:
+    """Check a state store keeps the promises every StateStore must keep.
+
+    Use names starting "check-state-store" in a store you don't mind it
+    writing to. Raises AssertionError naming the first promise broken.
+    """
+    a, b = "check-state-store-a", "check-state-store-b"
+
+    def fresh() -> dict[str, Any]:
+        return {"last": "2026-01-02T10:00:00Z", "seen": ["1", "2"], "n": 3, "ok": True}
+
+    value = fresh()
+    if store.get(a) is not None or store.get(b) is not None:
+        raise AssertionError(
+            f"get must give None for a name never saved; {a!r} or {b!r} gave a "
+            "value (or the store was used by an earlier check)"
+        )
+    store.put(a, value)
+    got = store.get(a)
+    if got != value:
+        raise AssertionError(f"put {value!r} but get gave back {got!r}")
+    got["seen"].append("changed")
+    # Compare with a fresh value: `value` itself may be what the store kept.
+    if store.get(a) != fresh():
+        raise AssertionError("get gave back the stored object itself, not a copy")
+    if store.get(b) is not None:
+        raise AssertionError(f"putting {a!r} changed {b!r}")
+    store.put(a, {"last": None, "seen": []})
+    if store.get(a) != {"last": None, "seen": []}:
+        raise AssertionError("put didn't replace the earlier value")

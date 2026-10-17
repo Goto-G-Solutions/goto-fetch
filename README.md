@@ -102,6 +102,19 @@ store(client.records("/orders/", incremental=since))
 saved_state = since.state  # plain JSON; moves on only after a complete run
 ```
 
+`tracked_run` does the saving for you, in an SQLite file (Python's own `sqlite3`, so no extra package). The state is saved only if the whole block worked, your storing included:
+
+```python
+from api_explorer import SqliteState, tracked_run
+
+with tracked_run(
+    SqliteState("state.db"), "orders", "updated_at", "updated_since"
+) as since:
+    store(client.records("/orders/", incremental=since))
+```
+
+Any object with `get(name)` and `put(name, value)` can keep the state instead; `api_explorer.testing.check_state_store` checks one, and `MemoryState` keeps it in memory for tests.
+
 Two rules keep it from losing data. The state moves on only when a run has read every page, since records may come in any order and a failed run could have skipped older ones. And it asks from the last value itself, not after it, then passes over what it has already seen there, so records that share the last value aren't lost. `created_at` finds new records only; `updated_at` also finds edits, so a record can come back with new values, and storing must replace it by its id rather than add it again.
 
 The interfaces are Protocols: your pieces match their shape and never inherit from ours, and a type checker confirms they fit. `Paging`, `RetryPolicy`, `Login` and `ResolvesUrls` (an auth with URLs of its own) are the main ones; `check_paging` and `check_retry_policy` check behaviour the types can't.

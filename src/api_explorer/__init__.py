@@ -6,8 +6,9 @@ The layers, each built only on the ones before it:
 - models, records, retry: typed records, reshaping lists of dicts, and
   the retry policy.
 - frames, paging: dataframes through narwhals, and the paging loop.
-- auth, incremental, client: Client fetches the records, page by page,
-  or only those changed since the last run.
+- auth, incremental, state, client: Client fetches the records, page by page,
+  or only those changed since the last run, whose state a StateStore
+  keeps.
 - plan: FetchPlan describes one fetch, and writes it as a script.
 
 Optional packages make it faster or richer when installed: msgspec parses
@@ -61,6 +62,7 @@ from .paths import get_path, parse_path
 from .plan import FetchPlan, package_requirement
 from .records import explode, flatten, parse_datetime, select
 from .retry import Failure, Retry, RetryPolicy, backoff_delay, retry_after_seconds
+from .state import SqliteState, StateStore, tracked_run
 
 __all__ = [
     "ApiError",
@@ -87,6 +89,8 @@ __all__ = [
     "ResponseCheck",
     "Retry",
     "RetryPolicy",
+    "SqliteState",
+    "StateStore",
     "TokenRefresh",
     "as_dict",
     "backoff_delay",
@@ -114,5 +118,6 @@ __all__ = [
     "select",
     "to_frame",
     "token_headers",
+    "tracked_run",
     "with_query",
 ]
