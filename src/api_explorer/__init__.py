@@ -2,38 +2,52 @@
 
 The layers, each built only on the ones before it:
 
-- paths: get_path reads a value out of nested JSON by a path string.
-- records: select, flatten and explode reshape lists of dicts.
-- frames: to_frame and latest_per_key, through narwhals.
-- paging, auth, client: Client fetches the records, page by page.
+- paths, decode: reading values by path, and parsing JSON.
+- models, records, retry: typed records, reshaping lists of dicts, and
+  the retry policy.
+- frames, paging: dataframes through narwhals, and the paging loop.
+- auth, client: Client fetches the records, page by page.
 - plan: FetchPlan describes one fetch, and writes it as a script.
+
+Optional packages make it faster or richer when installed: msgspec parses
+JSON faster, pydantic or msgspec models type the records, and polars,
+pandas or pyarrow hold the frames.
 
 HTML scraping lives in api_explorer.scrape and needs the "scrape" extra.
 """
 
 from .auth import PasswordLogin, TokenRefresh, jwt_expiry, token_headers
-from .client import Client, backoff_delay, retry_after_seconds
+from .client import Client
+from .decode import Decoder, json_decoder
 from .errors import ApiError
-from .frames import latest_per_key, to_frame
+from .frames import default_backend, latest_per_key, to_frame
+from .models import as_dict, converter
 from .paging import NextLink, Offset, Page, Paging, paginate
 from .paths import get_path, parse_path
 from .plan import FetchPlan, package_requirement
 from .records import explode, flatten, parse_datetime, select
+from .retry import Retry, backoff_delay, retry_after_seconds
 
 __all__ = [
     "ApiError",
     "Client",
+    "Decoder",
     "FetchPlan",
     "NextLink",
     "Offset",
     "Page",
     "Paging",
     "PasswordLogin",
+    "Retry",
     "TokenRefresh",
+    "as_dict",
     "backoff_delay",
+    "converter",
+    "default_backend",
     "explode",
     "flatten",
     "get_path",
+    "json_decoder",
     "jwt_expiry",
     "latest_per_key",
     "package_requirement",

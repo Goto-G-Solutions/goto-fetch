@@ -8,7 +8,7 @@ from typing import Any
 import httpx2
 import pytest
 
-from api_explorer import Client
+from api_explorer import Client, Retry
 
 # Frame tests run once per dataframe library installed. The dev group
 # installs polars and pandas, so both are always tried in development and CI.
@@ -34,7 +34,7 @@ def mock_client() -> Callable[..., Client]:
     """
 
     def make(handler: Callable, **options: Any) -> Client:
-        options.setdefault("backoff", 0.0)
+        options.setdefault("retry", Retry(backoff=0.0))
         return Client(
             "http://api.test/api", transport=httpx2.MockTransport(handler), **options
         )

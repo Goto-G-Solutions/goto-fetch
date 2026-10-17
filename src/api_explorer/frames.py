@@ -2,20 +2,47 @@
 
 import json
 import logging
+import sys
 from collections.abc import Iterable, Sequence
+from importlib.util import find_spec
 from types import ModuleType
 from typing import Any, Literal
 
 import narwhals.stable.v2 as nw
 
+from .models import as_dict
+
 logger = logging.getLogger(__name__)
 
+BACKENDS = ("polars", "pandas", "pyarrow")
+"""The dataframe libraries default_backend chooses from, in order."""
 
-def to_frame(records: Sequence[dict], backend: str | ModuleType) -> Any:
+
+def default_backend() -> str:
+    """Pick the dataframe library to use when none is named.
+
+    The first of polars, pandas and pyarrow already imported in this
+    session, so a notebook working in pandas gets pandas. Otherwise the
+    first one installed. Raises ImportError when none is.
+    """
+    for name in BACKENDS:
+        if name in sys.modules:
+            return name
+    for name in BACKENDS:
+        if find_spec(name) is not None:
+            return name
+    raise ImportError(
+        "to_frame needs a dataframe library; install one of: " + ", ".join(BACKENDS)
+    )
+
+
+def to_frame(records: Sequence[Any], backend: str | ModuleType | None = None) -> Any:
     """Build a dataframe from records, in the library you name.
 
     `backend` is a name such as "polars", "pandas" or "pyarrow", or the
-    module itself. The result is that library's own frame. Columns are every
+    module itself; None picks one (see default_backend). The result is that
+    library's own frame. Records can be dicts, or typed models (see
+    as_dict). Columns are every
     key found in any record, in the order first seen, and a missing value is
     null.
 
@@ -61,9 +88,10 @@ def to_frame(records: Sequence[dict], backend: str | ModuleType) -> Any:
         logger.warning("Column %r mixes %s; storing it as text", column, names)
         return [as_text(v) for v in values]
 
+    records = [as_dict(record) for record in records]
     columns = list(dict.fromkeys(key for record in records for key in record))
     data = {c: even_out(c, [r.get(c) for r in records]) for c in columns}
-    return nw.from_dict(data, backend=backend).to_native()
+    return nw.from_dict(data, backend=backend or default_backend()).to_native()
 
 
 def latest_per_key(

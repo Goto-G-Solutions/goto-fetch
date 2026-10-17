@@ -1,50 +1,21 @@
 """An HTTP client for one API: URLs, retries, JSON, and paginated records."""
 
 import logging
-import random
 import time
 from collections.abc import Iterator, Mapping
-from datetime import UTC, datetime
-from email.utils import parsedate_to_datetime
 from typing import Any, Self
 from urllib.parse import urlsplit
 
 import httpx2
 
+from .decode import Decoder, json_decoder
 from .errors import ApiError
+from .models import converter
 from .paging import NextLink, Page, Paging, paginate
 from .paths import MISSING, get_path
+from .retry import Retry, retry_after_seconds
 
 logger = logging.getLogger(__name__)
-
-
-def backoff_delay(attempt: int, base: float = 1.0, cap: float = 30.0) -> float:
-    """Return the seconds to wait before retry number `attempt` (0 is the first).
-
-    The delay doubles with each retry up to `cap`, then gets ±20% jitter, so
-    callers that failed together don't all retry at the same moment.
-    """
-    return min(base * 2**attempt, cap) * random.uniform(0.8, 1.2)
-
-
-def retry_after_seconds(value: str | None, now: datetime | None = None) -> float | None:
-    """Read a Retry-After header, which is either seconds or an HTTP date.
-
-    Returns None when the header is absent or unreadable, and 0 for a date
-    already past. `now` defaults to the current time.
-    """
-    if not value:
-        return None
-    value = value.strip()
-    if value.isdigit():
-        return float(value)
-    try:
-        when = parsedate_to_datetime(value)
-    except (TypeError, ValueError):
-        return None
-    if when.tzinfo is None:
-        when = when.replace(tzinfo=UTC)
-    return max(0.0, (when - (now or datetime.now(UTC))).total_seconds())
 
 
 class Client:
@@ -56,20 +27,17 @@ class Client:
     `trailing_slash`, a relative endpoint gets a "/" before any query, as
     Django REST Framework expects.
 
-    A failed request is tried up to `attempts` times in all, for network
-    errors, timeouts, 429 and 5xx. The waits grow by backoff_delay, and are
-    never shorter than a Retry-After header asks. If Retry-After asks for
-    more than `max_backoff`, the request fails at once rather than block.
-    Only idempotent methods are retried unless a call says otherwise,
-    because repeating a POST can repeat what it did.
+    `retry` says when a failed request is tried again (see Retry): by
+    default up to 3 tries for network errors, timeouts, rate limits and
+    temporary server errors, for idempotent methods only. `decode` parses
+    JSON bodies (see json_decoder); by default msgspec when installed.
 
     `auth` signs every request, for tokens that change, such as
-    TokenRefresh. Its own URLs (login, refresh) follow the endpoint rules. A fixed token can go in `headers` instead (token_headers).
+    TokenRefresh. Its own URLs (login, refresh) follow the endpoint rules.
+    A fixed token can go in `headers` instead (token_headers).
 
     Use it in a `with` block, or call close() when done.
     """
-
-    IDEMPOTENT = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
 
     def __init__(
         self,
@@ -77,18 +45,14 @@ class Client:
         *,
         headers: Mapping[str, str] | None = None,
         timeout: float = 20.0,
-        attempts: int = 3,
-        backoff: float = 1.0,
-        max_backoff: float = 30.0,
+        retry: Retry | None = None,
+        decode: Decoder | None = None,
         trailing_slash: bool = True,
         auth: httpx2.Auth | None = None,
         transport: httpx2.BaseTransport | None = None,
     ) -> None:
-        if attempts < 1:
-            raise ValueError(f"attempts must be at least 1, got {attempts}")
-        self.attempts = attempts
-        self.backoff = backoff
-        self.max_backoff = max_backoff
+        self.retry = retry or Retry()
+        self.decode = decode or json_decoder()
         self.trailing_slash = trailing_slash
         self._http = httpx2.Client(
             base_url=base_url,
@@ -134,15 +98,16 @@ class Client:
     ) -> httpx2.Response:
         """Send a request and return the response, or raise ApiError.
 
-        `retry` overrides the default of retrying idempotent methods only.
-        Other keyword arguments go to httpx2: params=, json=, data=,
-        headers= and so on.
+        `retry` overrides whether this call is retried, which by default
+        depends on the method (Retry.methods). Other keyword arguments go to
+        httpx2: params=, json=, data=, headers= and so on.
         """
         method = method.upper()
         url = self.url(endpoint)
+        policy = self.retry
         if retry is None:
-            retry = method in self.IDEMPOTENT
-        tries = self.attempts if retry else 1
+            retry = method in policy.methods
+        tries = policy.attempts if retry else 1
         attempt = 1
         while True:
             wait = 0.0
@@ -163,22 +128,19 @@ class Client:
                     url=str(response.url),
                     status=status,
                 )
-                if status != 429 and status < 500:
+                if status not in policy.statuses:
                     raise failure
                 wait = retry_after_seconds(response.headers.get("Retry-After")) or 0.0
-                if wait > self.max_backoff:
+                if wait > policy.max_backoff:
                     raise ApiError(
                         f"{failure} (the server asks to wait {wait:.0f}s, "
-                        f"more than max_backoff={self.max_backoff:g}s)",
+                        f"more than max_backoff={policy.max_backoff:g}s)",
                         url=failure.url,
                         status=status,
                     )
             if attempt >= tries:
                 raise failure
-            delay = max(
-                wait,
-                backoff_delay(attempt - 1, self.backoff, self.max_backoff),
-            )
+            delay = max(wait, policy.delay(attempt - 1))
             logger.warning(
                 "%s; retry %d of %d in %.1fs",
                 failure,
@@ -193,7 +155,7 @@ class Client:
         """GET `endpoint` and return its parsed JSON body, or raise ApiError."""
         response = self.request("GET", endpoint, **kwargs)
         try:
-            return response.json()
+            return self.decode(response.content)
         except ValueError as exc:
             raise ApiError(
                 f"GET {response.url} did not return JSON: {exc}",
@@ -210,6 +172,7 @@ class Client:
         count_key: str | None = None,
         paging: Paging | None = None,
         max_pages: int | None = None,
+        model: Any = None,
     ) -> Iterator[Any]:
         """Yield every record from a paginated JSON endpoint.
 
@@ -221,19 +184,23 @@ class Client:
         the next page: NextLink() (the default) follows a next-page URL in
         each page, and Offset(...) steps a limit/offset query. `params` are
         added to the first URL; later pages carry or work out their own.
+        `model` turns each record into a typed object (see converter): a
+        pydantic model, msgspec Struct, dataclass or function.
 
         Each page logs one INFO line on the "api_explorer.client" logger,
         such as "Page 44: 100 records in 0.62s, 4,400 so far of 61,203", so
         a long run can be watched (the explorer notebook shows them).
-        Retries log as
-        warnings.
+        Retries log as warnings.
 
         Raises ApiError when a request fails, when the results path is
-        missing or isn't a list, or when paging finds something wrong. A
+        missing or isn't a list, when a record doesn't fit `model`, or when
+        paging finds something wrong. A
         missing results path is an error, not an empty page, so a mistyped
         key can't pass for "no data". An explicit null is an empty page.
         """
         url = httpx2.URL(self.url(endpoint)).copy_merge_params(params or {})
+        convert = None if model is None else converter(model)
+        name = getattr(model, "__name__", repr(model))
         warned_no_count = False
 
         def read(page: Any) -> Page:
@@ -287,4 +254,13 @@ class Client:
                 of_total,
                 extra={"progress": True},
             )
-            yield from items
+            if convert is None:
+                yield from items
+                continue
+            for index, item in enumerate(items, start=received - len(items)):
+                try:
+                    yield convert(item)
+                except (ValueError, TypeError) as exc:
+                    raise ApiError(
+                        f"Record {index} doesn't fit {name}: {exc}", url=str(url)
+                    ) from exc

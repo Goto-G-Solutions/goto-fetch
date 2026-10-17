@@ -17,6 +17,7 @@ The core needs only `httpx2` and `narwhals`. Optional extras add more:
 
 | Extra | Adds |
 |-------|------|
+| `fast` | faster JSON parsing with msgspec, giving the same results |
 | `scrape` | HTML scraping with `api_explorer.scrape` (parsel) |
 | `explorer` | the explorer notebook (marimo) |
 
@@ -27,7 +28,9 @@ import os
 
 from api_explorer import Client, Offset, select, to_frame, token_headers
 
-with Client("https://host/api", headers=token_headers(os.environ["API_TOKEN"])) as client:
+with Client(
+    "https://host/api", headers=token_headers(os.environ["API_TOKEN"])
+) as client:
     records = list(client.records("/items/", count_key="count"))
 
 df = to_frame(select(records, ["id", "name", "owner.email"]), "polars")
@@ -38,11 +41,44 @@ For a Django Ninja style API (no next link, a `count`, and routes without a trai
 ```python
 with Client("https://host/api", trailing_slash=False) as client:
     records = list(
-        client.records("/items", results_key="items", count_key="count", paging=Offset(limit=100))
+        client.records(
+            "/items", results_key="items", count_key="count", paging=Offset(limit=100)
+        )
     )
 ```
 
 Every public function and class has a docstring that explains its rules.
+
+## Light by default, richer with what you have
+
+Each piece works with no extra packages, and uses better ones when you have them:
+
+| Piece | Default | With other packages |
+|-------|---------|---------------------|
+| JSON parsing | the standard library | msgspec, used by itself when installed (same results, faster); orjson by name, with `json_decoder("orjson")` |
+| Typed records | plain dicts | `records(..., model=Item)` with a pydantic model, msgspec Struct or dataclass |
+| Dataframes | named by you | `to_frame(records)` uses the library you've already imported, else the first one installed |
+| Retries | 3 tries, idempotent methods, temporary errors | `Client(retry=Retry(attempts=5, statuses=..., methods=...))` |
+| Paging and auth | next links, limit/offset, tokens | your own `Paging` or `httpx2.Auth` |
+
+```python
+from pydantic import BaseModel
+
+from api_explorer import Client, Retry, to_frame
+
+
+class Item(BaseModel):
+    id: int
+    name: str
+
+
+with Client("https://host/api", retry=Retry(attempts=5)) as client:
+    # A record that doesn't fit Item raises ApiError, naming the record.
+    items = list(client.records("/items/", model=Item))
+
+# In whichever dataframe library this session already uses.
+df = to_frame(items)
+```
 
 ## The explorer
 

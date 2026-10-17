@@ -1,11 +1,19 @@
 """to_frame and latest_per_key, run once for each installed dataframe library."""
 
 import math
+import sys
 from typing import Any
 
 import narwhals.stable.v2 as nw
+import pytest
 
-from api_explorer import latest_per_key, parse_datetime, to_frame
+from api_explorer import (
+    default_backend,
+    frames,
+    latest_per_key,
+    parse_datetime,
+    to_frame,
+)
 
 
 def rows_of(frame: Any) -> list[dict]:
@@ -78,3 +86,38 @@ def test_latest_per_key_can_keep_the_earliest_instead(backend):
     assert [r["v"] for r in rows_of(latest_per_key(frame, "id", "n", "earliest"))] == [
         "a"
     ]
+
+
+@pytest.fixture
+def no_frame_libraries(monkeypatch):
+    """A session where no dataframe library is imported or installed, until a test says so."""
+    for name in frames.BACKENDS:
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    installed: set[str] = set()
+    monkeypatch.setattr(
+        frames, "find_spec", lambda name: object() if name in installed else None
+    )
+    return installed
+
+
+def test_default_backend_prefers_a_library_already_imported(
+    no_frame_libraries, monkeypatch
+):
+    no_frame_libraries.update({"polars", "pandas"})
+    monkeypatch.setitem(sys.modules, "pandas", object())
+    assert default_backend() == "pandas"
+
+
+def test_default_backend_falls_back_to_the_first_installed(no_frame_libraries):
+    no_frame_libraries.update({"pandas", "pyarrow"})
+    assert default_backend() == "pandas"
+
+
+def test_default_backend_says_what_to_install_when_there_is_none(no_frame_libraries):
+    with pytest.raises(ImportError, match="install one of: polars, pandas, pyarrow"):
+        default_backend()
+
+
+def test_to_frame_without_a_backend_uses_the_default(backend):
+    # The other tests pass the backend; this one checks None means default_backend().
+    assert type(to_frame([{"id": 1}])) is type(to_frame([{"id": 1}], default_backend()))

@@ -237,16 +237,19 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 
 **Layers.** Each module imports only from modules listed before it. Dependencies point inward, as in section 2.
 
-1. `errors`, `paths`: the exception, and reading values by path.
-2. `records`, `frames`, `paging`: reshaping records, dataframes, and the paging loop and styles.
-3. `auth`, `client`: authentication, and the HTTP client.
-4. `scrape`, `plan`: HTML scraping, and describing a fetch as a script.
+1. `errors`, `paths`, `decode`: the exception, reading values by path, and parsing JSON.
+2. `models`, `records`, `retry`: typed records, reshaping records, and the retry policy.
+3. `frames`, `paging`: dataframes, and the paging loop and styles.
+4. `auth`, `client`: authentication, and the HTTP client.
+5. `scrape`, `plan`: HTML scraping, and describing a fetch as a script.
 
 **Dependencies.**
 
 - The core needs only `httpx2` and `narwhals`.
 - Anything else is an optional extra (`scrape`, `explorer`).
 - An optional package is imported only in the module that needs it, never in `__init__.py`, so the core runs without it.
+- **Extension points.** Each piece another package can improve sits behind a small interface with a default that needs nothing extra: `decode` (JSON parsing), `model` (typed records), `backend` (the dataframe library), `Retry` (the retry policy), `Paging`, `httpx2.Auth` and `transport`.
+- An upgrade happens by itself only if it gives exactly the same results, such as msgspec for JSON. Anything that can change results is chosen by name, such as orjson, which turns integers beyond 64 bits into floats.
 
 **Commands.**
 

@@ -10,7 +10,7 @@ import pytest
 from support import auth_server
 
 import api_explorer
-from api_explorer import Client, FetchPlan, package_requirement, select, to_frame
+from api_explorer import Client, FetchPlan, Retry, package_requirement, select, to_frame
 from api_explorer import plan as plan_module
 
 SECRETS = {
@@ -49,7 +49,7 @@ def run_script(monkeypatch, capsys):
         fake = types.ModuleType("api_explorer")
         fake.__dict__.update(vars(api_explorer))
         fake.Client = functools.partial(
-            Client, transport=httpx2.MockTransport(handler), backoff=0.0
+            Client, transport=httpx2.MockTransport(handler), retry=Retry(backoff=0.0)
         )
         monkeypatch.setitem(sys.modules, "api_explorer", fake)
         for name, value in env.items():

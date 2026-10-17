@@ -10,6 +10,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Faster JSON parsing, with the same results (see json_decoder)
+fast = ["msgspec>=0.22"]
 # HTML scraping (api_explorer.scrape)
 scrape = ["parsel>=1.10.0"]
 # The explorer notebook
@@ -17,11 +19,15 @@ explorer = ["marimo>=0.25.1"]
 
 [dependency-groups]
 # Everything the tests use: two dataframe libraries, so code meant to work on
-# any frame is tried on more than one, and parsel for the scraping tests.
+# any frame is tried on more than one, plus every optional package an
+# adapter supports, so each adapter is tested.
 dev = [
+    "msgspec>=0.22",
+    "orjson>=3.11",
     "pandas>=2.2",
     "parsel>=1.10.0",
     "polars>=1.33",
+    "pydantic>=2.11",
     "pytest>=8.4",
 ]
 
