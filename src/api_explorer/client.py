@@ -27,6 +27,11 @@ class Client:
     `trailing_slash`, a relative endpoint gets a "/" before any query, as
     Django REST Framework expects.
 
+    `timeout` is seconds for every stage of a request, or an
+    httpx2.Timeout for separate limits, such as
+    httpx2.Timeout(60, connect=5): give up quickly when the server is
+    down, but wait for a slow page.
+
     `retry` says when a failed request is tried again (see Retry): by
     default up to 3 tries for network errors, timeouts, rate limits and
     temporary server errors, for idempotent methods only. `decode` parses
@@ -44,7 +49,7 @@ class Client:
         base_url: str = "",
         *,
         headers: Mapping[str, str] | None = None,
-        timeout: float = 20.0,
+        timeout: float | httpx2.Timeout = 20.0,
         retry: Retry | None = None,
         decode: Decoder | None = None,
         trailing_slash: bool = True,

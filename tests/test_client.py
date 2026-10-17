@@ -50,3 +50,15 @@ def test_get_json_parses_with_the_client_s_decoder(mock_client):
     handler, _ = replies(httpx2.Response(200, content=b"raw body"))
     client = mock_client(handler, decode=lambda body: {"decoded": body})
     assert client.get_json("/items/") == {"decoded": b"raw body"}
+
+
+def test_timeout_can_set_connect_and_read_limits_apart(mock_client):
+    seen = {}
+
+    def handler(request):
+        seen.update(request.extensions["timeout"])
+        return OK
+
+    client = mock_client(handler, timeout=httpx2.Timeout(60.0, connect=5.0))
+    client.request("GET", "/items/")
+    assert (seen["connect"], seen["read"]) == (5.0, 60.0)
