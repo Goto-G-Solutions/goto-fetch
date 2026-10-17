@@ -365,7 +365,8 @@ class Client:
         Incremental asks the API from its last value on, and Changes
         fetches everything and passes on new and changed records. Save
         its state after storing the records (tracked_run does both); it
-        moves on only when every page has been read.
+        moves on only when every page has been read, so it can't be
+        used with `max_pages`.
 
         Each page logs a "page" event at INFO, such as "Page 44: 100 records
         in 0.62s, 4,400 so far of 61,203", and the end a "done" event, so a
@@ -384,6 +385,14 @@ class Client:
         not an empty page, so a mistyped key can't pass for "no data". An
         explicit null is an empty page.
         """
+        if incremental is not None and max_pages is not None:
+            # A run cut short ends like a complete one, so the tracker would
+            # move past the pages never fetched (or call their records
+            # deleted).
+            raise ValueError(
+                "max_pages can't be used with incremental: a run cut short "
+                "would skip the records it didn't fetch"
+            )
         url = httpx2.URL(self.url(endpoint)).copy_merge_params(params or {})
         convert = None if model is None else converter(model)
         name = getattr(model, "__name__", repr(model))
