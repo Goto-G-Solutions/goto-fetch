@@ -62,7 +62,7 @@ Each piece works with no extra packages, and uses better ones when you have them
 | Retries | 3 tries, idempotent methods, temporary errors | `Retry(attempts=5, statuses=..., methods=...)`, or your own policy: any object with `wait(failure)` |
 | HTTP | an httpx2 client made for you | `Client(http=httpx2.Client(...))` for proxies, HTTP/2, certificates or event hooks |
 | Logging | silent | `enable_logging()`; every line is an event with data (`record.event`, `record.data`) |
-| Paging | next links (body or `Link` header), cursors, limit/offset, GET or POST | your own `Paging`: it sees each page's body and response; `with_query` sets a query parameter |
+| Paging | next links (body or `Link` header), cursors, limit/offset, keyset, GET or POST | your own `Paging`: it sees each page's body and response; `with_param` sets a query or body parameter |
 | Incremental fetching | everything, every run | `Incremental(field, param)` asks only for changes; `Changes(key)` passes on only changed records and lists deleted ones |
 | Errors in a 200 | trusted as data | `Client(check=error_at("error\|errors"))`, or your own check: a function from response to problem |
 | Auth | fixed tokens; access and refresh tokens, renewed safely across threads | log in with `PasswordLogin`, OAuth2 `ClientCredentials`, or your own `Login`; any `httpx2.Auth` |
@@ -104,7 +104,22 @@ with tracked_run(state, "orders", Incremental, "updated_at", "updated_since") as
 
 Two rules keep it from losing data. The state moves on only when a run has read every page, since records may come in any order and a failed run could have skipped older ones. And it asks from the last value itself, not after it, then passes over what it has already seen there, so records that share the last value aren't lost. `created_at` finds new records only; `updated_at` also finds edits, so a record can come back with new values, and storing must replace it by its id rather than add it again.
 
-One trap: paging by page number or offset can skip a record when the data changes during a run, because the records after a changed one shift a place. With `Incremental`, a skipped record is lost for good, since later runs start past it; use a paging style the server keeps steady, such as a cursor. `Changes` finds such a record again on its next run.
+One trap: paging by page number or offset can skip a record when the data changes during a run, because the records after a changed one shift a place. With `Incremental`, a skipped record is lost for good, since later runs start past it. Use a paging style that doesn't shift: a server cursor (`Cursor`), or, when the API can sort by the field, `Keyset`, which asks each page from the last value of the one before. `Changes` finds such a record again on its next run, so it suits APIs that offer neither.
+
+```python
+from api_explorer import Keyset
+
+with tracked_run(state, "orders", Incremental, "updated_at", "updated_since") as since:
+    store(
+        client.records(
+            "/orders/?ordering=updated_at",
+            incremental=since,
+            paging=Keyset("updated_at", "updated_since", limit=500),
+        )
+    )
+```
+
+Keyset pages overlap at each page's last value, and `Incremental` passes the repeats over. When more records share one value than a page holds, Keyset stops with an error rather than skip any; raise `limit`.
 
 When an API has no such field, or doesn't always update it, `Changes` fetches everything and passes on only new and changed records, by a fingerprint (a hash) of each. It also lists the records that disappeared, which a timestamp never shows. Leave out fields that change on every fetch, or every record looks changed:
 

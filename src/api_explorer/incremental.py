@@ -25,17 +25,17 @@ are stored (tracked_run does both), so a crash between the two can only
 repeat records, never skip them.
 """
 
-import dataclasses
 import hashlib
 import json
 import logging
 from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from .errors import ApiError
 from .logs import log_event
-from .paging import PageRequest, with_query
+from .paging import Fetched, NextLinkFunction, Page, PageRequest, with_param
 from .paths import MISSING, get_path, parse_path
 from .records import parse_datetime
 
@@ -169,7 +169,7 @@ class Incremental:
         self.field = field
         self.param = param
         self.key = key
-        self.send_in = send_in
+        self.send_in: Literal["query", "body"] = send_in
         self.send_as = send_as
         self.missing = missing
         if state is not None:
@@ -205,27 +205,17 @@ class Incremental:
         """
         if self._last is None or self.param is None:
             return request
-        value = self.send_as(self._last)
-        if self.send_in == "query":
-            return dataclasses.replace(
-                request, url=with_query(request.url, self.param, value)
-            )
-        if request.json is not None and not isinstance(request.json, dict):
-            raise ApiError(
-                f"Incremental can't add {self.param!r} to a body that isn't a "
-                f"JSON object: {request.json!r}"
-            )
-        return dataclasses.replace(
-            request, json={**(request.json or {}), self.param: value}
-        )
+        return with_param(request, self.param, self.send_as(self._last), self.send_in)
 
     def track(self, records: Iterable[Any]) -> Iterator[Any]:
         """Yield the records not yet seen, and move `state` on once all are seen.
 
         A record is passed over when its value is below the last one (an
         API that ignores or loosens the filter), or equal to it and seen in
-        the last run. Records may come in any order. If the loop stops
-        early, by an error or a break, `state` stays as it was.
+        the last run, or when this run already passed it at its highest
+        value so far (pages that overlap, as Keyset's do). Records may come
+        in any order. If the loop stops early, by an error or a break,
+        `state` stays as it was.
         """
         highest, at_highest = self._last, set(self._seen)
         kept = dropped = 0
@@ -256,7 +246,13 @@ class Incremental:
             if highest is None or _greater(value, highest, self.field):
                 highest, at_highest = value, set()
             if _same(value, highest, self.field):
-                at_highest.add(self._identity(record))
+                identity = self._identity(record)
+                if identity in at_highest:
+                    # Already passed at the highest value: a repeat from
+                    # overlapping pages, or from the last run.
+                    dropped += 1
+                    continue
+                at_highest.add(identity)
             kept += 1
             yield record
         self._state = {"last": _send_form(highest), "seen": sorted(at_highest)}
@@ -297,6 +293,118 @@ def _without(value: Any, path: list[str]) -> Any:
     if not rest:
         return {k: v for k, v in value.items() if k != head}
     return {**value, head: _without(value[head], rest)}
+
+
+@dataclass(frozen=True)
+class Keyset:
+    """Page by the records' own field: each page asks from the last value of the one before.
+
+    For an API that sorts by a field that only grows, such as updated_at
+    (often with a parameter like ordering=updated_at), and filters by it
+    from a value on (`param`, such as updated_since). Page numbers and
+    offsets skip a record when the data changes during a run; keyset pages
+    don't, because each page starts from a value, not a position.
+
+    Pages overlap: each starts at the last value of the one before, so the
+    records at that value come again. Pair Keyset with Incremental or
+    Changes, which pass the repeats over; on its own it yields them again.
+
+    - `field`: path to the sorted value in each record.
+    - `param`: the filter parameter, "from this value on" (>=). One that
+      means "after this value" (>) would skip records that share a value.
+    - `limit`, `limit_param`: the page size it asks for, and its name.
+      Keyset needs it to tell the last page from a page full of one value.
+    - `send_in`, `send_as`: where the parameters go, and the form of the
+      value, as for Incremental.
+
+    Raises ApiError when a page isn't sorted by `field`, or when more
+    records share one value than fit on a page, since it can't move past
+    them (raise `limit`), or when the API ignores `param`. A server that
+    caps the page size below `limit` is noticed once a short page turns
+    out not to be the last; until then, a short page that moves nowhere
+    counts as the end, so set `limit` no higher than the server allows.
+    """
+
+    field: str
+    param: str
+    limit: int = 100
+    limit_param: str = "limit"
+    send_in: Literal["query", "body"] = "query"
+    send_as: Callable[[Any], Any] = _send_form
+
+    def __post_init__(self) -> None:
+        if self.send_in not in ("query", "body"):
+            raise ValueError(f"send_in must be 'query' or 'body', got {self.send_in!r}")
+        if self.limit < 1:
+            raise ValueError(f"limit must be at least 1, got {self.limit}")
+
+    def begin(
+        self, first: PageRequest, read: Callable[[Fetched], Page]
+    ) -> tuple[PageRequest, NextLinkFunction]:
+        """Start a run: the first request gets the page size, and keeps any filter."""
+        current: Any = None  # the value the last request asked from
+        page_size = self.limit  # what the server really gives, if it caps
+        previous = 0  # the last page's length
+
+        def next_link(fetched: Fetched, request: PageRequest) -> PageRequest | None:
+            nonlocal current, page_size, previous
+            items = read(fetched).items
+            if not items:
+                return None
+            bottom, top = self._value_range(items, request)
+            if current is not None and _greater(current, bottom, self.field):
+                raise ApiError(
+                    f"The page starts at {self.field}={bottom!r}, before the "
+                    f"{current!r} it asked from: the API ignores {self.param!r}",
+                    url=request.url,
+                )
+            following = with_param(request, self.param, self.send_as(top), self.send_in)
+            # Asking again from where this page started moves nowhere. The
+            # first request may already ask from a value (an Incremental's
+            # last), which `current` doesn't know, hence the second test.
+            stuck = following == request
+            if stuck or (current is not None and _same(top, current, self.field)):
+                # Only records at the value asked from: the repeats at the
+                # end, unless the page is full, when more may follow.
+                if len(items) < page_size:
+                    return None
+                raise ApiError(
+                    f"{len(items)} or more records share {self.field}={top!r}, "
+                    f"more than a page holds, so Keyset can't page past them; "
+                    f"raise limit",
+                    url=request.url,
+                )
+            if current is not None and previous < page_size:
+                # The last page was short, yet this one found more: the
+                # server caps the page size at what it gave.
+                page_size = previous
+            current, previous = top, len(items)
+            return following
+
+        return with_param(first, self.limit_param, self.limit, self.send_in), next_link
+
+    def _value_range(self, items: list[Any], request: PageRequest) -> tuple[Any, Any]:
+        """The page's first and last values of `field`, checking it is sorted by it."""
+        first: Any = MISSING
+        last: Any = MISSING
+        for item in items:
+            value = get_path(item, self.field, MISSING)
+            if value is MISSING or value is None:
+                raise ApiError(
+                    f"A record has no {self.field!r}, so Keyset can't page past it",
+                    url=request.url,
+                )
+            if last is not MISSING and _greater(last, value, self.field):
+                raise ApiError(
+                    f"The page isn't sorted by {self.field!r} ({last!r} comes "
+                    f"before {value!r}); Keyset needs ascending order, often "
+                    f"asked for with a parameter like ordering={self.field}",
+                    url=request.url,
+                )
+            if first is MISSING:
+                first = value
+            last = value
+        return first, last
 
 
 class Changes:

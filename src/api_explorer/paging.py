@@ -156,6 +156,29 @@ class PageRequest:
     json: Any = None
 
 
+def with_param(
+    request: PageRequest,
+    name: str,
+    value: object,
+    send_in: Literal["query", "body"] = "query",
+) -> PageRequest:
+    """Return `request` with `name` set to `value`, in its query or its JSON body.
+
+    The step paging styles and trackers share: a cursor, a page size or a
+    "from this value" filter. In the body, `name` joins the request's JSON
+    object, which must be an object (or no body at all).
+    """
+    if send_in == "query":
+        return dataclasses.replace(request, url=with_query(request.url, name, value))
+    if request.json is not None and not isinstance(request.json, dict):
+        raise ApiError(
+            f"Can't add {name!r} to a body that isn't a JSON object: "
+            f"{json.dumps(request.json, default=str)[:200]}",
+            url=request.url,
+        )
+    return dataclasses.replace(request, json={**(request.json or {}), name: value})
+
+
 class Fetched(NamedTuple):
     """One page as Client.records fetched it: the parsed body, and its response.
 
@@ -434,10 +457,6 @@ class Cursor:
             if cursor is None or cursor == "":
                 _stopped("the page has no cursor", "no cursor")
                 return None
-            if self.send_in == "query":
-                return with_query(request.url, self.param, cursor)
-            body = dict(request.json or {})
-            body[self.param] = cursor
-            return dataclasses.replace(request, json=body)
+            return with_param(request, self.param, cursor, self.send_in)
 
         return first, next_link

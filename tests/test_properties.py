@@ -371,3 +371,76 @@ def test_a_warehouse_fed_by_tracked_runs_mirrors_the_source_despite_failures(
             continue
         event("a run succeeded")
         assert warehouse == source
+
+
+@settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(
+    sizes=st.lists(st.integers(0, 4), min_size=1, max_size=5),
+    limit=st.integers(2, 4),
+    data=st.data(),
+)
+def test_keyset_runs_mirror_the_source_while_it_changes_mid_run(sizes, limit, data):
+    # Each run first adds some records; then, before any request, a record
+    # may be edited (it moves to the end, with a newer time) or the request
+    # may fail. Keyset with Incremental must still leave the warehouse
+    # equal to the source after every run that succeeds. A run fails when
+    # retries run out, or when more records share a time than a page
+    # holds (Keyset refuses those); then the state must not move.
+    from api_explorer import ApiError, Incremental, Keyset, tracked_run
+    from api_explorer.testing import FakeApi, MemoryState, keyset_api
+
+    store = MemoryState()
+    source: dict[int, dict] = {}
+    warehouse: dict[int, dict] = {}
+    rows: list[dict] = []
+    clock = 0
+
+    def stamp() -> str:
+        nonlocal clock
+        clock += data.draw(st.integers(0, 1))
+        return f"2026-01-01T{clock // 60:02d}:{clock % 60:02d}:00Z"
+
+    def sync() -> None:
+        rows[:] = list(source.values())
+
+    api = keyset_api(rows)
+
+    def answer(request):
+        if source and data.draw(st.booleans()):
+            id_ = data.draw(st.sampled_from(sorted(source)))
+            source[id_] = {
+                **source[id_],
+                "updated_at": stamp(),
+                "edits": source[id_].get("edits", 0) + 1,
+            }
+            sync()
+        outcome = data.draw(FAILURES)
+        if outcome == "503":
+            return httpx2.Response(503)
+        if outcome in ("drop", "refused"):
+            raise httpx2.ConnectError("connection lost")
+        return api(request)
+
+    for size in sizes:
+        for _ in range(size):
+            id_ = len(source)
+            source[id_] = {"id": id_, "updated_at": stamp()}
+        sync()
+        before = store.get("orders")
+        client = FakeApi(answer).client(retry=Retry(attempts=3, backoff=0))
+        try:
+            with tracked_run(
+                store, "orders", Incremental, "updated_at", "updated_since"
+            ) as run:
+                for record in client.records(
+                    "/orders/",
+                    incremental=run,
+                    paging=Keyset("updated_at", "updated_since", limit=limit),
+                ):
+                    warehouse[record["id"]] = record
+        except ApiError:
+            event("a run failed")
+            assert store.get("orders") == before
+            continue
+        event("a run succeeded")
+        assert warehouse == source

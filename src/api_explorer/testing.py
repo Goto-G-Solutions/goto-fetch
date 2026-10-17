@@ -183,6 +183,39 @@ def changes_api(
     return FakeApi(answer)
 
 
+def keyset_api(
+    records: list[dict[str, Any]],
+    *,
+    field: str = "updated_at",
+    param: str = "updated_since",
+    limit_param: str = "limit",
+    cap: int | None = None,
+    ignore_filter: bool = False,
+) -> FakeApi:
+    """An API sorted by a field, paged by "from this value on", for testing Keyset.
+
+    It answers {"results": [...]}: the records whose `field` is >= the
+    `param` value, sorted by `field` (ties keep their order in `records`),
+    at most ?`limit_param`= of them (default 100), and at most `cap` if
+    given, as servers with a largest page size do. With `ignore_filter`,
+    every page starts from the first record. Values compare as text, so
+    give them one fixed format. Like changes_api, it reads `records` on
+    every request, so a test can change the data during a run.
+    """
+
+    def answer(request: httpx2.Request) -> httpx2.Response:
+        since = request.url.params.get(param)
+        size = _query(request, limit_param, 100)
+        if cap is not None:
+            size = min(size, cap)
+        chosen = sorted(records, key=lambda r: r[field])
+        if since is not None and not ignore_filter:
+            chosen = [r for r in chosen if r[field] >= since]
+        return httpx2.Response(200, json={"results": chosen[:size]})
+
+    return FakeApi(answer)
+
+
 def offset_api(
     records: Sequence[Any] | int,
     *,

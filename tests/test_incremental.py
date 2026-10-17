@@ -13,8 +13,8 @@ import logging
 import httpx2
 import pytest
 
-from api_explorer import ApiError, Incremental, PageRequest, logging_to
-from api_explorer.testing import FakeApi, changes_api, replies
+from api_explorer import ApiError, Incremental, Keyset, PageRequest, logging_to
+from api_explorer.testing import FakeApi, changes_api, keyset_api, replies
 
 
 def at(day: int, hour: int = 0) -> str:
@@ -337,3 +337,133 @@ def test_a_finished_run_logs_what_it_kept_and_where_the_next_starts():
 def test_changes_api_filters_as_told(compare, since, expected):
     api = changes_api([rec(1, 1), rec(2, 2), rec(3, 3)], compare=compare)
     assert ids(api.client().records(f"/o/?updated_since={since}")) == expected
+
+
+# Keyset paging
+
+
+def keyset(**options) -> Keyset:
+    return Keyset("updated_at", "updated_since", **{"limit": 2, **options})
+
+
+def keyset_run(api, since=None, **options) -> list[int]:
+    since = since or orders()
+    return run(api, since, paging=keyset(**options))
+
+
+def test_keyset_pages_from_each_page_s_last_value():
+    api = keyset_api([rec(i, i) for i in range(1, 6)])
+    assert keyset_run(api) == [1, 2, 3, 4, 5]
+    assert api.queries == [
+        {"limit": "2"},
+        {"limit": "2", "updated_since": at(2)},
+        {"limit": "2", "updated_since": at(3)},
+        {"limit": "2", "updated_since": at(4)},
+        {"limit": "2", "updated_since": at(5)},
+    ]
+
+
+def test_keyset_starts_from_the_incremental_s_last_value():
+    api = keyset_api([rec(i, i) for i in range(1, 6)])
+    since = Incremental("updated_at", "updated_since", key="id", start=at(4))
+    assert keyset_run(api, since) == [4, 5]
+    assert api.queries[0] == {"updated_since": at(4), "limit": "2"}
+
+
+def test_keyset_gets_records_sharing_a_value_across_a_page_boundary():
+    # Page 1 ends inside the run of 2s; page 2 starts from 2 and holds
+    # them all, with room to spare, so it moves on to 3.
+    data = [rec(1, 1), rec(2, 2), rec(3, 2), rec(4, 2), rec(5, 3)]
+    assert keyset_run(keyset_api(data), limit=4) == [1, 2, 3, 4, 5]
+
+
+def test_keyset_refuses_more_records_at_one_value_than_a_page_holds():
+    data = [rec(1, 1), rec(2, 2), rec(3, 2), rec(4, 2)]
+    with pytest.raises(ApiError, match="share updated_at=.*raise limit"):
+        keyset_run(keyset_api(data))
+
+
+def test_keyset_notices_a_server_that_caps_the_page_size():
+    data = [rec(i, i) for i in range(1, 8)]
+    assert keyset_run(keyset_api(data, cap=2), limit=5) == [1, 2, 3, 4, 5, 6, 7]
+
+
+def test_keyset_loses_nothing_when_the_data_changes_during_a_run():
+    # The case page numbers lose a record in (see the test above): record 1
+    # is edited between pages, and moves to the end, where Keyset finds it.
+    data = [rec(i, i) for i in range(1, 6)]
+    api = keyset_api(data)
+    requests = 0
+
+    def answer(request):
+        nonlocal requests
+        requests += 1
+        if requests == 2:
+            data[0] = rec(1, 9)
+        return api(request)
+
+    first = orders()
+    assert keyset_run(FakeApi(answer), first) == [1, 2, 3, 4, 5, 1]
+    second = Incremental("updated_at", "updated_since", key="id", state=first.state)
+    assert keyset_run(FakeApi(answer), second) == []
+
+
+def test_keyset_needs_pages_sorted_by_its_field():
+    with pytest.raises(ApiError, match="isn't sorted by 'updated_at'"):
+        keyset_run(
+            replies(httpx2.Response(200, json={"results": [rec(1, 2), rec(2, 1)]}))
+        )
+
+
+def test_keyset_notices_an_api_that_ignores_its_filter():
+    api = keyset_api([rec(i, i) for i in range(1, 6)], ignore_filter=True)
+    with pytest.raises(ApiError, match="ignores 'updated_since'"):
+        keyset_run(api)
+
+
+def test_keyset_needs_every_record_to_have_its_field():
+    body = {"results": [rec(1, 1), {"id": 2}]}
+    with pytest.raises(ApiError, match="no 'updated_at', so Keyset"):
+        keyset_run(
+            replies(httpx2.Response(200, json=body)),
+            Incremental("updated_at", missing="keep"),
+        )
+
+
+def test_keyset_can_send_its_parameters_in_a_post_body():
+    pages = [{"results": [rec(1, 1), rec(2, 2)]}, {"results": [rec(2, 2)]}]
+    api = replies(*(httpx2.Response(200, json=page) for page in pages))
+    records = api.client().records(
+        "/search/",
+        method="POST",
+        json={"q": "x"},
+        retry=True,
+        incremental=orders(),
+        paging=keyset(send_in="body"),
+    )
+    assert ids(records) == [1, 2]
+    assert api.bodies == [
+        {"q": "x", "limit": 2},
+        {"q": "x", "limit": 2, "updated_since": at(2)},
+    ]
+
+
+def test_keyset_on_its_own_yields_the_repeats_at_each_boundary():
+    # Shown on purpose: the overlap is why Keyset pairs with a tracker.
+    api = keyset_api([rec(i, i) for i in range(1, 4)])
+    records = api.client().records("/o/", paging=keyset())
+    assert ids(records) == [1, 2, 2, 3, 3]
+
+
+@pytest.mark.parametrize(
+    ("option", "value"), [("send_in", "header"), ("limit", 0)], ids=["send_in", "limit"]
+)
+def test_keyset_refuses_unknown_settings(option, value):
+    with pytest.raises(ValueError, match=option):
+        Keyset("updated_at", "updated_since", **{option: value})
+
+
+def test_incremental_passes_over_a_record_it_already_passed_this_run():
+    since = Incremental("updated_at", key="id")
+    records = [rec(1, 1), rec(2, 2), rec(3, 2), rec(2, 2)]
+    assert ids(since.track(records)) == [1, 2, 3]
