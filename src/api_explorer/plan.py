@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from .auth import PasswordLogin, TokenRefresh, token_headers
 from .client import Client
-from .paging import HeaderLink, NextLink, Offset, Paging
+from .paging import Cursor, HeaderLink, NextLink, Offset, Paging
 
 
 @dataclass(frozen=True)
@@ -24,6 +24,9 @@ class FetchPlan:
 
     base_url: str
     endpoint: str
+    method: str = "GET"
+    body: Any = None
+    retry: bool | None = None
     trailing_slash: bool = True
     timeout: float = 20.0
     auth: Literal["none", "header", "refresh"] = "none"
@@ -38,9 +41,12 @@ class FetchPlan:
     password: str = field(default="", repr=False)
     results_key: str | None = "results"
     count_key: str | None = None
-    paging: Literal["next", "offset", "header"] = "next"
+    paging: Literal["next", "offset", "header", "cursor"] = "next"
     next_key: str = "next"
     limit: int = 100
+    cursor_key: str = "next_cursor"
+    cursor_param: str = "cursor"
+    cursor_in: Literal["query", "body"] = "query"
     max_pages: int | None = None
 
     def _login(self) -> PasswordLogin | None:
@@ -76,12 +82,17 @@ class FetchPlan:
             return Offset(limit=self.limit)
         if self.paging == "header":
             return HeaderLink()
+        if self.paging == "cursor":
+            return Cursor(self.cursor_key, self.cursor_param, self.cursor_in)
         return NextLink(self.next_key)
 
     def records(self, client: Client) -> Iterator[Any]:
         """Yield this plan's records through `client`."""
         return client.records(
             self.endpoint,
+            method=self.method,
+            json=self.body,
+            retry=self.retry,
             results_key=self.results_key,
             count_key=self.count_key,
             paging=self.paging_strategy(),
@@ -130,13 +141,25 @@ class FetchPlan:
         if not self.trailing_slash:
             client_args.append("trailing_slash=False")
 
-        record_args = [repr(self.endpoint), f"results_key={self.results_key!r}"]
+        record_args = [repr(self.endpoint)]
+        if self.method.upper() != "GET":
+            record_args.append(f"method={self.method.upper()!r}")
+        if self.body is not None:
+            record_args.append(f"json={self.body!r}")
+        if self.retry is not None:
+            record_args.append(f"retry={self.retry!r}")
+        record_args.append(f"results_key={self.results_key!r}")
         if self.count_key:
             record_args.append(f"count_key={self.count_key!r}")
         if self.paging == "offset":
             record_args.append(f"paging=Offset(limit={self.limit!r})")
         elif self.paging == "header":
             record_args.append("paging=HeaderLink()")
+        elif self.paging == "cursor":
+            record_args.append(
+                f"paging=Cursor(key={self.cursor_key!r}, param={self.cursor_param!r}, "
+                f"send_in={self.cursor_in!r})"
+            )
         elif self.next_key != "next":
             record_args.append(f"paging=NextLink({self.next_key!r})")
         if self.max_pages:

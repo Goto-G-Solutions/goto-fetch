@@ -78,6 +78,18 @@ KEYED = FetchPlan(
 )
 
 
+SEARCH = FetchPlan(
+    "http://api.test/api",
+    "/search/",
+    method="POST",
+    body={"query": "late", "filters": {"open": True}},
+    retry=True,
+    results_key="hits",
+    paging="cursor",
+    cursor_in="body",
+)
+
+
 @pytest.mark.parametrize("auth", ["header", "refresh"])
 def test_scripts_and_repr_never_contain_secrets(auth):
     plan = FetchPlan("http://h/api", "/a/", auth=auth, username="me", **SECRETS)
@@ -96,6 +108,7 @@ def test_scripts_and_repr_never_contain_secrets(auth):
             "http://h/api", "/a/", results_key=None, next_key="links.next", max_pages=3
         ),
         FetchPlan("http://h/api", "/a/", results_key=None, paging="header"),
+        SEARCH,
         KEYED,
     ],
     ids=[
@@ -104,11 +117,31 @@ def test_scripts_and_repr_never_contain_secrets(auth):
         "login",
         "custom-next",
         "header-link",
+        "post-cursor",
         "header-offset",
     ],
 )
 def test_every_kind_of_plan_writes_valid_python(plan):
     compile(plan.script(columns=["id"], backend="polars"), "fetch.py", "exec")
+
+
+def search_api(request):
+    """A POST search: the body's "cursor" picks one of two pages."""
+    cursor = json.loads(request.content).get("cursor")
+    pages = {
+        None: {"hits": [1, 2], "next_cursor": "c2"},
+        "c2": {"hits": [3], "next_cursor": None},
+    }
+    return httpx2.Response(200, json=pages[cursor])
+
+
+def test_a_post_search_script_fetches_what_its_plan_fetches(run_script):
+    # A second end-to-end script test, on purpose: method, body, retry and
+    # cursor paging are written by their own branches of script().
+    with SEARCH.client(transport=httpx2.MockTransport(search_api)) as client:
+        expected = list(SEARCH.records(client))
+    namespace = run_script(SEARCH.script(), search_api)
+    assert namespace["records"] == expected == [1, 2, 3]
 
 
 def test_the_script_header_lists_the_package_and_the_backend():

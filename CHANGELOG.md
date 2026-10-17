@@ -7,7 +7,7 @@ Each release lists what changed for people using the package. The format follows
 The first release.
 
 - `Client`: one API's base URL, headers, timeouts, retries and authentication, with JSON and paginated records.
-- Paging: next links in the body (`NextLink`) or the `Link` header (`HeaderLink`), or limit and offset (`Offset`), with an optional count, and progress logged per page. Paging styles see each page's body and response (`Fetched`).
+- Paging: next links in the body (`NextLink`) or the `Link` header (`HeaderLink`), cursors in the query or the body (`Cursor`), or limit and offset (`Offset`), with an optional count, and progress logged per page. `records(method="POST", json=...)` pages a POST search, with `retry=True` when it only reads. Paging styles see each page's body and response (`Fetched`) and say what to fetch next (a URL, or a `PageRequest`).
 - Authentication: fixed token headers (`token_headers`), and access tokens that renew themselves (`TokenRefresh`, with an optional `PasswordLogin`).
 - Records: `get_path`, `select`, `flatten` and `explode` reshape nested JSON without a dataframe library.
 - Dataframes: `to_frame` in polars, pandas or pyarrow through narwhals, evening out mixed types at every depth, and `latest_per_key`.

@@ -18,6 +18,7 @@ app = marimo.App(width="medium")
 with app.setup:
     """Explore a paginated JSON API, then copy the fetch as a script."""
 
+    import json
     import logging
     import os
     import sys
@@ -64,6 +65,14 @@ def _():
         placeholder="/products/", label="Endpoint", full_width=True
     )
     trailing_slash = mo.ui.checkbox(value=True, label="Trailing slash")
+    method = mo.ui.dropdown(["GET", "POST"], value="GET", label="Method")
+    body = mo.ui.text_area(
+        placeholder='{"query": "late orders"}',
+        label="JSON body",
+        rows=3,
+        full_width=True,
+    )
+    read_only = mo.ui.checkbox(label="Safe to retry: it only reads")
 
     _env_auth = (
         "Access/refresh"
@@ -104,12 +113,15 @@ def _():
     results_key = mo.ui.text(value="results", label="Results path")
     count_key = mo.ui.text(placeholder="count", label="Count path")
     paging = mo.ui.dropdown(
-        ["next link", "limit/offset", "header link"],
+        ["next link", "limit/offset", "header link", "cursor"],
         value="next link",
         label="Paging",
     )
     next_key = mo.ui.text(value="next", label="Next-page path")
     limit = mo.ui.number(start=1, value=100, step=1, label="Limit")
+    cursor_key = mo.ui.text(value="next_cursor", label="Cursor path")
+    cursor_param = mo.ui.text(value="cursor", label="Send it as")
+    cursor_in = mo.ui.dropdown(["query", "body"], value="query", label="In the")
 
     max_pages = mo.ui.number(start=0, value=1, step=1, label="Pages (0 = all)")
     timeout = mo.ui.number(start=1, value=20, step=1, label="Timeout (s)")
@@ -132,17 +144,23 @@ def _():
         auth_kind,
         backend,
         base_url,
+        body,
         columns,
         count_key,
+        cursor_in,
+        cursor_key,
+        cursor_param,
         endpoint,
         fetch,
         header,
         limit,
         login_url,
         max_pages,
+        method,
         next_key,
         paging,
         password,
+        read_only,
         refresh_token,
         refresh_url,
         results_key,
@@ -160,16 +178,22 @@ def _(
     access_token,
     auth_kind,
     base_url,
+    body,
     count_key,
+    cursor_in,
+    cursor_key,
+    cursor_param,
     endpoint,
     fetch,
     header,
     limit,
     login_url,
     max_pages,
+    method,
     next_key,
     paging,
     password,
+    read_only,
     refresh_token,
     refresh_url,
     results_key,
@@ -215,6 +239,20 @@ def _(
     else:
         _auth_rows = [_hint("No authentication.")]
 
+    _post_rows = (
+        [
+            body,
+            _row(read_only),
+            _hint(
+                "Every page is sent with this body. A POST isn't retried "
+                "unless you say it only reads, since retrying could repeat "
+                "a change."
+            ),
+        ]
+        if method.value == "POST"
+        else []
+    )
+
     if paging.value == "limit/offset":
         _paging_rows = [
             _row(paging, limit),
@@ -222,6 +260,14 @@ def _(
                 "Steps `?limit=&offset=` itself, for pages with no next "
                 "link, such as Django Ninja's. The count path lets it stop "
                 "exactly at the end."
+            ),
+        ]
+    elif paging.value == "cursor":
+        _paging_rows = [
+            _row(paging, cursor_key, cursor_param, cursor_in),
+            _hint(
+                "Sends back the cursor each page gives, in the query string "
+                "or the JSON body, until a page gives none."
             ),
         ]
     elif paging.value == "header link":
@@ -246,12 +292,13 @@ def _(
             _section(
                 "Request",
                 mo.hstack([base_url, endpoint], widths="equal"),
-                _row(trailing_slash),
+                _row(method, trailing_slash),
                 _hint(
-                    'Adds a "/" to the endpoint, as Django REST Framework '
-                    "expects. Turn it off for routes that don't end in one, "
-                    "such as Django Ninja's."
+                    'Trailing slash adds a "/" to the endpoint, as Django '
+                    "REST Framework expects. Turn it off for routes that "
+                    "don't end in one, such as Django Ninja's."
                 ),
+                *_post_rows,
             ),
             _section("Authentication", _row(auth_kind), *_auth_rows),
             _section(
@@ -283,16 +330,22 @@ def _(
     access_token,
     auth_kind,
     base_url,
+    body,
     count_key,
+    cursor_in,
+    cursor_key,
+    cursor_param,
     endpoint,
     fetch,
     header,
     limit,
     login_url,
     max_pages,
+    method,
     next_key,
     paging,
     password,
+    read_only,
     refresh_token,
     refresh_url,
     results_key,
@@ -307,9 +360,19 @@ def _(
         not fetch.value,
         mo.md("Fill in the request above, then press **Fetch**."),
     )
+    _posting = method.value == "POST"
+    _body = None
+    if _posting and body.value.strip():
+        try:
+            _body = json.loads(body.value)
+        except json.JSONDecodeError as _error:
+            raise ValueError(f"The JSON body isn't valid JSON: {_error}") from _error
     plan = FetchPlan(
         base_url=base_url.value,
         endpoint=endpoint.value,
+        method=method.value,
+        body=_body,
+        retry=True if _posting and read_only.value else None,
         trailing_slash=trailing_slash.value,
         timeout=float(timeout.value),
         auth={"Header token": "header", "Access/refresh": "refresh"}.get(
@@ -326,10 +389,15 @@ def _(
         password=password.value,
         results_key=results_key.value or None,
         count_key=count_key.value or None,
-        paging={"limit/offset": "offset", "header link": "header"}.get(
-            paging.value, "next"
-        ),
+        paging={
+            "limit/offset": "offset",
+            "header link": "header",
+            "cursor": "cursor",
+        }.get(paging.value, "next"),
         next_key=next_key.value or "next",
+        cursor_key=cursor_key.value or "next_cursor",
+        cursor_param=cursor_param.value or "cursor",
+        cursor_in=cursor_in.value,
         limit=int(limit.value),
         max_pages=int(max_pages.value) or None,
     )
@@ -442,7 +510,7 @@ def _():
 
     import polars as pl
     from api_explorer import (
-        ApiError, Client, Offset, PasswordLogin, TokenRefresh,
+        ApiError, Client, Cursor, Offset, PasswordLogin, TokenRefresh,
         explode, select, to_frame, token_headers,
     )
 
@@ -635,7 +703,33 @@ def _():
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ### Example 7: Other ways in
+    ### Example 7: A search API that pages with POST
+
+    The query goes in a JSON body, and each page hands back a cursor that
+    goes into the next body. A POST isn't retried by default, since it might
+    change data; this one only reads, so it says so.
+
+    ```python
+    with Client(BASE_URL, headers=HEADERS) as client:
+        hits = list(
+            client.records(
+                "/search/",
+                method="POST",
+                json={"query": "late orders", "status": "open"},
+                results_key="hits",
+                paging=Cursor(send_in="body"),
+                retry=True,
+            )
+        )
+    ```
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### Example 8: Other ways in
 
     A token in a header of the API's own choosing:
 

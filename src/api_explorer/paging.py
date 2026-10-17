@@ -1,10 +1,11 @@
 """Follow a paginated API from page to page: the loop, and the paging styles."""
 
+import dataclasses
 import json
 import logging
 from collections.abc import Callable, Hashable, Iterator
 from dataclasses import dataclass
-from typing import Any, NamedTuple, Protocol, TypeVar
+from typing import Any, Literal, NamedTuple, Protocol, TypeVar
 from urllib.parse import urljoin
 
 import httpx2
@@ -23,11 +24,14 @@ P = TypeVar("P")
 def request_key(request: Any) -> Hashable:
     """Tell requests apart for paginate's loop check: by default, by value.
 
-    A string (a URL) is its own key. Anything else, such as a dict holding a
-    POST body or a cursor, is keyed by its JSON form, with keys sorted.
+    A string (a URL) is its own key. Anything else, such as a PageRequest, a
+    dict holding a POST body, or a cursor, is keyed by its JSON form, with
+    keys sorted, so the same body written in another order is the same page.
     """
     if isinstance(request, str):
         return request
+    if dataclasses.is_dataclass(request) and not isinstance(request, type):
+        request = dataclasses.asdict(request)
     return json.dumps(request, sort_keys=True, default=repr)
 
 
@@ -130,6 +134,19 @@ class Progress(NamedTuple):
     seconds: float
 
 
+@dataclass(frozen=True)
+class PageRequest:
+    """The request for one page: its URL, method, and JSON body if any.
+
+    Client.records starts from one (records(method=..., json=...)) and
+    paging styles say what the next one is.
+    """
+
+    url: str
+    method: str = "GET"
+    json: Any = None
+
+
 class Fetched(NamedTuple):
     """One page as Client.records fetched it: the parsed body, and its response.
 
@@ -141,18 +158,29 @@ class Fetched(NamedTuple):
     response: httpx2.Response
 
 
+NextLinkFunction = Callable[[Fetched, PageRequest], "PageRequest | str | None"]
+"""Given a page and its request, what to fetch next: see Paging."""
+
+
 class Paging(Protocol):
     """How a paginated JSON API says where the next page is.
 
-    begin(first_url, read) starts one run. It returns the URL to fetch first
-    and a fresh next_link(fetched, url) for paginate, which gets each page
-    as a Fetched and returns the next URL, or None at the end. read(fetched)
-    gives the page's records and count, as read_page does.
+    begin(first, read) starts one run, from the first PageRequest. It
+    returns the request to fetch first and a fresh next_link(fetched,
+    request), which gets each page as a Fetched and says what comes next:
+
+    - a URL (str), fetched with the same method and body, so styles that
+      work on URLs work for POST searches too; a relative URL resolves
+      against the current one;
+    - a PageRequest, to change the method or the body;
+    - None, at the end.
+
+    read(fetched) gives the page's records and count, as read_page does.
     """
 
     def begin(
-        self, first_url: str, read: Callable[[Fetched], Page]
-    ) -> tuple[str, Callable[[Fetched, str], str | None]]: ...
+        self, first: PageRequest, read: Callable[[Fetched], Page]
+    ) -> tuple[PageRequest, NextLinkFunction]: ...
 
 
 @dataclass(frozen=True)
@@ -166,18 +194,20 @@ class NextLink:
     key: str = "next"
 
     def begin(
-        self, first_url: str, read: Callable[[Fetched], Page]
-    ) -> tuple[str, Callable[[Fetched, str], str | None]]:
-        """Start a run; the first URL is used as given."""
+        self, first: PageRequest, read: Callable[[Fetched], Page]
+    ) -> tuple[PageRequest, NextLinkFunction]:
+        """Start a run; the first request is used as given."""
 
-        def next_link(fetched: Fetched, url: str) -> str | None:
+        def next_link(fetched: Fetched, request: PageRequest) -> str | None:
             link = get_path(fetched.body, self.key)
             if link is not None and not isinstance(link, str):
                 kind = type(link).__name__
-                raise ApiError(f"{self.key!r} holds a {kind}, not a URL", url=url)
+                raise ApiError(
+                    f"{self.key!r} holds a {kind}, not a URL", url=request.url
+                )
             return link
 
-        return first_url, next_link
+        return first, next_link
 
 
 @dataclass(frozen=True)
@@ -214,25 +244,25 @@ class Offset:
             raise ValueError(f"limit must be at least 1, got {self.limit}")
 
     def begin(
-        self, first_url: str, read: Callable[[Fetched], Page]
-    ) -> tuple[str, Callable[[Fetched, str], str | None]]:
-        """Start a run: set limit and offset on the first URL."""
-        url = httpx2.URL(first_url)
+        self, first: PageRequest, read: Callable[[Fetched], Page]
+    ) -> tuple[PageRequest, NextLinkFunction]:
+        """Start a run: set limit and offset on the first request's URL."""
+        url = httpx2.URL(first.url)
         start = int(url.params.get(self.offset_param, 0))
-        first = url.copy_set_param(self.limit_param, self.limit)
-        first = first.copy_set_param(self.offset_param, start)
+        start_url = url.copy_set_param(self.limit_param, self.limit)
+        start_url = start_url.copy_set_param(self.offset_param, start)
         received = 0
         biggest = 0
         previous: list | None = None
 
-        def next_link(fetched: Fetched, page_url: str) -> str | None:
+        def next_link(fetched: Fetched, request: PageRequest) -> str | None:
             nonlocal received, biggest, previous
             items, total = read(fetched)
             if items and items == previous:
                 raise ApiError(
-                    f"{page_url} returned the same records as the page "
+                    f"{request.url} returned the same records as the page "
                     f"before; the server seems to ignore {self.offset_param!r}",
-                    url=page_url,
+                    url=request.url,
                 )
             previous = items
             received += len(items)
@@ -250,9 +280,11 @@ class Offset:
             elif not items or len(items) < biggest:
                 return None
             biggest = max(biggest, len(items))
-            return str(httpx2.URL(page_url).copy_set_param(self.offset_param, reached))
+            return str(
+                httpx2.URL(request.url).copy_set_param(self.offset_param, reached)
+            )
 
-        return str(first), next_link
+        return dataclasses.replace(first, url=str(start_url)), next_link
 
 
 @dataclass(frozen=True)
@@ -267,11 +299,48 @@ class HeaderLink:
     rel: str = "next"
 
     def begin(
-        self, first_url: str, read: Callable[[Fetched], Page]
-    ) -> tuple[str, Callable[[Fetched, str], str | None]]:
-        """Start a run; the first URL is used as given."""
+        self, first: PageRequest, read: Callable[[Fetched], Page]
+    ) -> tuple[PageRequest, NextLinkFunction]:
+        """Start a run; the first request is used as given."""
 
-        def next_link(fetched: Fetched, url: str) -> str | None:
+        def next_link(fetched: Fetched, request: PageRequest) -> str | None:
             return fetched.response.links.get(self.rel, {}).get("url")
 
-        return first_url, next_link
+        return first, next_link
+
+
+@dataclass(frozen=True)
+class Cursor:
+    """Send back the cursor each page gives, until a page gives none.
+
+    `key` is the path to the next cursor in the body, such as "next_cursor"
+    or "meta.next". `param` is the name it goes back under, and `send_in`
+    says where: "query" (?cursor=abc) or "body" (a field in the JSON body,
+    for POST searches).
+    """
+
+    key: str = "next_cursor"
+    param: str = "cursor"
+    send_in: Literal["query", "body"] = "query"
+
+    def __post_init__(self) -> None:
+        if self.send_in not in ("query", "body"):
+            raise ValueError(f"send_in must be 'query' or 'body', got {self.send_in!r}")
+
+    def begin(
+        self, first: PageRequest, read: Callable[[Fetched], Page]
+    ) -> tuple[PageRequest, NextLinkFunction]:
+        """Start a run; the first request is used as given."""
+
+        def next_link(fetched: Fetched, request: PageRequest) -> PageRequest | None:
+            cursor = get_path(fetched.body, self.key)
+            if cursor is None or cursor == "":
+                return None
+            if self.send_in == "query":
+                url = httpx2.URL(request.url).copy_set_param(self.param, cursor)
+                return dataclasses.replace(request, url=str(url))
+            body = dict(request.json or {})
+            body[self.param] = cursor
+            return dataclasses.replace(request, json=body)
+
+        return first, next_link

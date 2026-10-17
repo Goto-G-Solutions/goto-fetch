@@ -4,6 +4,7 @@ records() is exercised through a mock client because it is where paging,
 results paths and counts meet; each test still checks one behaviour.
 """
 
+import json
 import re
 
 import httpx2
@@ -12,10 +13,12 @@ from support import offset_api, pages_at
 
 from api_explorer import (
     ApiError,
+    Cursor,
     HeaderLink,
     NextLink,
     Offset,
     Page,
+    PageRequest,
     Progress,
     paginate,
     read_page,
@@ -96,6 +99,118 @@ def test_records_follow_a_link_header_with_header_link(mock_client):
         "/repos/", results_key=None, paging=HeaderLink()
     )
     assert list(records) == [1, 2]
+
+
+def search_api(pages: dict) -> tuple:
+    """A POST search endpoint: the body's "cursor" picks the page. Also logs bodies."""
+    bodies = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        bodies.append((request.method, body))
+        return httpx2.Response(200, json=pages[body.get("cursor")])
+
+    return handler, bodies
+
+
+def test_records_page_a_post_search_by_a_cursor_in_the_body(mock_client):
+    handler, bodies = search_api(
+        {
+            None: {"hits": [1, 2], "next_cursor": "c2"},
+            "c2": {"hits": [3], "next_cursor": None},
+        }
+    )
+    records = mock_client(handler).records(
+        "/search/",
+        method="POST",
+        json={"q": "late"},
+        results_key="hits",
+        paging=Cursor(send_in="body"),
+    )
+    assert list(records) == [1, 2, 3]
+    assert bodies == [("POST", {"q": "late"}), ("POST", {"q": "late", "cursor": "c2"})]
+
+
+def test_a_cursor_can_go_back_in_the_query(mock_client):
+    def handler(request):
+        cursor = request.url.params.get("after")
+        page = {
+            None: {"data": [1], "meta": {"next": "x"}},
+            "x": {"data": [2], "meta": {}},
+        }
+        return httpx2.Response(200, json=page[cursor])
+
+    paging = Cursor(key="meta.next", param="after")
+    assert list(
+        mock_client(handler).records("/events/", results_key="data", paging=paging)
+    ) == [1, 2]
+
+
+def test_a_next_url_keeps_the_post_method_and_body(mock_client):
+    # The Paging rule: a URL from a style keeps the method and body, so
+    # URL-based styles (NextLink here) work for POST searches too.
+    seen = []
+
+    def handler(request):
+        seen.append((request.method, str(request.url), json.loads(request.content)))
+        last = "page=2" in str(request.url)
+        return httpx2.Response(
+            200, json={"results": [], "next": None if last else "?page=2"}
+        )
+
+    list(mock_client(handler).records("/search/", method="post", json={"q": "x"}))
+    assert seen == [
+        ("POST", f"{BASE.replace('items', 'search')}", {"q": "x"}),
+        ("POST", f"{BASE.replace('items', 'search')}?page=2", {"q": "x"}),
+    ]
+
+
+def test_records_pass_retry_through_so_a_post_search_can_be_retried(mock_client):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx2.Response(503)
+        return httpx2.Response(200, json={"results": [1], "next": None})
+
+    records = mock_client(handler).records(
+        "/search/", method="POST", json={}, retry=True
+    )
+    assert list(records) == [1]
+    assert len(calls) == 2
+
+
+def test_a_cursor_that_repeats_is_caught_as_a_loop(mock_client):
+    handler, _ = search_api(
+        {
+            None: {"hits": [1], "next_cursor": "c"},
+            "c": {"hits": [2], "next_cursor": "c"},
+        }
+    )
+    records = mock_client(handler).records(
+        "/search/",
+        method="POST",
+        json={},
+        results_key="hits",
+        paging=Cursor(send_in="body"),
+    )
+    with pytest.raises(ApiError, match="Pagination loops"):
+        list(records)
+
+
+def test_cursor_refuses_an_unknown_place_to_send_it():
+    with pytest.raises(ValueError, match="send_in must be"):
+        Cursor(send_in="header")
+
+
+def test_request_key_compares_page_requests_by_value():
+    first = PageRequest("http://h/s", "POST", {"q": "x", "cursor": "c"})
+    same = PageRequest("http://h/s", "POST", {"cursor": "c", "q": "x"})
+    assert request_key(first) == request_key(same)
+    assert request_key(first) != request_key(
+        PageRequest("http://h/s", "POST", {"q": "y"})
+    )
 
 
 def test_records_follow_next_links_by_default(mock_client):

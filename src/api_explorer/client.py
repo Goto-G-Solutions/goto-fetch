@@ -1,17 +1,27 @@
 """An HTTP client for one API: URLs, retries, JSON, and paginated records."""
 
+import dataclasses
 import logging
 import time
 from collections.abc import Iterator, Mapping
 from typing import Any, Self
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx2
 
 from .decode import Decoder, json_decoder
 from .errors import ApiError
 from .models import converter
-from .paging import Fetched, NextLink, Page, Paging, Progress, paginate, read_page
+from .paging import (
+    Fetched,
+    NextLink,
+    Page,
+    PageRequest,
+    Paging,
+    Progress,
+    paginate,
+    read_page,
+)
 from .retry import Failure, Retry, RetryPolicy
 
 logger = logging.getLogger(__name__)
@@ -189,12 +199,15 @@ class Client:
         self,
         endpoint: str,
         *,
+        method: str = "GET",
+        json: Any = None,
         params: Mapping[str, Any] | None = None,
         results_key: str | None = "results",
         count_key: str | None = None,
         paging: Paging | None = None,
         max_pages: int | None = None,
         model: Any = None,
+        retry: bool | None = None,
     ) -> Iterator[Any]:
         """Yield every record from a paginated JSON endpoint.
 
@@ -204,8 +217,16 @@ class Client:
         total record count, such as "count". It shows in the progress log,
         and lets Offset stop exactly at the end. `paging` says how to reach
         the next page: NextLink() (the default) follows a next-page URL in
-        each page, and Offset(...) steps a limit/offset query. `params` are
-        added to the first URL; later pages carry or work out their own.
+        each page, Offset(...) steps a limit/offset query, HeaderLink()
+        follows the Link header, and Cursor(...) sends back a cursor.
+        `params` are added to the first URL; later pages carry or work out
+        their own.
+
+        `method` and `json` make the first request, such as a POST search
+        with its query in the body; later pages keep them unless the paging
+        style changes them (Cursor(send_in="body") does). `retry` is passed
+        to each request: a POST isn't retried by default, since it might
+        change data, so pass retry=True for a search that only reads.
         `model` turns each record into a typed object (see converter): a
         pydantic model, msgspec Struct, dataclass or function.
 
@@ -233,7 +254,9 @@ class Client:
 
         def read(fetched: Fetched) -> Page:
             nonlocal warned_no_count
-            result = read_page(fetched.body, results_key, count_key, url=str(url))
+            result = read_page(
+                fetched.body, results_key, count_key, url=str(fetched.response.url)
+            )
             if count_key is not None and result.total is None and not warned_no_count:
                 warned_no_count = True
                 logger.warning("No count at %r in the response", count_key)
@@ -241,18 +264,31 @@ class Client:
 
         seconds = 0.0
 
-        def fetch(page_url: str) -> Fetched:
+        def fetch(request: PageRequest) -> Fetched:
             nonlocal seconds
             started = time.monotonic()
-            response = self.request("GET", page_url)
+            response = self.request(
+                request.method, request.url, json=request.json, retry=retry
+            )
             fetched = Fetched(self.json_body(response), response)
             seconds = time.monotonic() - started
             return fetched
 
-        first, next_link = (paging or NextLink()).begin(str(url), read)
+        start = PageRequest(str(url), method.upper(), json)
+        first, next_link = (paging or NextLink()).begin(start, read)
+
+        def next_request(fetched: Fetched, request: PageRequest) -> PageRequest | None:
+            # A URL from the style keeps the method and body (see Paging).
+            following = next_link(fetched, request)
+            if isinstance(following, str):
+                if not following:
+                    return None
+                return dataclasses.replace(request, url=urljoin(request.url, following))
+            return following
+
         received = 0
         for number, fetched in enumerate(
-            paginate(fetch, first, next_link, max_pages=max_pages), start=1
+            paginate(fetch, first, next_request, max_pages=max_pages), start=1
         ):
             items, total = read(fetched)
             received += len(items)

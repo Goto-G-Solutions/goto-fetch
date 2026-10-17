@@ -2,7 +2,7 @@
 
 Pull data from paginated JSON APIs, and shape it for whichever dataframe library you use.
 
-- **Paging:** follows next-page links in the body or the `Link` header, or steps `limit` and `offset` itself, and knows when it has reached the end.
+- **Paging:** follows next-page links in the body or the `Link` header, sends back cursors, or steps `limit` and `offset` itself, for GET or POST, and knows when it has reached the end.
 - **Reliability:** retries network errors, timeouts, 429 and 5xx responses, and renews short-lived access tokens.
 - **Output:** turns nested JSON into tidy rows, then into a polars, pandas or pyarrow frame.
 - **Explorer:** a marimo notebook to explore an unfamiliar API, then copy the fetch as a script.
@@ -62,9 +62,24 @@ Each piece works with no extra packages, and uses better ones when you have them
 | Retries | 3 tries, idempotent methods, temporary errors | `Retry(attempts=5, statuses=..., methods=...)`, or your own policy: any object with `wait(failure)` |
 | HTTP | an httpx2 client made for you | `Client(http=httpx2.Client(...))` for proxies, HTTP/2, certificates or event hooks |
 | Progress | one log line per page | each line also carries the numbers (`record.progress`), for a progress bar |
-| Paging and auth | next links (body or `Link` header), limit/offset, tokens | your own `Paging` (it sees each page's body and response) or `httpx2.Auth` |
+| Paging and auth | next links (body or `Link` header), cursors, limit/offset, GET or POST; tokens | your own `Paging` (it sees each page's body and response) or `httpx2.Auth` |
 
-`Client.records` is built from public parts, `paginate`, a `Paging`, `read_page` and `converter`, so a loop of your own can reuse the same rules. `paginate` pages by whatever your fetch needs, not only URLs, so an API that pages with a cursor in a POST body works too:
+A search API that pages with POST, with the query and the cursor in the body:
+
+```python
+from api_explorer import Cursor
+
+records = client.records(
+    "/search/",
+    method="POST",
+    json={"query": "late orders"},
+    results_key="hits",
+    paging=Cursor(send_in="body"),
+    retry=True,  # safe here: this POST only reads
+)
+```
+
+`Client.records` is built from public parts, `paginate`, a `Paging`, `read_page` and `converter`, so a loop of your own can reuse the same rules. `paginate` pages by whatever your fetch needs, not only URLs, with the same loop protection:
 
 ```python
 from api_explorer import paginate, read_page

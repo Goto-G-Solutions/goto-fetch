@@ -23,11 +23,13 @@ from .errors import ApiError
 from .frames import default_backend, latest_per_key, to_frame
 from .models import as_dict, converter
 from .paging import (
+    Cursor,
     Fetched,
     HeaderLink,
     NextLink,
     Offset,
     Page,
+    PageRequest,
     Paging,
     Progress,
     paginate,
@@ -42,6 +44,7 @@ from .retry import Failure, Retry, RetryPolicy, backoff_delay, retry_after_secon
 __all__ = [
     "ApiError",
     "Client",
+    "Cursor",
     "Decoder",
     "Failure",
     "FetchPlan",
@@ -50,6 +53,7 @@ __all__ = [
     "NextLink",
     "Offset",
     "Page",
+    "PageRequest",
     "Paging",
     "PasswordLogin",
     "Progress",
