@@ -1,0 +1,61 @@
+name: Issue
+description: A bug, a gap, or an idea. Every pull request starts from one of these.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for opening an issue. Please fill in each part. If you aren't sure about the cause or the fix yet, say so: working that out together is what the issue is for.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happens
+      description: What you see, in a sentence or two. Paste errors and logs as text.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      description: The smallest steps, code or API response that shows it.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: cause
+    attributes:
+      label: Why you think it happens
+      description: What you found when you looked into it. Point to the code if you can.
+    validations:
+      required: true
+  - type: textarea
+    id: fix
+    attributes:
+      label: The fix you suggest
+      description: How you would change it, and why this way. Write "not sure yet" if you don't know.
+    validations:
+      required: true
+  - type: textarea
+    id: implications
+    attributes:
+      label: What the fix would touch
+      description: |
+        In this project: the modules, functions and behaviour it changes.
+        Beyond it: who or what depends on that behaviour, such as notebooks, scripts or other code.
+    validations:
+      required: true
+  - type: checkboxes
+    id: diligence
+    attributes:
+      label: Before you send it
+      options:
+        - label: I searched the existing issues, and this isn't one of them.
+          required: true
+        - label: I can make it happen on the latest `main`.
+          required: true
+        - label: I read CONTRIBUTING.md.
+          required: true

@@ -1,0 +1,30 @@
+Closes #
+
+## What changed, and why
+
+<!-- In plain language: what this does, and the reason. Someone who hasn't read the code should follow it. -->
+
+## How
+
+<!-- The approach, and anything a reviewer should look at closely. -->
+
+## What it touches
+
+<!-- In this project: the modules and behaviour it changes. Beyond it: anything that depends on that behaviour. Say "nothing beyond the issue" if that's so. -->
+
+## Tests
+
+<!-- Which checks you ran, and what you added. -->
+
+- [ ] `uv run pytest` passes.
+- [ ] `uvx ruff check` and `uvx ruff format --check` pass.
+- [ ] `uvx marimo check --strict notebooks/explorer.py` passes, if I changed the notebook.
+- [ ] New behaviour has tests at its interface.
+- [ ] A bug fix has a regression test, marked `# Regression:`.
+- [ ] The tests are orthogonal, and any overlap is explained in a comment.
+
+## Before you send it
+
+- [ ] The issue above was opened first, and this pull request does what it describes.
+- [ ] Commits read `type(scope): lowercase summary`, with the reason in the body.
+- [ ] Plain language throughout, and no em dashes.

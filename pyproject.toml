@@ -35,6 +35,10 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py311"
 
+[tool.ruff.format]
+# marimo formats the notebooks on save, in a way ruff can't reproduce.
+exclude = ["notebooks/*"]
+
 [tool.ruff.lint]
 # marimo ends every notebook cell with a bare return; let it.
 ignore = ["PLR1711"]
