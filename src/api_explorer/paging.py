@@ -9,7 +9,7 @@ from urllib.parse import urljoin
 import httpx2
 
 from .errors import ApiError
-from .paths import get_path
+from .paths import MISSING, get_path
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,54 @@ class Page(NamedTuple):
 
     items: list
     total: int | None
+
+
+def read_page(
+    page: Any,
+    results_key: str | None = "results",
+    count_key: str | None = None,
+    *,
+    url: str | None = None,
+) -> Page:
+    """Read one page of a paginated JSON API: its records, and its count if any.
+
+    `results_key` is the path to the records (see get_path), with fallbacks
+    such as "results|items"; None means the page itself is the list. An
+    explicit null there is an empty page. `count_key` is the path to the
+    total record count; a value that isn't a whole number counts as no
+    count.
+
+    Raises ApiError, naming `url` if given, when the results path is missing
+    or doesn't hold a list. Missing is an error, not an empty page, so a
+    mistyped key can't pass for "no data".
+    """
+    items = page if results_key is None else get_path(page, results_key, MISSING)
+    if items is MISSING:
+        raise ApiError(f"No {results_key!r} in the response", url=url)
+    if items is None:
+        items = []
+    if not isinstance(items, list):
+        raise ApiError(
+            f"{results_key!r} holds a {type(items).__name__}, not a list", url=url
+        )
+    total = None if count_key is None else get_path(page, count_key)
+    if not isinstance(total, int) or isinstance(total, bool):
+        total = None
+    return Page(items, total)
+
+
+class Progress(NamedTuple):
+    """How far a records() run has got, after each page.
+
+    Carried by each progress log record as record.progress, for displays
+    that want numbers rather than text.
+    """
+
+    page: int
+    records_on_page: int
+    records_so_far: int
+    total: int | None
+    seconds: float
 
 
 class Paging(Protocol):

@@ -4,6 +4,11 @@ import random
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from typing import Protocol
+
+import httpx2
+
+from .errors import ApiError
 
 IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
 """Methods that can be repeated safely: doing them twice does what doing them once does."""
@@ -44,8 +49,40 @@ def retry_after_seconds(value: str | None, now: datetime | None = None) -> float
 
 
 @dataclass(frozen=True)
+class Failure:
+    """One failed try of a request, as a RetryPolicy sees it.
+
+    `attempt` counts the tries so far, this one included (1 after the first
+    failure). Exactly one of `response` (the server answered with an error
+    status) and `error` (a network error or timeout) is set. `retry` is the
+    call's own say: True to retry whatever the method, None to leave it to
+    the policy. A call with retry=False never reaches the policy.
+    """
+
+    attempt: int
+    method: str
+    url: str
+    response: httpx2.Response | None = None
+    error: Exception | None = None
+    retry: bool | None = None
+
+
+class RetryPolicy(Protocol):
+    """Decides whether a failed request is tried again, and when.
+
+    wait(failure) returns the seconds to wait before the next try, or None
+    to stop, and the request fails with its own error. To stop with a
+    message of your own, raise ApiError instead. A policy must stop
+    eventually: Client keeps trying for as long as it returns a number.
+    Retry is the built-in policy.
+    """
+
+    def wait(self, failure: Failure) -> float | None: ...
+
+
+@dataclass(frozen=True)
 class Retry:
-    """When a failed request is tried again, and how long to wait between tries.
+    """The built-in RetryPolicy: a few tries for temporary failures, with growing waits.
 
     - `attempts`: tries in all, the first included. At least 1.
     - `statuses`: HTTP statuses worth another try. Network errors and
@@ -74,3 +111,24 @@ class Retry:
     def delay(self, retry_number: int) -> float:
         """Seconds to wait before retry number `retry_number` (0 is the first)."""
         return backoff_delay(retry_number, self.backoff, self.max_backoff)
+
+    def wait(self, failure: Failure) -> float | None:
+        """Seconds to wait before trying `failure`'s request again, or None to stop."""
+        allowed = failure.retry or failure.method in self.methods
+        if not allowed or failure.attempt >= self.attempts:
+            return None
+        response = failure.response
+        if response is None:
+            return self.delay(failure.attempt - 1)
+        if response.status_code not in self.statuses:
+            return None
+        asked = retry_after_seconds(response.headers.get("Retry-After")) or 0.0
+        if asked > self.max_backoff:
+            raise ApiError(
+                f"{failure.method} {failure.url} returned HTTP {response.status_code}, "
+                f"and the server asks to wait {asked:.0f}s, more than "
+                f"max_backoff={self.max_backoff:g}s",
+                url=failure.url,
+                status=response.status_code,
+            )
+        return max(asked, self.delay(failure.attempt - 1))

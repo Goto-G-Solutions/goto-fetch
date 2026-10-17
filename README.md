@@ -59,8 +59,12 @@ Each piece works with no extra packages, and uses better ones when you have them
 | JSON parsing | the standard library | msgspec, used by itself when installed (same results, faster); orjson by name, with `json_decoder("orjson")` |
 | Typed records | plain dicts | `records(..., model=Item)` with a pydantic model, msgspec Struct or dataclass |
 | Dataframes | named by you | `to_frame(records)` uses the library you've already imported, else the first one installed |
-| Retries | 3 tries, idempotent methods, temporary errors | `Client(retry=Retry(attempts=5, statuses=..., methods=...))` |
+| Retries | 3 tries, idempotent methods, temporary errors | `Retry(attempts=5, statuses=..., methods=...)`, or your own policy: any object with `wait(failure)` |
+| HTTP | an httpx2 client made for you | `Client(http=httpx2.Client(...))` for proxies, HTTP/2, certificates or event hooks |
+| Progress | one log line per page | each line also carries the numbers (`record.progress`), for a progress bar |
 | Paging and auth | next links, limit/offset, tokens | your own `Paging` or `httpx2.Auth` |
+
+`Client.records` is built from public parts, `paginate`, a `Paging`, `read_page` and `converter`, so a loop of your own can reuse the same rules.
 
 ```python
 from pydantic import BaseModel

@@ -6,7 +6,7 @@ import httpx2
 import pytest
 from support import replies
 
-from api_explorer import ApiError, Retry, backoff_delay, retry_after_seconds
+from api_explorer import ApiError, Failure, Retry, backoff_delay, retry_after_seconds
 
 OK = httpx2.Response(200, json={"ok": True})
 
@@ -20,7 +20,7 @@ def test_a_server_error_is_retried_and_each_retry_is_logged(mock_client, caplog)
     assert raised.value.status == 503
     assert len(calls) == 3
     retries = [m.rsplit("; ", 1)[1].split(" in ")[0] for m in caplog.messages]
-    assert retries == ["retry 1 of 2", "retry 2 of 2"]
+    assert retries == ["retry 1", "retry 2"]
 
 
 @pytest.mark.parametrize(
@@ -112,3 +112,79 @@ def test_backoff_delay_doubles_within_its_jitter(attempt):
 
 def test_backoff_delay_never_exceeds_its_cap_plus_jitter():
     assert all(backoff_delay(10, base=1.0, cap=5.0) <= 6.0 for _ in range(20))
+
+
+class Recording:
+    """A retry policy that records each Failure, and waits as told."""
+
+    def __init__(self, *waits):
+        self.waits = list(waits)
+        self.failures = []
+
+    def wait(self, failure):
+        self.failures.append(failure)
+        return self.waits.pop(0) if self.waits else None
+
+
+def test_a_policy_sees_each_failure_and_decides(mock_client):
+    handler, _ = replies(httpx2.Response(503), httpx2.ConnectError("refused"), OK)
+    policy = Recording(0.0, 0.0)
+    assert (
+        mock_client(handler, retry=policy).request("GET", "/items/").status_code == 200
+    )
+    first, second = policy.failures
+    assert (first.attempt, first.method, first.url) == (
+        1,
+        "GET",
+        "http://api.test/api/items/",
+    )
+    assert first.response.status_code == 503 and first.error is None
+    assert second.attempt == 2 and second.response is None
+    assert isinstance(second.error, httpx2.ConnectError)
+
+
+def test_a_policy_that_stops_leaves_the_request_s_own_error(mock_client):
+    handler, calls = replies(httpx2.Response(503))
+    with pytest.raises(ApiError, match="HTTP 503") as raised:
+        mock_client(handler, retry=Recording()).request("GET", "/items/")
+    assert raised.value.status == 503
+    assert len(calls) == 1
+
+
+def test_a_policy_can_stop_with_its_own_message(mock_client):
+    class Refuse:
+        def wait(self, failure):
+            raise ApiError(f"gave up on {failure.url}", url=failure.url)
+
+    handler, _ = replies(httpx2.Response(503))
+    with pytest.raises(ApiError, match="gave up on http://api.test/api/items/"):
+        mock_client(handler, retry=Refuse()).request("GET", "/items/")
+
+
+def test_a_policy_can_retry_on_what_the_body_says(mock_client):
+    # The point of the interface: a rule Retry's settings can't express.
+    class WhileWarmingUp:
+        def wait(self, failure: Failure):
+            body = failure.response.json() if failure.response is not None else {}
+            return 0.0 if body.get("detail") == "warming up" else None
+
+    warming = httpx2.Response(404, json={"detail": "warming up"})
+    handler, calls = replies(warming, OK)
+    assert (
+        mock_client(handler, retry=WhileWarmingUp()).request("GET", "/x/").status_code
+        == 200
+    )
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("retry", "seen"), [(True, [True]), (None, [None]), (False, [])]
+)
+def test_the_call_s_retry_argument_reaches_the_policy_unless_it_is_false(
+    mock_client, retry, seen
+):
+    handler, _ = replies(httpx2.Response(503))
+    policy = Recording()
+    with pytest.raises(ApiError):
+        mock_client(handler, retry=policy).request("POST", "/items/", retry=retry)
+    assert [f.retry for f in policy.failures] == seen

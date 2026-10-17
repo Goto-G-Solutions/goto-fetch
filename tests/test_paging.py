@@ -10,7 +10,7 @@ import httpx2
 import pytest
 from support import offset_api, pages_at
 
-from api_explorer import ApiError, NextLink, Offset, paginate
+from api_explorer import ApiError, NextLink, Offset, Page, Progress, paginate, read_page
 
 BASE = "http://api.test/api/items/"
 
@@ -70,41 +70,67 @@ def test_records_stop_at_max_pages(mock_client):
     assert list(mock_client(handler).records("/items/", max_pages=1)) == [1]
 
 
-def test_records_read_results_and_next_by_path_or_take_a_bare_list(mock_client):
-    handler = pages_at(
-        {
-            "http://api.test/api/geo/": {
-                "features": [{"id": 1}],
-                "meta": {"next": None},
-            },
-            "http://api.test/api/plain/": [{"id": 2}],
-        }
-    )
-    client = mock_client(handler)
-    geo = client.records(
-        "/geo/", results_key="results|features", paging=NextLink("meta.next")
-    )
-    assert list(geo) == [{"id": 1}]
-    assert list(client.records("/plain/", results_key=None)) == [{"id": 2}]
-
-
-def test_records_treat_null_results_as_an_empty_page(mock_client):
-    handler = pages_at({BASE: {"results": None, "next": None}})
-    assert list(mock_client(handler).records("/items/")) == []
+@pytest.mark.parametrize(
+    ("page", "results_key", "count_key", "expected"),
+    [
+        ({"results": [1, 2], "count": 9}, "results", "count", Page([1, 2], 9)),
+        ({"data": {"rows": [1]}}, "results|data.rows", None, Page([1], None)),
+        ([1, 2], None, None, Page([1, 2], None)),
+        ({"results": None}, "results", None, Page([], None)),
+        ({"results": [], "count": "9"}, "results", "count", Page([], None)),
+        ({"results": [], "count": True}, "results", "count", Page([], None)),
+    ],
+    ids=[
+        "results-and-count",
+        "fallback-path",
+        "bare-list",
+        "null-results",
+        "count-as-text",
+        "count-as-bool",
+    ],
+)
+def test_read_page_finds_the_records_and_a_whole_number_count(
+    page, results_key, count_key, expected
+):
+    assert read_page(page, results_key, count_key) == expected
 
 
 @pytest.mark.parametrize(
     ("page", "message"),
     [
-        ({"data": [1], "next": None}, "No 'results' in the response"),
-        ({"results": {"a": 1}, "next": None}, "'results' holds a dict, not a list"),
-        ({"results": [], "next": 2}, "'next' holds a int, not a URL"),
+        ({"data": [1]}, "No 'results' in the response"),
+        ({"results": {"a": 1}}, "'results' holds a dict, not a list"),
     ],
-    ids=["missing-results", "results-not-a-list", "next-not-a-string"],
+    ids=["missing-results", "results-not-a-list"],
 )
-def test_records_refuse_a_page_of_the_wrong_shape(mock_client, page, message):
-    with pytest.raises(ApiError, match=re.escape(message)):
-        list(mock_client(pages_at({BASE: page})).records("/items/"))
+def test_read_page_refuses_a_page_of_the_wrong_shape(page, message):
+    with pytest.raises(ApiError, match=re.escape(message)) as raised:
+        read_page(page, url="http://h/items/")
+    assert raised.value.url == "http://h/items/"
+
+
+def test_records_read_pages_with_read_page_and_name_the_url(mock_client):
+    # Overlaps the read_page tests on purpose: this checks records() uses it
+    # and passes its URL, so a bad page names where it came from.
+    with pytest.raises(ApiError, match="No 'results'") as raised:
+        list(mock_client(pages_at({BASE: {"data": []}})).records("/items/"))
+    assert raised.value.url == BASE
+
+
+def test_records_follow_a_next_link_at_any_path(mock_client):
+    handler = pages_at(
+        {"http://api.test/api/geo/": {"results": [1], "meta": {"next": None}}}
+    )
+    assert list(
+        mock_client(handler).records("/geo/", paging=NextLink("meta.next"))
+    ) == [1]
+
+
+def test_records_refuse_a_next_link_that_is_not_a_string(mock_client):
+    with pytest.raises(ApiError, match="'next' holds a int, not a URL"):
+        list(
+            mock_client(pages_at({BASE: {"results": [], "next": 2}})).records("/items/")
+        )
 
 
 def test_records_log_one_progress_line_per_page(mock_client, log_info):
@@ -117,6 +143,15 @@ def test_records_log_one_progress_line_per_page(mock_client, log_info):
     list(mock_client(handler).records("/items/", count_key="count"))
     progress = [m for m in log_info.messages if m.startswith("Page ")]
     assert len(progress) == 2
+    # The same numbers come as data too, for progress bars and the like.
+    numbers = [r.progress for r in log_info.records if hasattr(r, "progress")]
+    assert all(isinstance(p, Progress) for p in numbers)
+    assert [
+        (p.page, p.records_on_page, p.records_so_far, p.total) for p in numbers
+    ] == [
+        (1, 2, 2, 3),
+        (2, 1, 3, 3),
+    ]
     assert re.fullmatch(r"Page 1: 2 records in \d+\.\d\ds, 2 so far of 3", progress[0])
     assert re.fullmatch(r"Page 2: 1 records in \d+\.\d\ds, 3 so far of 3", progress[1])
 

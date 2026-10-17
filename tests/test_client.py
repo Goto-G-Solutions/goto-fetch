@@ -4,7 +4,7 @@ import httpx2
 import pytest
 from support import replies
 
-from api_explorer import ApiError
+from api_explorer import ApiError, Client
 
 OK = httpx2.Response(200, json={"ok": True})
 
@@ -62,3 +62,46 @@ def test_timeout_can_set_connect_and_read_limits_apart(mock_client):
     client = mock_client(handler, timeout=httpx2.Timeout(60.0, connect=5.0))
     client.request("GET", "/items/")
     assert (seen["connect"], seen["read"]) == (5.0, 60.0)
+
+
+def test_a_client_you_bring_supplies_the_base_url_and_headers():
+    seen = []
+
+    def handler(request):
+        seen.append((str(request.url), request.headers.get("X-Team")))
+        return OK
+
+    http = httpx2.Client(
+        base_url="http://own.test/api",
+        headers={"X-Team": "data"},
+        transport=httpx2.MockTransport(handler),
+    )
+    Client(http=http).request("GET", "/items/")
+    assert seen == [("http://own.test/api/items/", "data")]
+
+
+@pytest.mark.parametrize(
+    "setting",
+    [
+        {"base_url": "http://h"},
+        {"headers": {"a": "b"}},
+        {"timeout": 5.0},
+        {"transport": httpx2.MockTransport(lambda r: OK)},
+    ],
+    ids=["base_url", "headers", "timeout", "transport"],
+)
+def test_a_setting_given_twice_is_refused(setting):
+    # One place for each setting: here, or on the httpx2.Client, not both.
+    with pytest.raises(
+        ValueError, match=f"Set {next(iter(setting))} on the httpx2.Client"
+    ):
+        Client(http=httpx2.Client(), **setting)
+
+
+def test_closing_leaves_a_client_you_bring_open_and_closes_its_own():
+    yours = httpx2.Client()
+    Client(http=yours).close()
+    assert not yours.is_closed
+    own = Client("http://h")
+    own.close()
+    assert own._http.is_closed

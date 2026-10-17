@@ -22,23 +22,26 @@ from .decode import Decoder, json_decoder
 from .errors import ApiError
 from .frames import default_backend, latest_per_key, to_frame
 from .models import as_dict, converter
-from .paging import NextLink, Offset, Page, Paging, paginate
+from .paging import NextLink, Offset, Page, Paging, Progress, paginate, read_page
 from .paths import get_path, parse_path
 from .plan import FetchPlan, package_requirement
 from .records import explode, flatten, parse_datetime, select
-from .retry import Retry, backoff_delay, retry_after_seconds
+from .retry import Failure, Retry, RetryPolicy, backoff_delay, retry_after_seconds
 
 __all__ = [
     "ApiError",
     "Client",
     "Decoder",
+    "Failure",
     "FetchPlan",
     "NextLink",
     "Offset",
     "Page",
     "Paging",
     "PasswordLogin",
+    "Progress",
     "Retry",
+    "RetryPolicy",
     "TokenRefresh",
     "as_dict",
     "backoff_delay",
@@ -54,6 +57,7 @@ __all__ = [
     "paginate",
     "parse_datetime",
     "parse_path",
+    "read_page",
     "retry_after_seconds",
     "select",
     "to_frame",

@@ -9,6 +9,7 @@ from support import auth_server, paths_called
 
 from api_explorer import (
     ApiError,
+    Client,
     PasswordLogin,
     TokenRefresh,
     jwt_expiry,
@@ -192,3 +193,15 @@ def test_secrets_stay_out_of_repr():
     for text in (repr(login), repr(auth)):
         assert "hunter2" not in text
         assert "r-secret" not in text
+
+
+def test_auth_on_a_client_you_bring_still_resolves_urls_like_endpoints():
+    handler, state = auth_server()
+    auth = TokenRefresh("token/refresh", refresh="r0")
+    http = httpx2.Client(
+        base_url="http://api.test/api",
+        auth=auth,
+        transport=httpx2.MockTransport(handler),
+    )
+    assert list(Client(http=http).records("/items/")) == [{"id": 1}]
+    assert paths_called(state) == ["/api/token/refresh/", "/api/items/"]

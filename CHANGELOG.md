@@ -11,6 +11,7 @@ The first release.
 - Authentication: fixed token headers (`token_headers`), and access tokens that renew themselves (`TokenRefresh`, with an optional `PasswordLogin`).
 - Records: `get_path`, `select`, `flatten` and `explode` reshape nested JSON without a dataframe library.
 - Dataframes: `to_frame` in polars, pandas or pyarrow through narwhals, evening out mixed types at every depth, and `latest_per_key`.
-- Extension points: `json_decoder` (msgspec when installed), typed records with `records(model=...)`, `default_backend`, and `Retry`.
+- Extension points: `json_decoder` (msgspec when installed), typed records with `records(model=...)`, `default_backend`, retry policies (`RetryPolicy`, with `Retry` built in), and `Client(http=...)` for an httpx2 client of your own.
+- Building blocks for loops of your own: `paginate`, `read_page`, `converter`, and progress data on each page's log record (`Progress`).
 - `FetchPlan`: describe a fetch once, run it, or write it as a script.
 - Scraping (the `scrape` extra), and the explorer notebook (the `explorer` extra).

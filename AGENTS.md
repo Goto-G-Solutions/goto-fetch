@@ -248,7 +248,9 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 - The core needs only `httpx2` and `narwhals`.
 - Anything else is an optional extra (`scrape`, `explorer`).
 - An optional package is imported only in the module that needs it, never in `__init__.py`, so the core runs without it.
-- **Extension points.** Each piece another package can improve sits behind a small interface with a default that needs nothing extra: `decode` (JSON parsing), `model` (typed records), `backend` (the dataframe library), `Retry` (the retry policy), `Paging`, `httpx2.Auth` and `transport`.
+- **Extension points.** Each piece a user might replace sits behind a small interface, and the built-in version is one implementation of it: `decode` (JSON parsing), `model` (typed records), `backend` (the dataframe library), `RetryPolicy` (built in: `Retry`), `Paging` (built in: `NextLink`, `Offset`), `httpx2.Auth`, and `http` (an httpx2 client of the user's own).
+- **Built from public parts.** `Client.records` is composed of public pieces (`paginate`, a `Paging`, `read_page`, `converter`), so a user's own loop can reuse them. Keep it that way.
+- **One place for each setting.** When two ways to set the same thing meet, such as `Client(timeout=...)` and the timeout of a client passed as `http`, refuse the pair with a clear error instead of picking one.
 - An upgrade happens by itself only if it gives exactly the same results, such as msgspec for JSON. Anything that can change results is chosen by name, such as orjson, which turns integers beyond 64 bits into floats.
 
 **Commands.**
