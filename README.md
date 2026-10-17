@@ -101,3 +101,7 @@ uvx ruff check && uvx ruff format --check
 ```
 
 Changes start as an issue. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).

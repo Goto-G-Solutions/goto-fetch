@@ -3,6 +3,9 @@ name = "api-explorer"
 version = "0.1.0"
 description = "Pull data from paginated JSON APIs, and shape it for any dataframe library."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Dario Clarke" }]
 requires-python = ">=3.11"
 dependencies = [
     "httpx2>=2.13.1",
