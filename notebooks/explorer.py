@@ -103,7 +103,9 @@ def _():
     results_key = mo.ui.text(value="results", label="Results path")
     count_key = mo.ui.text(placeholder="count", label="Count path")
     paging = mo.ui.dropdown(
-        ["next link", "limit/offset"], value="next link", label="Paging"
+        ["next link", "limit/offset", "header link"],
+        value="next link",
+        label="Paging",
     )
     next_key = mo.ui.text(value="next", label="Next-page path")
     limit = mo.ui.number(start=1, value=100, step=1, label="Limit")
@@ -222,10 +224,21 @@ def _(
                 "exactly at the end."
             ),
         ]
+    elif paging.value == "header link":
+        _paging_rows = [
+            _row(paging),
+            _hint(
+                "Follows the next-page link in each response's `Link` "
+                "header, as GitHub's API gives."
+            ),
+        ]
     else:
         _paging_rows = [
             _row(paging, next_key),
-            _hint("Follows the next-page URL in each page, as Django REST Framework gives."),
+            _hint(
+                "Follows the next-page URL in each page, as Django REST "
+                "Framework gives."
+            ),
         ]
 
     mo.vstack(
@@ -313,7 +326,9 @@ def _(
         password=password.value,
         results_key=results_key.value or None,
         count_key=count_key.value or None,
-        paging="offset" if paging.value == "limit/offset" else "next",
+        paging={"limit/offset": "offset", "header link": "header"}.get(
+            paging.value, "next"
+        ),
         next_key=next_key.value or "next",
         limit=int(limit.value),
         max_pages=int(max_pages.value) or None,

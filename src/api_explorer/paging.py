@@ -1,9 +1,10 @@
 """Follow a paginated API from page to page: the loop, and the paging styles."""
 
+import json
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Hashable, Iterator
 from dataclasses import dataclass
-from typing import Any, NamedTuple, Protocol
+from typing import Any, NamedTuple, Protocol, TypeVar
 from urllib.parse import urljoin
 
 import httpx2
@@ -13,35 +14,61 @@ from .paths import MISSING, get_path
 
 logger = logging.getLogger(__name__)
 
+R = TypeVar("R")
+"""What paginate fetches by: a URL, a request body, a cursor."""
+P = TypeVar("P")
+"""What fetch returns for one page."""
+
+
+def request_key(request: Any) -> Hashable:
+    """Tell requests apart for paginate's loop check: by default, by value.
+
+    A string (a URL) is its own key. Anything else, such as a dict holding a
+    POST body or a cursor, is keyed by its JSON form, with keys sorted.
+    """
+    if isinstance(request, str):
+        return request
+    return json.dumps(request, sort_keys=True, default=repr)
+
 
 def paginate(
-    fetch: Callable[[str], Any],
-    first_url: str,
-    next_link: Callable[[Any, str], str | None],
+    fetch: Callable[[R], P],
+    first: R,
+    next_request: Callable[[P, R], R | None],
     *,
     max_pages: int | None = None,
-) -> Iterator[Any]:
+    key: Callable[[R], Hashable] = request_key,
+) -> Iterator[P]:
     """Yield pages one at a time, following each page to the next.
 
-    fetch(url) returns a page. next_link(page, url) returns the next page's
-    URL, or None at the end; it gets the current URL too, so a link can be
-    worked out from it as well as read from the page. A relative link
-    resolves against the current URL. Pages are fetched only as the caller
-    asks for them, and at most `max_pages` of them.
+    fetch(request) returns a page, and next_request(page, request) says
+    what to fetch next, or None at the end. A request is whatever your
+    fetch needs: usually a URL, but a POST body or a cursor works too. When
+    both are strings, a relative next URL resolves against the current one.
+    Pages are fetched only as the caller asks for them, and at most
+    `max_pages` of them.
 
-    Raises ApiError if a link leads back to a page already fetched, since
-    following it would loop forever.
+    Raises ApiError if the next request was already fetched, since following
+    it would loop forever. Requests are told apart by key(request); see
+    request_key for the default, and pass your own when only part of a
+    request identifies the page.
     """
-    seen: set[str] = set()
-    url: str | None = first_url
-    while url is not None and (max_pages is None or len(seen) < max_pages):
-        if url in seen:
-            raise ApiError(f"Pagination loops: {url} was already fetched", url=url)
-        seen.add(url)
-        page = fetch(url)
+    seen: set[Hashable] = set()
+    request: R | None = first
+    while request is not None and (max_pages is None or len(seen) < max_pages):
+        identity = key(request)
+        if identity in seen:
+            url = request if isinstance(request, str) else None
+            raise ApiError(
+                f"Pagination loops: {request!r} was already fetched", url=url
+            )
+        seen.add(identity)
+        page = fetch(request)
         yield page
-        link = next_link(page, url)
-        url = urljoin(url, link) if link else None
+        following = next_request(page, request)
+        if isinstance(following, str) and isinstance(request, str):
+            following = urljoin(request, following) if following else None
+        request = following or None
 
 
 class Page(NamedTuple):
@@ -103,17 +130,29 @@ class Progress(NamedTuple):
     seconds: float
 
 
+class Fetched(NamedTuple):
+    """One page as Client.records fetched it: the parsed body, and its response.
+
+    Paging styles get these, so they can read the next page from the body
+    (NextLink), the query (Offset) or the headers (HeaderLink).
+    """
+
+    body: Any
+    response: httpx2.Response
+
+
 class Paging(Protocol):
     """How a paginated JSON API says where the next page is.
 
     begin(first_url, read) starts one run. It returns the URL to fetch first
-    and a fresh next_link(page, url) for paginate. read(page) turns a raw
-    page into a Page.
+    and a fresh next_link(fetched, url) for paginate, which gets each page
+    as a Fetched and returns the next URL, or None at the end. read(fetched)
+    gives the page's records and count, as read_page does.
     """
 
     def begin(
-        self, first_url: str, read: Callable[[Any], Page]
-    ) -> tuple[str, Callable[[Any, str], str | None]]: ...
+        self, first_url: str, read: Callable[[Fetched], Page]
+    ) -> tuple[str, Callable[[Fetched, str], str | None]]: ...
 
 
 @dataclass(frozen=True)
@@ -127,12 +166,12 @@ class NextLink:
     key: str = "next"
 
     def begin(
-        self, first_url: str, read: Callable[[Any], Page]
-    ) -> tuple[str, Callable[[Any, str], str | None]]:
+        self, first_url: str, read: Callable[[Fetched], Page]
+    ) -> tuple[str, Callable[[Fetched, str], str | None]]:
         """Start a run; the first URL is used as given."""
 
-        def next_link(page: Any, url: str) -> str | None:
-            link = get_path(page, self.key)
+        def next_link(fetched: Fetched, url: str) -> str | None:
+            link = get_path(fetched.body, self.key)
             if link is not None and not isinstance(link, str):
                 kind = type(link).__name__
                 raise ApiError(f"{self.key!r} holds a {kind}, not a URL", url=url)
@@ -175,8 +214,8 @@ class Offset:
             raise ValueError(f"limit must be at least 1, got {self.limit}")
 
     def begin(
-        self, first_url: str, read: Callable[[Any], Page]
-    ) -> tuple[str, Callable[[Any, str], str | None]]:
+        self, first_url: str, read: Callable[[Fetched], Page]
+    ) -> tuple[str, Callable[[Fetched, str], str | None]]:
         """Start a run: set limit and offset on the first URL."""
         url = httpx2.URL(first_url)
         start = int(url.params.get(self.offset_param, 0))
@@ -186,9 +225,9 @@ class Offset:
         biggest = 0
         previous: list | None = None
 
-        def next_link(page: Any, page_url: str) -> str | None:
+        def next_link(fetched: Fetched, page_url: str) -> str | None:
             nonlocal received, biggest, previous
-            items, total = read(page)
+            items, total = read(fetched)
             if items and items == previous:
                 raise ApiError(
                     f"{page_url} returned the same records as the page "
@@ -214,3 +253,25 @@ class Offset:
             return str(httpx2.URL(page_url).copy_set_param(self.offset_param, reached))
 
         return str(first), next_link
+
+
+@dataclass(frozen=True)
+class HeaderLink:
+    """Follow the next-page link in each response's Link header.
+
+    This is GitHub's style, among others: the body holds only the records,
+    and the response carries `Link: <...?page=2>; rel="next"`. `rel` names
+    the link to follow.
+    """
+
+    rel: str = "next"
+
+    def begin(
+        self, first_url: str, read: Callable[[Fetched], Page]
+    ) -> tuple[str, Callable[[Fetched, str], str | None]]:
+        """Start a run; the first URL is used as given."""
+
+        def next_link(fetched: Fetched, url: str) -> str | None:
+            return fetched.response.links.get(self.rel, {}).get("url")
+
+        return first_url, next_link

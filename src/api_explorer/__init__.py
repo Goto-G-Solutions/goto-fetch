@@ -22,7 +22,18 @@ from .decode import Decoder, json_decoder
 from .errors import ApiError
 from .frames import default_backend, latest_per_key, to_frame
 from .models import as_dict, converter
-from .paging import NextLink, Offset, Page, Paging, Progress, paginate, read_page
+from .paging import (
+    Fetched,
+    HeaderLink,
+    NextLink,
+    Offset,
+    Page,
+    Paging,
+    Progress,
+    paginate,
+    read_page,
+    request_key,
+)
 from .paths import get_path, parse_path
 from .plan import FetchPlan, package_requirement
 from .records import explode, flatten, parse_datetime, select
@@ -34,6 +45,8 @@ __all__ = [
     "Decoder",
     "Failure",
     "FetchPlan",
+    "Fetched",
+    "HeaderLink",
     "NextLink",
     "Offset",
     "Page",
@@ -58,6 +71,7 @@ __all__ = [
     "parse_datetime",
     "parse_path",
     "read_page",
+    "request_key",
     "retry_after_seconds",
     "select",
     "to_frame",

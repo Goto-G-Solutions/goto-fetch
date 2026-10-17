@@ -11,7 +11,7 @@ import httpx2
 from .decode import Decoder, json_decoder
 from .errors import ApiError
 from .models import converter
-from .paging import NextLink, Page, Paging, Progress, paginate, read_page
+from .paging import Fetched, NextLink, Page, Paging, Progress, paginate, read_page
 from .retry import Failure, Retry, RetryPolicy
 
 logger = logging.getLogger(__name__)
@@ -172,12 +172,15 @@ class Client:
 
     def get_json(self, endpoint: str, **kwargs: Any) -> Any:
         """GET `endpoint` and return its parsed JSON body, or raise ApiError."""
-        response = self.request("GET", endpoint, **kwargs)
+        return self.json_body(self.request("GET", endpoint, **kwargs))
+
+    def json_body(self, response: httpx2.Response) -> Any:
+        """Parse a response's JSON body with this client's decoder, or raise ApiError."""
         try:
             return self.decode(response.content)
         except ValueError as exc:
             raise ApiError(
-                f"GET {response.url} did not return JSON: {exc}",
+                f"{response.request.method} {response.url} did not return JSON: {exc}",
                 url=str(response.url),
                 status=response.status_code,
             ) from exc
@@ -228,9 +231,9 @@ class Client:
         name = getattr(model, "__name__", repr(model))
         warned_no_count = False
 
-        def read(page: Any) -> Page:
+        def read(fetched: Fetched) -> Page:
             nonlocal warned_no_count
-            result = read_page(page, results_key, count_key, url=str(url))
+            result = read_page(fetched.body, results_key, count_key, url=str(url))
             if count_key is not None and result.total is None and not warned_no_count:
                 warned_no_count = True
                 logger.warning("No count at %r in the response", count_key)
@@ -238,19 +241,20 @@ class Client:
 
         seconds = 0.0
 
-        def fetch(page_url: str) -> Any:
+        def fetch(page_url: str) -> Fetched:
             nonlocal seconds
             started = time.monotonic()
-            page = self.get_json(page_url)
+            response = self.request("GET", page_url)
+            fetched = Fetched(self.json_body(response), response)
             seconds = time.monotonic() - started
-            return page
+            return fetched
 
         first, next_link = (paging or NextLink()).begin(str(url), read)
         received = 0
-        for number, page in enumerate(
+        for number, fetched in enumerate(
             paginate(fetch, first, next_link, max_pages=max_pages), start=1
         ):
-            items, total = read(page)
+            items, total = read(fetched)
             received += len(items)
             of_total = "" if total is None else f" of {total:,}"
             progress = Progress(number, len(items), received, total, seconds)

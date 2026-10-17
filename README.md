@@ -2,7 +2,7 @@
 
 Pull data from paginated JSON APIs, and shape it for whichever dataframe library you use.
 
-- **Paging:** follows next-page links, or steps `limit` and `offset` itself, and knows when it has reached the end.
+- **Paging:** follows next-page links in the body or the `Link` header, or steps `limit` and `offset` itself, and knows when it has reached the end.
 - **Reliability:** retries network errors, timeouts, 429 and 5xx responses, and renews short-lived access tokens.
 - **Output:** turns nested JSON into tidy rows, then into a polars, pandas or pyarrow frame.
 - **Explorer:** a marimo notebook to explore an unfamiliar API, then copy the fetch as a script.
@@ -62,9 +62,25 @@ Each piece works with no extra packages, and uses better ones when you have them
 | Retries | 3 tries, idempotent methods, temporary errors | `Retry(attempts=5, statuses=..., methods=...)`, or your own policy: any object with `wait(failure)` |
 | HTTP | an httpx2 client made for you | `Client(http=httpx2.Client(...))` for proxies, HTTP/2, certificates or event hooks |
 | Progress | one log line per page | each line also carries the numbers (`record.progress`), for a progress bar |
-| Paging and auth | next links, limit/offset, tokens | your own `Paging` or `httpx2.Auth` |
+| Paging and auth | next links (body or `Link` header), limit/offset, tokens | your own `Paging` (it sees each page's body and response) or `httpx2.Auth` |
 
-`Client.records` is built from public parts, `paginate`, a `Paging`, `read_page` and `converter`, so a loop of your own can reuse the same rules.
+`Client.records` is built from public parts, `paginate`, a `Paging`, `read_page` and `converter`, so a loop of your own can reuse the same rules. `paginate` pages by whatever your fetch needs, not only URLs, so an API that pages with a cursor in a POST body works too:
+
+```python
+from api_explorer import paginate, read_page
+
+
+def fetch(body):
+    return client.json_body(client.request("POST", "/search/", json=body))
+
+
+def next_request(page, body):
+    return {**body, "cursor": page["cursor"]} if page.get("cursor") else None
+
+
+for page in paginate(fetch, {"query": "late orders"}, next_request):
+    rows, _ = read_page(page, "hits")
+```
 
 ```python
 from pydantic import BaseModel

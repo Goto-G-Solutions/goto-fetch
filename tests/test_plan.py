@@ -95,9 +95,17 @@ def test_scripts_and_repr_never_contain_secrets(auth):
         FetchPlan(
             "http://h/api", "/a/", results_key=None, next_key="links.next", max_pages=3
         ),
+        FetchPlan("http://h/api", "/a/", results_key=None, paging="header"),
         KEYED,
     ],
-    ids=["no-auth", "refresh-token", "login", "custom-next", "header-offset"],
+    ids=[
+        "no-auth",
+        "refresh-token",
+        "login",
+        "custom-next",
+        "header-link",
+        "header-offset",
+    ],
 )
 def test_every_kind_of_plan_writes_valid_python(plan):
     compile(plan.script(columns=["id"], backend="polars"), "fetch.py", "exec")

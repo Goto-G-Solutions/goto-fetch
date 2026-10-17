@@ -10,7 +10,17 @@ import httpx2
 import pytest
 from support import offset_api, pages_at
 
-from api_explorer import ApiError, NextLink, Offset, Page, Progress, paginate, read_page
+from api_explorer import (
+    ApiError,
+    HeaderLink,
+    NextLink,
+    Offset,
+    Page,
+    Progress,
+    paginate,
+    read_page,
+    request_key,
+)
 
 BASE = "http://api.test/api/items/"
 
@@ -33,6 +43,59 @@ def test_paginate_stops_with_an_error_on_a_loop():
     pages = paginate(lambda url: url, "http://h/a", lambda page, url: "http://h/a")
     with pytest.raises(ApiError, match="Pagination loops"):
         list(pages)
+
+
+def test_paginate_can_page_by_request_body_as_well_as_url():
+    # A POST search API: the same URL each time, the cursor in the body.
+    pages = {None: {"rows": [1], "cursor": "c2"}, "c2": {"rows": [2], "cursor": None}}
+
+    def fetch(body):
+        return pages[body.get("cursor")]
+
+    def next_request(page, body):
+        return {**body, "cursor": page["cursor"]} if page["cursor"] else None
+
+    rows = [
+        row
+        for page in paginate(fetch, {"q": "x"}, next_request)
+        for row in page["rows"]
+    ]
+    assert rows == [1, 2]
+
+
+def test_paginate_detects_a_loop_in_request_bodies():
+    with pytest.raises(ApiError, match="Pagination loops"):
+        list(paginate(lambda body: body, {"q": "x"}, lambda page, body: {"q": "x"}))
+
+
+def test_paginate_tells_pages_apart_by_the_key_you_give():
+    # Bodies differ in a field that doesn't identify the page; keyed by
+    # cursor, the repeat is caught.
+    pages = paginate(
+        lambda body: body,
+        {"cursor": "a", "sent": 1},
+        lambda page, body: {"cursor": "a", "sent": body["sent"] + 1},
+        key=lambda body: body["cursor"],
+    )
+    with pytest.raises(ApiError, match="Pagination loops"):
+        list(pages)
+
+
+def test_request_key_is_the_url_or_the_json_form_with_sorted_keys():
+    assert request_key("http://h/a") == "http://h/a"
+    assert request_key({"b": 1, "a": 2}) == request_key({"a": 2, "b": 1})
+
+
+def test_records_follow_a_link_header_with_header_link(mock_client):
+    def handler(request):
+        page = request.url.params.get("page", "1")
+        headers = {"Link": '<?page=2>; rel="next"'} if page == "1" else {}
+        return httpx2.Response(200, json=[int(page)], headers=headers)
+
+    records = mock_client(handler).records(
+        "/repos/", results_key=None, paging=HeaderLink()
+    )
+    assert list(records) == [1, 2]
 
 
 def test_records_follow_next_links_by_default(mock_client):

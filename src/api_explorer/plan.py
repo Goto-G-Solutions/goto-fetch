@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from .auth import PasswordLogin, TokenRefresh, token_headers
 from .client import Client
-from .paging import NextLink, Offset, Paging
+from .paging import HeaderLink, NextLink, Offset, Paging
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,7 @@ class FetchPlan:
     password: str = field(default="", repr=False)
     results_key: str | None = "results"
     count_key: str | None = None
-    paging: Literal["next", "offset"] = "next"
+    paging: Literal["next", "offset", "header"] = "next"
     next_key: str = "next"
     limit: int = 100
     max_pages: int | None = None
@@ -74,6 +74,8 @@ class FetchPlan:
         """The Paging this plan asks for."""
         if self.paging == "offset":
             return Offset(limit=self.limit)
+        if self.paging == "header":
+            return HeaderLink()
         return NextLink(self.next_key)
 
     def records(self, client: Client) -> Iterator[Any]:
@@ -133,6 +135,8 @@ class FetchPlan:
             record_args.append(f"count_key={self.count_key!r}")
         if self.paging == "offset":
             record_args.append(f"paging=Offset(limit={self.limit!r})")
+        elif self.paging == "header":
+            record_args.append("paging=HeaderLink()")
         elif self.next_key != "next":
             record_args.append(f"paging=NextLink({self.next_key!r})")
         if self.max_pages:

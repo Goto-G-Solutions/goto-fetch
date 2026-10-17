@@ -7,11 +7,11 @@ Each release lists what changed for people using the package. The format follows
 The first release.
 
 - `Client`: one API's base URL, headers, timeouts, retries and authentication, with JSON and paginated records.
-- Paging: next links (`NextLink`) or limit and offset (`Offset`), with an optional count, and progress logged per page.
+- Paging: next links in the body (`NextLink`) or the `Link` header (`HeaderLink`), or limit and offset (`Offset`), with an optional count, and progress logged per page. Paging styles see each page's body and response (`Fetched`).
 - Authentication: fixed token headers (`token_headers`), and access tokens that renew themselves (`TokenRefresh`, with an optional `PasswordLogin`).
 - Records: `get_path`, `select`, `flatten` and `explode` reshape nested JSON without a dataframe library.
 - Dataframes: `to_frame` in polars, pandas or pyarrow through narwhals, evening out mixed types at every depth, and `latest_per_key`.
 - Extension points: `json_decoder` (msgspec when installed), typed records with `records(model=...)`, `default_backend`, retry policies (`RetryPolicy`, with `Retry` built in), and `Client(http=...)` for an httpx2 client of your own.
-- Building blocks for loops of your own: `paginate`, `read_page`, `converter`, and progress data on each page's log record (`Progress`).
+- Building blocks for loops of your own: `paginate` (which pages by any request, such as a POST body, with loop protection by `request_key` or your own key), `read_page`, `Client.json_body`, `converter`, and progress data on each page's log record (`Progress`).
 - `FetchPlan`: describe a fetch once, run it, or write it as a script.
 - Scraping (the `scrape` extra), and the explorer notebook (the `explorer` extra).
