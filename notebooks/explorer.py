@@ -22,6 +22,7 @@ with app.setup:
     import os
     import sys
     import time
+    from typing import Any
 
     import marimo as mo
 
@@ -156,7 +157,6 @@ def _():
 
 @app.cell(hide_code=True)
 def _(
-    Any,
     access_token,
     auth_kind,
     base_url,

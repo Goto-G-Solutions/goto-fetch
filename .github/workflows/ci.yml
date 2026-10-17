@@ -10,12 +10,17 @@ permissions:
 
 jobs:
   test:
-    name: Tests, with everything the tests use
+    name: Tests on Python ${{ matrix.python }}, with everything the tests use
+    # The oldest and newest Python supported: behaviour can differ between
+    # them (3.14 delays evaluating annotations, 3.11 doesn't).
+    strategy:
+      matrix:
+        python: ["3.11", "3.14"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv run pytest
+      - run: uv run --python ${{ matrix.python }} pytest
 
   core:
     name: Tests, with only the core dependencies
@@ -44,3 +49,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: uv run pyright
+
+  notebook:
+    name: Explorer notebook runs on Python 3.11
+    # marimo check reads the notebook; this runs every cell, on the oldest
+    # Python supported, and fails if any cell does.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: >-
+          uv run --python 3.11 --with marimo --with-editable .
+          marimo export html notebooks/explorer.py -o explorer.html
