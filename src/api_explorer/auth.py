@@ -3,6 +3,7 @@
 import base64
 import binascii
 import json
+import logging
 import time
 from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
@@ -11,7 +12,28 @@ from urllib.parse import urljoin
 import httpx2
 
 from .errors import ApiError
+from .logs import log_event
 from .paths import get_path
+
+logger = logging.getLogger(__name__)
+
+
+def _renewing(how: str, why: str) -> None:
+    """Log, at DEBUG, that an access token is being renewed, how and why."""
+    action = (
+        "Refreshing the access token"
+        if how == "refresh"
+        else "Logging in for new tokens"
+    )
+    log_event(
+        logger,
+        logging.DEBUG,
+        "renew",
+        "%s: %s",
+        action,
+        why,
+        data={"how": how, "why": why},
+    )
 
 
 def token_headers(
@@ -142,11 +164,12 @@ class TokenRefresh(httpx2.Auth):
     ) -> Generator[httpx2.Request, httpx2.Response, None]:
         """Sign `request`, renewing the access token before or after as needed."""
         if self._access is None or self._expiring():
-            yield from self._renew(str(request.url))
+            why = "no access token yet" if self._access is None else "it expires soon"
+            yield from self._renew(str(request.url), why)
         request.headers[self.header] = f"{self.scheme} {self._access}"
         response = yield request
         if response.status_code == 401:
-            yield from self._renew(str(request.url))
+            yield from self._renew(str(request.url), "the server answered 401")
             request.headers[self.header] = f"{self.scheme} {self._access}"
             yield request
 
@@ -154,11 +177,14 @@ class TokenRefresh(httpx2.Auth):
         expiry = jwt_expiry(self._access or "")
         return expiry is not None and self.now() >= expiry - self.leeway
 
-    def _renew(self, against: str) -> Generator[httpx2.Request, httpx2.Response, None]:
+    def _renew(
+        self, against: str, why: str
+    ) -> Generator[httpx2.Request, httpx2.Response, None]:
         failure = "there is no refresh token"
         if self._refresh is not None:
             body = {self.refresh_field: self._refresh}
             url = self._url(self.refresh_url, against)
+            _renewing("refresh", why)
             response = yield httpx2.Request("POST", url, json=body)
             if response.is_success:
                 self._take(response)
@@ -171,6 +197,7 @@ class TokenRefresh(httpx2.Auth):
                 url=against,
             )
         url = self._url(self.login.token_url, against)
+        _renewing("login", why if self._refresh is None else failure)
         response = yield self.login.build_request(url)
         if not response.is_success:
             raise ApiError(

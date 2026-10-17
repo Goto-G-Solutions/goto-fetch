@@ -21,7 +21,6 @@ with app.setup:
     import json
     import logging
     import os
-    import sys
     import time
     from typing import Any
 
@@ -29,6 +28,7 @@ with app.setup:
 
     from api_explorer import (
         FetchPlan,
+        logging_to,
         package_requirement,
         select,
     )
@@ -402,40 +402,26 @@ def _(
         max_pages=int(max_pages.value) or None,
     )
 
-    # The library only logs. Here the page lines drive the spinner, and the
-    # rest go to this cell's console: warnings always, everything with
-    # Verbose (including httpx2's line per request).
-    _package_log = logging.getLogger("api_explorer")
-    _echo = logging.StreamHandler(sys.stderr)
-    _echo.setLevel(logging.INFO if verbose.value else logging.WARNING)
-    _echo.setFormatter(
-        logging.Formatter("%(asctime)s %(name)s: %(message)s", "%H:%M:%S")
-    )
-    _watched = [_package_log] + ([logging.getLogger("httpx2")] if verbose.value else [])
-    _levels = {_log: _log.level for _log in _watched}
+    # The package logs nothing until asked. Here its "page" events drive the
+    # spinner, and its lines go to this cell's console: warnings always, and
+    # with Verbose every decision (DEBUG) plus httpx2's line per request.
+    class _Spinner(logging.Handler):
+        def __init__(self, spinner: Any) -> None:
+            super().__init__(logging.INFO)
+            self.spinner = spinner
+
+        def emit(self, record: logging.LogRecord) -> None:
+            if getattr(record, "event", None) == "page":
+                self.spinner.update(subtitle=record.getMessage())
+
     _started = time.monotonic()
-    with mo.status.spinner(
-        title="Fetching", subtitle=f"GET {endpoint.value}"
-    ) as _spinner:
-
-        def _show_progress(record: logging.LogRecord) -> None:
-            if getattr(record, "progress", False):
-                _spinner.update(subtitle=record.getMessage())
-
-        _progress = logging.Handler(logging.INFO)
-        _progress.emit = _show_progress
-        _package_log.addHandler(_progress)
-        for _log in _watched:
-            _log.setLevel(logging.INFO)
-            _log.addHandler(_echo)
-        try:
-            with plan.client() as _client:
-                fetched = list(plan.records(_client))
-        finally:
-            _package_log.removeHandler(_progress)
-            for _log in _watched:
-                _log.removeHandler(_echo)
-                _log.setLevel(_levels[_log])
+    with (
+        mo.status.spinner(title="Fetching", subtitle=f"GET {endpoint.value}") as _spin,
+        logging_to(_Spinner(_spin), "INFO"),
+        logging_to(level="DEBUG" if verbose.value else "WARNING", http=verbose.value),
+        plan.client() as _client,
+    ):
+        fetched = list(plan.records(_client))
     fetch_seconds = time.monotonic() - _started
     return fetch_seconds, fetched, plan
 

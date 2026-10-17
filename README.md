@@ -61,7 +61,7 @@ Each piece works with no extra packages, and uses better ones when you have them
 | Dataframes | named by you | `to_frame(records)` uses the library you've already imported, else the first one installed |
 | Retries | 3 tries, idempotent methods, temporary errors | `Retry(attempts=5, statuses=..., methods=...)`, or your own policy: any object with `wait(failure)` |
 | HTTP | an httpx2 client made for you | `Client(http=httpx2.Client(...))` for proxies, HTTP/2, certificates or event hooks |
-| Progress | one log line per page | each line also carries the numbers (`record.progress`), for a progress bar |
+| Logging | silent | `enable_logging()`; every line is an event with data (`record.event`, `record.data`) |
 | Paging and auth | next links (body or `Link` header), cursors, limit/offset, GET or POST; tokens | your own `Paging` (it sees each page's body and response) or `httpx2.Auth` |
 
 A search API that pages with POST, with the query and the cursor in the body:
@@ -115,6 +115,24 @@ with Client("https://host/api", retry=Retry(attempts=5)) as client:
 # In whichever dataframe library this session already uses.
 df = to_frame(items)
 ```
+
+## Logging
+
+The package prints nothing until you switch logging on:
+
+```python
+from api_explorer import enable_logging, logging_to
+
+enable_logging()  # INFO and up on stderr: a line per page, and retries
+enable_logging("DEBUG", http=True)  # every decision, and each request
+
+with logging_to(my_handler, "INFO"):  # for a while, to a handler of yours
+    ...
+```
+
+Each line the package logs is an event: `record.event` is a short name (`page`, `done`, `retry`, `stop`, `renew`, and so on) and `record.data` holds its numbers, so a progress bar or a log shipper can act on events without reading text. The full list is in the `api_explorer.logs` docstring.
+
+`Client(name="crm")` labels every line from that client's requests, `[crm]` in the readable format and `record.client` for handlers. That includes lines your own pieces log during a request: log under your own logger, add it with `enable_logging(loggers=("mypkg",))`, and use `log_event` for the same `event` and `data` fields.
 
 ## Testing your code
 

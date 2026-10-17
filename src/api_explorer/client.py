@@ -11,6 +11,7 @@ import httpx2
 
 from .decode import Decoder, json_decoder
 from .errors import ApiError
+from .logs import client_context, log_event
 from .models import converter
 from .paging import (
     Fetched,
@@ -18,7 +19,6 @@ from .paging import (
     Page,
     PageRequest,
     Paging,
-    Progress,
     paginate,
     read_page,
 )
@@ -58,6 +58,10 @@ class Client:
     refused: each setting has one place. A client you bring stays open
     when this one closes; it is yours to close.
 
+    `name` labels this client's log lines (record.client), including those
+    from pieces you build that log during its requests: useful when one
+    pipeline talks to several APIs. See enable_logging.
+
     Use it in a `with` block, or call close() when done.
     """
 
@@ -73,10 +77,12 @@ class Client:
         auth: httpx2.Auth | None = None,
         transport: httpx2.BaseTransport | None = None,
         http: httpx2.Client | None = None,
+        name: str | None = None,
     ) -> None:
         self.retry: RetryPolicy = retry or Retry()
         self.decode = decode or json_decoder()
         self.trailing_slash = trailing_slash
+        self.name = name
         if http is None:
             self._http = httpx2.Client(
                 base_url=base_url,
@@ -146,6 +152,12 @@ class Client:
         whatever the method. Other keyword arguments go to httpx2: params=,
         json=, data=, headers= and so on.
         """
+        with client_context(self.name):
+            return self._send(method, endpoint, retry, kwargs)
+
+    def _send(
+        self, method: str, endpoint: str, retry: bool | None, kwargs: dict[str, Any]
+    ) -> httpx2.Response:
         method = method.upper()
         url = self.url(endpoint)
         attempt = 0
@@ -175,9 +187,35 @@ class Client:
             wait = self.retry.wait(
                 Failure(attempt, method, url, response, error, retry)
             )
+            status = None if response is None else response.status_code
+            details = {
+                "method": method,
+                "url": url,
+                "attempt": attempt,
+                "status": status,
+            }
             if wait is None:
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    "give-up",
+                    "The retry policy gave up after try %d of %s %s",
+                    attempt,
+                    method,
+                    url,
+                    data=details,
+                )
                 raise failure
-            logger.warning("%s; retry %d in %.1fs", failure, attempt, wait)
+            log_event(
+                logger,
+                logging.WARNING,
+                "retry",
+                "%s; retry %d in %.1fs",
+                failure,
+                attempt,
+                wait,
+                data={**details, "wait": wait},
+            )
             time.sleep(wait)
 
     def get_json(self, endpoint: str, **kwargs: Any) -> Any:
@@ -230,11 +268,11 @@ class Client:
         `model` turns each record into a typed object (see converter): a
         pydantic model, msgspec Struct, dataclass or function.
 
-        Each page logs one INFO line on the "api_explorer.client" logger,
-        such as "Page 44: 100 records in 0.62s, 4,400 so far of 61,203", so
-        a long run can be watched (the explorer notebook shows them). The
-        record also carries the numbers as record.progress, a Progress, for
-        a progress bar or other display. Retries log as warnings.
+        Each page logs a "page" event at INFO, such as "Page 44: 100 records
+        in 0.62s, 4,400 so far of 61,203", and the end a "done" event, so a
+        long run can be watched; record.data carries the numbers. Retries log
+        as warnings. Nothing shows until logging is switched on (see
+        enable_logging), and every line is stamped with this client's name.
 
         records() is built from public parts, so a loop of your own can
         reuse them: paginate() follows the pages, a Paging finds the next
@@ -243,9 +281,9 @@ class Client:
 
         Raises ApiError when a request fails, when the results path is
         missing or isn't a list, when a record doesn't fit `model`, or when
-        paging finds something wrong. A
-        missing results path is an error, not an empty page, so a mistyped
-        key can't pass for "no data". An explicit null is an empty page.
+        paging finds something wrong. A missing results path is an error,
+        not an empty page, so a mistyped key can't pass for "no data". An
+        explicit null is an empty page.
         """
         url = httpx2.URL(self.url(endpoint)).copy_merge_params(params or {})
         convert = None if model is None else converter(model)
@@ -259,7 +297,14 @@ class Client:
             )
             if count_key is not None and result.total is None and not warned_no_count:
                 warned_no_count = True
-                logger.warning("No count at %r in the response", count_key)
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "no-count",
+                    "No count at %r in the response",
+                    count_key,
+                    data={"count_key": count_key},
+                )
             return result
 
         seconds = 0.0
@@ -279,7 +324,8 @@ class Client:
 
         def next_request(fetched: Fetched, request: PageRequest) -> PageRequest | None:
             # A URL from the style keeps the method and body (see Paging).
-            following = next_link(fetched, request)
+            with client_context(self.name):
+                following = next_link(fetched, request)
             if isinstance(following, str):
                 if not following:
                     return None
@@ -287,22 +333,34 @@ class Client:
             return following
 
         received = 0
+        pages = 0
+        started = time.monotonic()
         for number, fetched in enumerate(
             paginate(fetch, first, next_request, max_pages=max_pages), start=1
         ):
-            items, total = read(fetched)
-            received += len(items)
-            of_total = "" if total is None else f" of {total:,}"
-            progress = Progress(number, len(items), received, total, seconds)
-            logger.info(
-                "Page %d: %d records in %.2fs, %s so far%s",
-                number,
-                len(items),
-                seconds,
-                f"{received:,}",
-                of_total,
-                extra={"progress": progress},
-            )
+            pages = number
+            with client_context(self.name):
+                items, total = read(fetched)
+                received += len(items)
+                of_total = "" if total is None else f" of {total:,}"
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "page",
+                    "Page %d: %d records in %.2fs, %s so far%s",
+                    number,
+                    len(items),
+                    seconds,
+                    f"{received:,}",
+                    of_total,
+                    data={
+                        "page": number,
+                        "records_on_page": len(items),
+                        "records_so_far": received,
+                        "total": total,
+                        "seconds": seconds,
+                    },
+                )
             if convert is None:
                 yield from items
                 continue
@@ -313,3 +371,24 @@ class Client:
                     raise ApiError(
                         f"Record {index} doesn't fit {name}: {exc}", url=str(url)
                     ) from exc
+        with client_context(self.name):
+            if max_pages is not None and pages >= max_pages:
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    "stop",
+                    "Stopped at max_pages=%d",
+                    max_pages,
+                    data={"reason": "max_pages"},
+                )
+            elapsed = time.monotonic() - started
+            log_event(
+                logger,
+                logging.INFO,
+                "done",
+                "Done: %s records in %d pages, %.1fs",
+                f"{received:,}",
+                pages,
+                elapsed,
+                data={"pages": pages, "records": received, "seconds": elapsed},
+            )

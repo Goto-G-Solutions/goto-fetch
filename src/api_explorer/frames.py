@@ -10,6 +10,7 @@ from typing import Any, Literal, cast
 
 import narwhals.stable.v2 as nw
 
+from .logs import log_event
 from .models import as_dict
 
 logger = logging.getLogger(__name__)
@@ -104,7 +105,15 @@ def to_frame(records: Sequence[Any], backend: str | ModuleType | None = None) ->
             names = ", ".join(
                 sorted("number" if t is float else t.__name__ for t in found)
             )
-            logger.warning("Column %r mixes %s; storing it as text", where, names)
+            log_event(
+                logger,
+                logging.WARNING,
+                "text",
+                "Column %r mixes %s; storing it as text",
+                where,
+                names,
+                data={"column": where, "reason": f"mixes {names}"},
+            )
             return [as_text(v) for v in values]
         if found == {float}:
             return even_out_numbers(where, values)
@@ -114,9 +123,13 @@ def to_frame(records: Sequence[Any], backend: str | ModuleType | None = None) ->
         ints = [v for v in values if isinstance(v, int)]
         if any(v not in INT64 for v in ints):
             # pyarrow can't hold these at all; text keeps every digit.
-            logger.warning(
+            log_event(
+                logger,
+                logging.WARNING,
+                "text",
                 "Column %r holds integers too large for 64 bits; storing it as text",
                 where,
+                data={"column": where, "reason": "integers too large for 64 bits"},
             )
             return [as_text(v) for v in values]
         if ints and len(ints) < sum(v is not None for v in values):

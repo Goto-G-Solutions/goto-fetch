@@ -15,6 +15,8 @@ pandas or pyarrow hold the frames.
 
 HTML scraping lives in api_explorer.scrape and needs the "scrape" extra.
 Fake APIs for testing your own code live in api_explorer.testing.
+
+The package logs nothing until asked: enable_logging() switches it on.
 """
 
 from .auth import PasswordLogin, TokenRefresh, jwt_expiry, token_headers
@@ -22,6 +24,7 @@ from .client import Client
 from .decode import Decoder, json_decoder
 from .errors import ApiError
 from .frames import default_backend, latest_per_key, to_frame
+from .logs import ClientFilter, disable_logging, enable_logging, log_event, logging_to
 from .models import as_dict, converter
 from .paging import (
     Cursor,
@@ -32,7 +35,6 @@ from .paging import (
     Page,
     PageRequest,
     Paging,
-    Progress,
     paginate,
     read_page,
     request_key,
@@ -45,6 +47,7 @@ from .retry import Failure, Retry, RetryPolicy, backoff_delay, retry_after_secon
 __all__ = [
     "ApiError",
     "Client",
+    "ClientFilter",
     "Cursor",
     "Decoder",
     "Failure",
@@ -57,7 +60,6 @@ __all__ = [
     "PageRequest",
     "Paging",
     "PasswordLogin",
-    "Progress",
     "Retry",
     "RetryPolicy",
     "TokenRefresh",
@@ -65,12 +67,16 @@ __all__ = [
     "backoff_delay",
     "converter",
     "default_backend",
+    "disable_logging",
+    "enable_logging",
     "explode",
     "flatten",
     "get_path",
     "json_decoder",
     "jwt_expiry",
     "latest_per_key",
+    "log_event",
+    "logging_to",
     "package_requirement",
     "paginate",
     "parse_datetime",

@@ -11,9 +11,18 @@ from urllib.parse import urljoin
 import httpx2
 
 from .errors import ApiError
+from .logs import log_event
 from .paths import MISSING, get_path
 
 logger = logging.getLogger(__name__)
+
+
+def _stopped(why: str, reason: str) -> None:
+    """Log, at DEBUG, why a paging style ended a run."""
+    log_event(
+        logger, logging.DEBUG, "stop", "Stopped: %s", why, data={"reason": reason}
+    )
+
 
 R = TypeVar("R")
 """What paginate fetches by: a URL, a request body, a cursor."""
@@ -120,20 +129,6 @@ def read_page(
     return Page(items, total)
 
 
-class Progress(NamedTuple):
-    """How far a records() run has got, after each page.
-
-    Carried by each progress log record as record.progress, for displays
-    that want numbers rather than text.
-    """
-
-    page: int
-    records_on_page: int
-    records_so_far: int
-    total: int | None
-    seconds: float
-
-
 @dataclass(frozen=True)
 class PageRequest:
     """The request for one page: its URL, method, and JSON body if any.
@@ -205,6 +200,8 @@ class NextLink:
                 raise ApiError(
                     f"{self.key!r} holds a {kind}, not a URL", url=request.url
                 )
+            if not link:
+                _stopped("the page has no next link", "no next link")
             return link
 
         return first, next_link
@@ -269,15 +266,24 @@ class Offset:
             reached = start + received
             if total is not None:
                 if reached >= total:
+                    _stopped("the records reached the count", "count reached")
                     return None
                 if not items:
-                    logger.warning(
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        "count-short",
                         "Records ran out at %d of the %d the count promised",
                         reached,
                         total,
+                        data={"records": reached, "count": total},
                     )
                     return None
-            elif not items or len(items) < biggest:
+            elif not items:
+                _stopped("a page came back empty", "empty page")
+                return None
+            elif len(items) < biggest:
+                _stopped("a page was shorter than the biggest before it", "short page")
                 return None
             biggest = max(biggest, len(items))
             return str(
@@ -304,7 +310,10 @@ class HeaderLink:
         """Start a run; the first request is used as given."""
 
         def next_link(fetched: Fetched, request: PageRequest) -> str | None:
-            return fetched.response.links.get(self.rel, {}).get("url")
+            link = fetched.response.links.get(self.rel, {}).get("url")
+            if not link:
+                _stopped("the response has no next link", "no next link")
+            return link
 
         return first, next_link
 
@@ -335,6 +344,7 @@ class Cursor:
         def next_link(fetched: Fetched, request: PageRequest) -> PageRequest | None:
             cursor = get_path(fetched.body, self.key)
             if cursor is None or cursor == "":
+                _stopped("the page has no cursor", "no cursor")
                 return None
             if self.send_in == "query":
                 url = httpx2.URL(request.url).copy_set_param(self.param, cursor)

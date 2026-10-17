@@ -18,7 +18,6 @@ from api_explorer import (
     Offset,
     Page,
     PageRequest,
-    Progress,
     paginate,
     read_page,
     request_key,
@@ -313,7 +312,7 @@ def test_records_refuse_a_next_link_that_is_not_a_string(mock_client):
         )
 
 
-def test_records_log_one_progress_line_per_page(mock_client, log_info):
+def test_records_log_a_page_event_per_page_and_a_done_event(mock_client, log_info):
     handler = json_pages(
         {
             BASE: {"count": 3, "results": [1, 2], "next": "?page=2"},
@@ -321,28 +320,31 @@ def test_records_log_one_progress_line_per_page(mock_client, log_info):
         }
     )
     list(mock_client(handler).records("/items/", count_key="count"))
-    progress = [m for m in log_info.messages if m.startswith("Page ")]
-    assert len(progress) == 2
-    # The same numbers come as data too, for progress bars and the like.
-    numbers = [r.progress for r in log_info.records if hasattr(r, "progress")]
-    assert all(isinstance(p, Progress) for p in numbers)
+    pages = [r for r in log_info.records if getattr(r, "event", None) == "page"]
+    assert re.fullmatch(
+        r"Page 1: 2 records in \d+\.\d\ds, 2 so far of 3", pages[0].getMessage()
+    )
+    assert re.fullmatch(
+        r"Page 2: 1 records in \d+\.\d\ds, 3 so far of 3", pages[1].getMessage()
+    )
+    # The same numbers come as data, for progress bars and the like.
     assert [
-        (p.page, p.records_on_page, p.records_so_far, p.total) for p in numbers
+        {k: r.data[k] for k in ("page", "records_on_page", "records_so_far", "total")}
+        for r in pages
     ] == [
-        (1, 2, 2, 3),
-        (2, 1, 3, 3),
+        {"page": 1, "records_on_page": 2, "records_so_far": 2, "total": 3},
+        {"page": 2, "records_on_page": 1, "records_so_far": 3, "total": 3},
     ]
-    assert re.fullmatch(r"Page 1: 2 records in \d+\.\d\ds, 2 so far of 3", progress[0])
-    assert re.fullmatch(r"Page 2: 1 records in \d+\.\d\ds, 3 so far of 3", progress[1])
+    done = [r for r in log_info.records if getattr(r, "event", None) == "done"]
+    assert [(r.data["pages"], r.data["records"]) for r in done] == [(2, 3)]
 
 
 def test_progress_leaves_out_the_total_without_a_count(mock_client, log_info):
-    list(
-        mock_client(json_pages({BASE: {"results": [1], "next": None}})).records(
-            "/items/"
-        )
-    )
-    assert log_info.messages[-1].endswith("1 so far")
+    handler = json_pages({BASE: {"results": [1], "next": None}})
+    list(mock_client(handler).records("/items/"))
+    pages = [r for r in log_info.records if getattr(r, "event", None) == "page"]
+    assert pages[0].getMessage().endswith("1 so far")
+    assert pages[0].data["total"] is None
 
 
 def test_records_warn_once_when_the_count_is_missing(mock_client, caplog):

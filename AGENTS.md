@@ -271,6 +271,13 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 - **Fakes.** Fake servers live in `api_explorer.testing`, which is public: users test their own code with the same fakes. A fake our tests need belongs there, unless it only makes sense for one test. Tests never touch the network.
 - **Properties.** `tests/test_properties.py` states rules that must hold for any input (any JSON, any page size, any server cap), and Hypothesis tries to break them. When it finds a failing input, fix the code and add the smallest failing input as a regression test with the example tests. Run a deeper search now and then: `uv run pytest tests/test_properties.py --hypothesis-profile=thorough`.
 
+**Logging.**
+
+- The package prints nothing until the application asks (a `NullHandler` on the `api_explorer` logger). Never `print`, and never add a handler inside the package.
+- Log only through `log_event(logger, level, event, message, *args, data={...})`, under the module's logger (`logging.getLogger(__name__)`). Every record then carries `event` and plain-value `data`.
+- The list of events lives in one place, the `api_explorer.logs` docstring. Add a new event there, with its level and data keys.
+- Levels: INFO for what a run is doing (a line per page, a summary), WARNING for what someone should know (a retry, data changed to fit, a count that doesn't add up), DEBUG for why a decision went the way it did (why paging stopped, why a token was renewed). Keep INFO short: about one line per page.
+
 **Writing.** Plain language, as at the top of this file. No em dashes, anywhere: code, comments, docs, commits, issues or pull requests.
 
 **Issues and pull requests.** Every pull request starts from an issue, and links it. See `CONTRIBUTING.md`.
