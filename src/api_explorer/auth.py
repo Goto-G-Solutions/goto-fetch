@@ -20,6 +20,19 @@ from .paths import get_path
 logger = logging.getLogger(__name__)
 
 
+def _seconds(value: object) -> float | None:
+    """Read an expires_in value: positive seconds, as a number or digits.
+
+    Anything else, including 0 or a negative number, counts as unknown, so
+    expiry falls back to the token's own JWT expiry or to a 401.
+    """
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value)
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+        return float(value)
+    return None
+
+
 def _renewing(how: str, why: str) -> None:
     """Log, at DEBUG, that an access token is being renewed, how and why."""
     action = (
@@ -208,6 +221,7 @@ class TokenRefresh(httpx2.Auth):
         self._access = access
         self._refresh = refresh
         self._expires_at: float | None = None
+        self._lifetime: float | None = None
         self._resolve: Callable[[str], str] | None = None
         self._lock = threading.Lock()
 
@@ -243,7 +257,16 @@ class TokenRefresh(httpx2.Auth):
         expiry = self._expires_at
         if expiry is None:
             expiry = jwt_expiry(self._access or "")
-        return expiry is not None and self.now() >= expiry - self.leeway
+        if expiry is None:
+            return False
+        # Never more than half a token's life: a leeway longer than a
+        # short-lived token would make it look expired as it arrives.
+        margin = (
+            self.leeway
+            if self._lifetime is None
+            else min(self.leeway, self._lifetime / 2)
+        )
+        return self.now() >= expiry - margin
 
     def _renew_unless_done(
         self, against: str, why: str, seen: str | None
@@ -264,6 +287,7 @@ class TokenRefresh(httpx2.Auth):
         self, against: str, why: str
     ) -> Generator[httpx2.Request, httpx2.Response, None]:
         failure = "there is no refresh token"
+        status: int | None = None
         if self._refresh is not None and self.refresh_url is not None:
             body = {self.refresh_field: self._refresh}
             url = self._url(self.refresh_url, against)
@@ -273,11 +297,13 @@ class TokenRefresh(httpx2.Auth):
                 self._take(response)
                 return
             failure = f"refreshing at {url} returned HTTP {response.status_code}"
+            status = response.status_code
         if self.login is None:
             raise ApiError(
                 f"Can't renew the access token: {failure}, and there is no "
                 "login to fall back on. Paste new tokens.",
                 url=against,
+                status=status,
             )
         url = self._url(self.login.token_url, against)
         _renewing("login", why if self._refresh is None else failure)
@@ -305,9 +331,9 @@ class TokenRefresh(httpx2.Auth):
                 url=str(response.url),
             )
         self._access = access
-        lifetime = get_path(body, self.expires_key)
-        number = isinstance(lifetime, (int, float)) and not isinstance(lifetime, bool)
-        self._expires_at = self.now() + lifetime if number else None
+        lifetime = _seconds(get_path(body, self.expires_key))
+        self._lifetime = lifetime
+        self._expires_at = None if lifetime is None else self.now() + lifetime
         refresh = get_path(body, self.refresh_key)
         if isinstance(refresh, str):
             self._refresh = refresh

@@ -1,6 +1,7 @@
 """An HTTP client for one API: URLs, retries, JSON, and paginated records."""
 
 import dataclasses
+import gzip
 import logging
 import time
 from collections.abc import Callable, Iterator, Mapping
@@ -22,7 +23,7 @@ from .paging import (
     paginate,
     read_page,
 )
-from .retry import Failure, Retry, RetryPolicy
+from .retry import TEMPORARY_STATUSES, Failure, Retry, RetryPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,11 @@ class Client:
     ) -> httpx2.Response:
         method = method.upper()
         url = self.url(endpoint)
+        params = kwargs.pop("params", None)
+        if params:
+            # Merge into any query the endpoint already has; httpx2 alone
+            # would replace it (the httpx 0.28 behaviour, httpx #3433).
+            url = str(httpx2.URL(url).copy_merge_params(params))
         attempt = 0
         while True:
             attempt += 1
@@ -190,6 +196,13 @@ class Client:
                 failure.__cause__ = exc
             except httpx2.HTTPError as exc:
                 raise ApiError(f"{method} {url} failed: {exc}", url=url) from exc
+            except ApiError as exc:
+                # Raised by an auth while renewing its token. A temporary
+                # failure at the token endpoint goes to the retry policy,
+                # like any other; anything else is final.
+                if exc.status not in TEMPORARY_STATUSES:
+                    raise
+                error = failure = exc
             else:
                 if response.is_success:
                     return response
@@ -242,15 +255,31 @@ class Client:
     def json_body(self, response: httpx2.Response) -> Any:
         """Parse a response's JSON body with this client's decoder, or raise ApiError.
 
-        An empty body, such as a 204 No Content, gives None.
+        A 204 or 205, which has no body by definition, gives None. Any other
+        empty body is an error, not an empty page: an API answering 200 with
+        nothing (often a proxy or gateway fault) must not pass for "no
+        data". A gzip body sent without a Content-Encoding header is
+        recognised by its first bytes and unpacked.
         """
-        if not response.content.strip():
-            return None
+        content = response.content
+        where = f"{response.request.method} {response.url}"
+        kind = response.headers.get("Content-Type", "no Content-Type")
+        if not content.strip():
+            if response.status_code in (204, 205):
+                return None
+            raise ApiError(
+                f"{where} returned HTTP {response.status_code} with an empty body ({kind})",
+                url=str(response.url),
+                status=response.status_code,
+            )
+        if content[:2] == b"\x1f\x8b":
+            content = gzip.decompress(content)
         try:
-            return self.decode(response.content)
+            return self.decode(content)
         except ValueError as exc:
             raise ApiError(
-                f"{response.request.method} {response.url} did not return JSON: {exc}",
+                f"{where} did not return JSON ({kind}): {exc}; it began "
+                f"{content[:120]!r}",
                 url=str(response.url),
                 status=response.status_code,
             ) from exc

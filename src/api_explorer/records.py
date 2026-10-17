@@ -41,14 +41,29 @@ def flatten(record: dict, sep: str = ".", max_depth: int | None = None) -> dict:
     {"user.name": "Ann", "tags[0]": "a"}. Below `max_depth` levels, values
     are kept whole. An empty dict or list is kept as a value, so its key
     doesn't vanish.
+
+    A key holding the separator or a path character ([ ] | " ') goes in
+    quotes, as get_path writes it: {"a.b": 1, "a": {"b": 2}} gives
+    {'["a.b"]': 1, "a.b": 2}, so no two values collide, and with the
+    default separator every key reads back with get_path. Empty keys and
+    keys with spaces at either end are quoted too. A key named exactly "*"
+    can't be read back, since paths always read "*" as the wildcard.
     """
     flat: dict = {}
+
+    def segment(prefix: str, key: object) -> str:
+        name = str(key)
+        awkward = name == "" or name != name.strip()  # paths trim spaces
+        if awkward or sep in name or any(c in name for c in "[]|\"'"):
+            escaped = name.replace("\\", "\\\\").replace('"', '\\"')
+            return f'{prefix}["{escaped}"]'
+        return f"{prefix}{sep}{name}" if prefix else name
 
     def visit(value: Any, key: str, depth: int) -> None:
         deeper = max_depth is None or depth < max_depth
         if isinstance(value, dict) and value and deeper:
             for k, v in value.items():
-                visit(v, f"{key}{sep}{k}", depth + 1)
+                visit(v, segment(key, k), depth + 1)
         elif isinstance(value, list) and value and deeper:
             for i, v in enumerate(value):
                 visit(v, f"{key}[{i}]", depth + 1)
@@ -56,7 +71,7 @@ def flatten(record: dict, sep: str = ".", max_depth: int | None = None) -> dict:
             flat[key] = value
 
     for key, value in record.items():
-        visit(value, str(key), 1)
+        visit(value, segment("", key), 1)
     return flat
 
 

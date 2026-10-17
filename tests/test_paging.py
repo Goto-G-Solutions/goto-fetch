@@ -519,10 +519,13 @@ def test_a_malformed_next_link_is_refused_even_on_an_empty_page(mock_client):
         )
 
 
-def test_an_empty_body_or_204_is_an_empty_page(mock_client):
+def test_a_204_is_an_empty_page(mock_client):
     # Regression (dlt #1849): an empty 204 failed as "did not return JSON".
     assert list(mock_client(replies(httpx2.Response(204))).records("/items/")) == []
-    assert (
+
+
+def test_an_empty_200_is_an_error_not_an_empty_page(mock_client):
+    # Guard (Airbyte PR #1108): an empty 200 is more likely a gateway fault
+    # than "no data", and must not end a run quietly.
+    with pytest.raises(ApiError, match="returned HTTP 200 with an empty body"):
         list(mock_client(replies(httpx2.Response(200, content=b""))).records("/items/"))
-        == []
-    )

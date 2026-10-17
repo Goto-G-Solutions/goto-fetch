@@ -297,3 +297,64 @@ def test_a_custom_auth_with_its_own_urls_opts_in_to_endpoint_rules():
     replies(200).client(auth=auth)
     assert auth.resolve is not None
     assert auth.resolve("keys") == "http://api.test/api/keys/"
+
+
+def test_a_temporary_failure_at_the_token_endpoint_is_retried():
+    # Regression (meltano #1038): a 503 from the token endpoint failed the run.
+    server = TokenServer()
+    answer = server._answer
+    failures = [httpx2.Response(503)]
+
+    def flaky(request):
+        if request.url.path == "/api/token/" and failures:
+            return failures.pop()
+        return answer(request)
+
+    server._answer = flaky
+    auth = TokenRefresh(login=ClientCredentials("/token/", "client", "secret"))
+    assert list(server.client(auth=auth).records("/items/")) == [{"id": 1}]
+    assert server.paths.count("/api/token/") == 2
+
+
+def test_a_refused_login_is_not_retried():
+    server = TokenServer(accept_logins=False)
+    auth = TokenRefresh(login=PasswordLogin("/token/", "me", "pw"))
+    with pytest.raises(ApiError, match="returned HTTP 401"):
+        list(server.client(auth=auth).records("/items/"))
+    assert server.paths == ["/api/token/"]
+
+
+def token_requests(expires_in, leeway=30.0, calls=3):
+    """How many token requests `calls` requests make, given the reply's expires_in."""
+    server = TokenServer()
+    answer = server._answer
+
+    def with_expiry(request):
+        response = answer(request)
+        if request.url.path == "/api/token/":
+            return httpx2.Response(
+                200, json={**response.json(), "expires_in": expires_in}
+            )
+        return response
+
+    server._answer = with_expiry
+    auth = TokenRefresh(
+        login=ClientCredentials("/token/", "client", "secret"), leeway=leeway
+    )
+    client = server.client(auth=auth)
+    for _ in range(calls):
+        client.request("GET", "/items/")
+    return server.paths.count("/api/token/")
+
+
+@pytest.mark.parametrize("expires_in", ["3600", 0, -5, "soon", None])
+def test_an_expires_in_that_is_text_zero_or_odd_doesn_t_renew_every_request(expires_in):
+    # Regression (authlib #530, Airbyte #824): 0 or a negative value made
+    # every request fetch a new token. Digits as text count as seconds.
+    assert token_requests(expires_in) == 1
+
+
+def test_the_leeway_is_capped_at_half_a_short_token_s_life():
+    # Regression (authlib #716): a 30s leeway on a 20s token made it look
+    # expired on arrival, so every request fetched a new one.
+    assert token_requests(20, leeway=30) == 1

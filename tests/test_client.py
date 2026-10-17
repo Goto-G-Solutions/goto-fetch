@@ -1,5 +1,8 @@
 """Client: URLs, responses, errors and JSON decoding. Retries are in test_retry, paging in test_paging."""
 
+import gzip
+import json
+
 import httpx2
 import pytest
 
@@ -105,3 +108,29 @@ def test_closing_leaves_a_client_you_bring_open_and_closes_its_own():
     own = Client("http://h")
     own.close()
     assert own._http.is_closed
+
+
+def test_params_merge_into_a_query_the_endpoint_already_has(mock_client):
+    # Regression (httpx #3433): httpx2 replaced the endpoint's query.
+    handler = replies(OK)
+    mock_client(handler).request("GET", "/items/?a=1", params={"b": "2"})
+    assert dict(handler.calls[0].url.params) == {"a": "1", "b": "2"}
+
+
+def test_a_gzip_body_without_content_encoding_is_unpacked(mock_client):
+    # Guard (Airbyte #914): some servers gzip without saying so.
+    body = gzip.compress(json.dumps({"ok": True}).encode())
+    assert mock_client(replies(httpx2.Response(200, content=body))).get_json("/x/") == {
+        "ok": True
+    }
+
+
+def test_a_body_that_is_not_json_says_what_it_was(mock_client):
+    page = httpx2.Response(
+        200, text="<html>login</html>", headers={"Content-Type": "text/html"}
+    )
+    with pytest.raises(
+        ApiError, match=r"did not return JSON \(text/html\).*began b'<html>login"
+    ) as raised:
+        mock_client(replies(page)).get_json("/x/")
+    assert raised.value.status == 200

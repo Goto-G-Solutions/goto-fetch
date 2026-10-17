@@ -52,6 +52,10 @@ SEGMENTS = st.lists(
 )
 
 
+# Any text as a key, except "*", which paths always read as the wildcard.
+TEXT_KEYS = st.text(max_size=6).filter(lambda key: key != "*")
+
+
 def path_of(segments: list[str]) -> str:
     return ".".join(segments)
 
@@ -74,6 +78,23 @@ def test_any_key_survives_quoting(keys):
         return f'["{escaped}"]'
 
     assert parse_path("".join(quote(k) for k in keys)) == keys
+
+
+@given(
+    record=st.dictionaries(
+        TEXT_KEYS,
+        st.recursive(
+            SCALARS,
+            lambda inner: st.dictionaries(TEXT_KEYS, inner, max_size=3),
+            max_leaves=6,
+        ),
+        max_size=4,
+    )
+)
+def test_every_flattened_key_reads_back_with_get_path(record):
+    # Any keys at all, dots and quotes included: no value is lost or merged.
+    for key, value in flatten(record).items():
+        assert get_path(record, key) == value
 
 
 @given(

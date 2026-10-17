@@ -291,6 +291,11 @@ class Offset:
     3. An empty page. It catches a total that fits on the first page or is
        an exact multiple of the page size, at the cost of one more request.
 
+    Offsets shift when records are added or removed during a run, so a
+    record can be skipped or seen twice. Where the API offers it, prefer a
+    next link or cursor, or sort oldest first so new records land at the
+    end. A "count-short" warning is often the first sign.
+
     A page that repeats the one before raises ApiError: the server is
     probably ignoring the offset, and would otherwise page forever.
     """

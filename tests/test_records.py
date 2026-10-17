@@ -45,6 +45,13 @@ def test_flatten_keeps_empty_containers_as_values():
     assert flatten({"meta": {}, "tags": []}) == {"meta": {}, "tags": []}
 
 
+def test_flatten_quotes_keys_that_would_collide():
+    # Guard (pandas json_normalize): "a.b" next to {"a": {"b": ...}} made
+    # two values share one column, and one was lost.
+    record = {"a.b": 1, "a": {"b": 2}}
+    assert flatten(record) == {'["a.b"]': 1, "a.b": 2}
+
+
 def test_flatten_stops_at_max_depth():
     record = {"a": {"b": {"c": 1}}}
     assert flatten(record, max_depth=1) == {"a": {"b": {"c": 1}}}
