@@ -4,21 +4,21 @@ from datetime import UTC, datetime
 
 import httpx2
 import pytest
-from support import replies
 
 from api_explorer import ApiError, Failure, Retry, backoff_delay, retry_after_seconds
+from api_explorer.testing import replies
 
 OK = httpx2.Response(200, json={"ok": True})
 
 
 def test_a_server_error_is_retried_and_each_retry_is_logged(mock_client, caplog):
-    handler, calls = replies(httpx2.Response(503))
+    handler = replies(httpx2.Response(503))
     with pytest.raises(ApiError) as raised:
         mock_client(handler, retry=Retry(attempts=3, backoff=0)).request(
             "GET", "/items/"
         )
     assert raised.value.status == 503
-    assert len(calls) == 3
+    assert len(handler.calls) == 3
     retries = [m.rsplit("; ", 1)[1].split(" in ")[0] for m in caplog.messages]
     assert retries == ["retry 1", "retry 2"]
 
@@ -29,52 +29,52 @@ def test_a_server_error_is_retried_and_each_retry_is_logged(mock_client, caplog)
     ids=["rate-limited", "request-timeout", "network-error"],
 )
 def test_temporary_failures_are_retried(mock_client, first):
-    handler, calls = replies(first, OK)
+    handler = replies(first, OK)
     assert mock_client(handler).request("GET", "/items/").status_code == 200
-    assert len(calls) == 2
+    assert len(handler.calls) == 2
 
 
 @pytest.mark.parametrize("status", [404, 501, 505])
 def test_failures_that_wont_change_are_not_retried(mock_client, status):
-    handler, calls = replies(httpx2.Response(status))
+    handler = replies(httpx2.Response(status))
     with pytest.raises(ApiError):
         mock_client(handler).request("GET", "/items/")
-    assert len(calls) == 1
+    assert len(handler.calls) == 1
 
 
 def test_the_statuses_worth_retrying_can_be_chosen(mock_client):
-    handler, calls = replies(httpx2.Response(404), OK)
+    handler = replies(httpx2.Response(404), OK)
     retry = Retry(backoff=0, statuses=frozenset({404}))
     assert (
         mock_client(handler, retry=retry).request("GET", "/items/").status_code == 200
     )
-    assert len(calls) == 2
+    assert len(handler.calls) == 2
 
 
 def test_post_is_retried_only_when_asked(mock_client):
-    handler, calls = replies(httpx2.Response(503))
+    handler = replies(httpx2.Response(503))
     with pytest.raises(ApiError):
         mock_client(handler).request("POST", "/items/", json={})
-    assert len(calls) == 1
+    assert len(handler.calls) == 1
     with pytest.raises(ApiError):
         mock_client(handler).request("POST", "/items/", json={}, retry=True)
-    assert len(calls) == 1 + 3
+    assert len(handler.calls) == 1 + 3
 
 
 def test_the_methods_retried_by_default_can_be_chosen(mock_client):
-    handler, calls = replies(httpx2.Response(503), OK)
+    handler = replies(httpx2.Response(503), OK)
     retry = Retry(backoff=0, methods=frozenset({"POST"}))
     assert (
         mock_client(handler, retry=retry).request("POST", "/items/").status_code == 200
     )
-    assert len(calls) == 2
+    assert len(handler.calls) == 2
 
 
 def test_a_retry_after_beyond_max_backoff_fails_at_once(mock_client):
-    handler, calls = replies(httpx2.Response(429, headers={"Retry-After": "999"}))
+    handler = replies(httpx2.Response(429, headers={"Retry-After": "999"}))
     with pytest.raises(ApiError, match="asks to wait 999s"):
         mock_client(handler, retry=Retry(max_backoff=1.0)).request("GET", "/items/")
-    assert len(calls) == 1
+    assert len(handler.calls) == 1
 
 
 @pytest.mark.parametrize(
@@ -127,7 +127,7 @@ class Recording:
 
 
 def test_a_policy_sees_each_failure_and_decides(mock_client):
-    handler, _ = replies(httpx2.Response(503), httpx2.ConnectError("refused"), OK)
+    handler = replies(httpx2.Response(503), httpx2.ConnectError("refused"), OK)
     policy = Recording(0.0, 0.0)
     assert (
         mock_client(handler, retry=policy).request("GET", "/items/").status_code == 200
@@ -144,11 +144,11 @@ def test_a_policy_sees_each_failure_and_decides(mock_client):
 
 
 def test_a_policy_that_stops_leaves_the_request_s_own_error(mock_client):
-    handler, calls = replies(httpx2.Response(503))
+    handler = replies(httpx2.Response(503))
     with pytest.raises(ApiError, match="HTTP 503") as raised:
         mock_client(handler, retry=Recording()).request("GET", "/items/")
     assert raised.value.status == 503
-    assert len(calls) == 1
+    assert len(handler.calls) == 1
 
 
 def test_a_policy_can_stop_with_its_own_message(mock_client):
@@ -156,7 +156,7 @@ def test_a_policy_can_stop_with_its_own_message(mock_client):
         def wait(self, failure):
             raise ApiError(f"gave up on {failure.url}", url=failure.url)
 
-    handler, _ = replies(httpx2.Response(503))
+    handler = replies(httpx2.Response(503))
     with pytest.raises(ApiError, match="gave up on http://api.test/api/items/"):
         mock_client(handler, retry=Refuse()).request("GET", "/items/")
 
@@ -169,12 +169,12 @@ def test_a_policy_can_retry_on_what_the_body_says(mock_client):
             return 0.0 if body.get("detail") == "warming up" else None
 
     warming = httpx2.Response(404, json={"detail": "warming up"})
-    handler, calls = replies(warming, OK)
+    handler = replies(warming, OK)
     assert (
         mock_client(handler, retry=WhileWarmingUp()).request("GET", "/x/").status_code
         == 200
     )
-    assert len(calls) == 2
+    assert len(handler.calls) == 2
 
 
 @pytest.mark.parametrize(
@@ -183,7 +183,7 @@ def test_a_policy_can_retry_on_what_the_body_says(mock_client):
 def test_the_call_s_retry_argument_reaches_the_policy_unless_it_is_false(
     mock_client, retry, seen
 ):
-    handler, _ = replies(httpx2.Response(503))
+    handler = replies(httpx2.Response(503))
     policy = Recording()
     with pytest.raises(ApiError):
         mock_client(handler, retry=policy).request("POST", "/items/", retry=retry)

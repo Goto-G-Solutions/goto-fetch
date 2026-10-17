@@ -4,9 +4,9 @@ import dataclasses
 from datetime import datetime
 
 import pytest
-from support import pages_at
 
 from api_explorer import ApiError, as_dict, converter, to_frame
+from api_explorer.testing import json_pages
 
 BASE = "http://api.test/api/items/"
 
@@ -78,14 +78,14 @@ def test_as_dict_keeps_dates_and_nested_models():
 
 
 def test_records_turn_each_record_into_the_model(mock_client):
-    handler = pages_at({BASE: {"results": [{"id": 1, "name": "Ann"}], "next": None}})
+    handler = json_pages({BASE: {"results": [{"id": 1, "name": "Ann"}], "next": None}})
     assert list(mock_client(handler).records("/items/", model=ItemDataclass)) == [
         ItemDataclass(1, "Ann")
     ]
 
 
 def test_a_record_that_doesnt_fit_names_its_position_and_the_model(mock_client):
-    handler = pages_at(
+    handler = json_pages(
         {
             BASE: {"results": [{"id": 1, "name": "Ann"}], "next": "?page=2"},
             f"{BASE}?page=2": {"results": [{"id": 2}], "next": None},

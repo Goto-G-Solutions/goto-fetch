@@ -9,7 +9,6 @@ import re
 
 import httpx2
 import pytest
-from support import offset_api, pages_at
 
 from api_explorer import (
     ApiError,
@@ -24,6 +23,7 @@ from api_explorer import (
     read_page,
     request_key,
 )
+from api_explorer.testing import json_pages, offset_api
 
 BASE = "http://api.test/api/items/"
 
@@ -214,7 +214,7 @@ def test_request_key_compares_page_requests_by_value():
 
 
 def test_records_follow_next_links_by_default(mock_client):
-    handler = pages_at(
+    handler = json_pages(
         {
             BASE: {"results": [1, 2], "next": f"{BASE}?page=2"},
             f"{BASE}?page=2": {"results": [3], "next": None},
@@ -239,7 +239,7 @@ def test_records_add_params_to_the_first_url_only(mock_client):
 
 
 def test_records_stop_at_max_pages(mock_client):
-    handler = pages_at(
+    handler = json_pages(
         {
             BASE: {"results": [1], "next": "?page=2"},
             f"{BASE}?page=2": {"results": [2], "next": None},
@@ -291,12 +291,12 @@ def test_records_read_pages_with_read_page_and_name_the_url(mock_client):
     # Overlaps the read_page tests on purpose: this checks records() uses it
     # and passes its URL, so a bad page names where it came from.
     with pytest.raises(ApiError, match="No 'results'") as raised:
-        list(mock_client(pages_at({BASE: {"data": []}})).records("/items/"))
+        list(mock_client(json_pages({BASE: {"data": []}})).records("/items/"))
     assert raised.value.url == BASE
 
 
 def test_records_follow_a_next_link_at_any_path(mock_client):
-    handler = pages_at(
+    handler = json_pages(
         {"http://api.test/api/geo/": {"results": [1], "meta": {"next": None}}}
     )
     assert list(
@@ -307,12 +307,14 @@ def test_records_follow_a_next_link_at_any_path(mock_client):
 def test_records_refuse_a_next_link_that_is_not_a_string(mock_client):
     with pytest.raises(ApiError, match="'next' holds a int, not a URL"):
         list(
-            mock_client(pages_at({BASE: {"results": [], "next": 2}})).records("/items/")
+            mock_client(json_pages({BASE: {"results": [], "next": 2}})).records(
+                "/items/"
+            )
         )
 
 
 def test_records_log_one_progress_line_per_page(mock_client, log_info):
-    handler = pages_at(
+    handler = json_pages(
         {
             BASE: {"count": 3, "results": [1, 2], "next": "?page=2"},
             f"{BASE}?page=2": {"count": 3, "results": [3], "next": None},
@@ -336,13 +338,15 @@ def test_records_log_one_progress_line_per_page(mock_client, log_info):
 
 def test_progress_leaves_out_the_total_without_a_count(mock_client, log_info):
     list(
-        mock_client(pages_at({BASE: {"results": [1], "next": None}})).records("/items/")
+        mock_client(json_pages({BASE: {"results": [1], "next": None}})).records(
+            "/items/"
+        )
     )
     assert log_info.messages[-1].endswith("1 so far")
 
 
 def test_records_warn_once_when_the_count_is_missing(mock_client, caplog):
-    handler = pages_at(
+    handler = json_pages(
         {
             BASE: {"results": [1], "next": "?page=2"},
             f"{BASE}?page=2": {"results": [2], "next": None},
@@ -363,42 +367,42 @@ def fetch_offset(mock_client, handler, count_key=None, **paging):
 
 
 def test_offset_stops_at_the_count_without_an_extra_request(mock_client):
-    handler, calls = offset_api(250)
+    handler = offset_api(250)
     assert fetch_offset(mock_client, handler, "count", limit=100) == list(range(250))
-    assert [c["offset"] for c in calls] == ["0", "100", "200"]
+    assert [c["offset"] for c in handler.queries] == ["0", "100", "200"]
 
 
 def test_offset_survives_a_server_that_caps_the_page_size(mock_client):
     # Pages of 100 when 1,000 were asked for must not look like the last page.
-    handler, calls = offset_api(250, cap=100, count=None)
+    handler = offset_api(250, cap=100, count=False)
     assert fetch_offset(mock_client, handler, limit=1000) == list(range(250))
-    assert [c["offset"] for c in calls] == ["0", "100", "200"]
+    assert [c["offset"] for c in handler.queries] == ["0", "100", "200"]
 
 
 @pytest.mark.parametrize(
     ("total", "requests"), [(200, 3), (37, 2)], ids=["exact-multiple", "one-page"]
 )
 def test_offset_without_a_count_ends_on_an_empty_page(mock_client, total, requests):
-    handler, calls = offset_api(total, count=None)
+    handler = offset_api(total, count=False)
     assert fetch_offset(mock_client, handler, limit=100) == list(range(total))
-    assert len(calls) == requests
+    assert len(handler.queries) == requests
 
 
 def test_offset_warns_when_records_run_out_before_the_count(mock_client, caplog):
-    handler, _ = offset_api(230, count=250)
+    handler = offset_api(230, count=250)
     assert fetch_offset(mock_client, handler, "count", limit=100) == list(range(230))
     assert caplog.messages == ["Records ran out at 230 of the 250 the count promised"]
 
 
 def test_offset_refuses_a_server_that_ignores_the_offset(mock_client):
-    handler, calls = offset_api(250, count=None, ignore_offset=True)
+    handler = offset_api(250, count=False, ignore_offset=True)
     with pytest.raises(ApiError, match="seems to ignore 'offset'"):
         fetch_offset(mock_client, handler, limit=100)
-    assert len(calls) == 2
+    assert len(handler.queries) == 2
 
 
 def test_offset_starts_from_the_offset_in_the_endpoint_and_keeps_the_query(mock_client):
-    handler, calls = offset_api(250)
+    handler = offset_api(250)
     records = mock_client(handler).records(
         "/items/?q=x&offset=200",
         results_key="items",
@@ -406,7 +410,7 @@ def test_offset_starts_from_the_offset_in_the_endpoint_and_keeps_the_query(mock_
         paging=Offset(limit=100),
     )
     assert list(records) == list(range(200, 250))
-    assert calls == [{"q": "x", "offset": "200", "limit": "100"}]
+    assert handler.queries == [{"q": "x", "offset": "200", "limit": "100"}]
 
 
 def test_offset_names_its_own_query_parameters(mock_client):

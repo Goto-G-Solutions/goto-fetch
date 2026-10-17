@@ -5,7 +5,6 @@ import json
 
 import httpx2
 import pytest
-from support import auth_server, paths_called
 
 from api_explorer import (
     ApiError,
@@ -15,6 +14,7 @@ from api_explorer import (
     jwt_expiry,
     token_headers,
 )
+from api_explorer.testing import TokenServer
 
 LOGIN = PasswordLogin("/token/", "me", "pw")
 
@@ -64,17 +64,17 @@ def test_token_refresh_needs_a_refresh_token_or_a_login():
 def test_the_first_request_gets_an_access_token_first(
     mock_client, options, first_calls
 ):
-    handler, state = auth_server()
+    server = TokenServer()
     auth = TokenRefresh("/token/refresh/", **options)
-    assert list(mock_client(handler, auth=auth).records("/items/")) == [{"id": 1}]
-    assert paths_called(state) == [*first_calls, "/api/items/"]
+    assert list(mock_client(server, auth=auth).records("/items/")) == [{"id": 1}]
+    assert server.paths == [*first_calls, "/api/items/"]
 
 
 def test_a_401_renews_the_access_token_and_resends_once(mock_client):
-    handler, state = auth_server()
+    server = TokenServer()
     auth = TokenRefresh("/token/refresh/", refresh="r0", access="stale")
-    assert list(mock_client(handler, auth=auth).records("/items/")) == [{"id": 1}]
-    assert paths_called(state) == ["/api/items/", "/api/token/refresh/", "/api/items/"]
+    assert list(mock_client(server, auth=auth).records("/items/")) == [{"id": 1}]
+    assert server.paths == ["/api/items/", "/api/token/refresh/", "/api/items/"]
 
 
 @pytest.mark.parametrize(
@@ -83,92 +83,98 @@ def test_a_401_renews_the_access_token_and_resends_once(mock_client):
     ids=["about-to-expire", "fresh"],
 )
 def test_a_jwt_is_renewed_only_when_it_is_about_to_expire(mock_client, now, calls):
-    handler, state = auth_server()
+    server = TokenServer()
     token = make_jwt(1000.0)
-    state["access"].add(token)
+    server.access_tokens.add(token)
     auth = TokenRefresh("/token/refresh/", refresh="r0", access=token, now=lambda: now)
-    list(mock_client(handler, auth=auth).records("/items/"))
-    assert paths_called(state) == calls
+    list(mock_client(server, auth=auth).records("/items/"))
+    assert server.paths == calls
 
 
 def test_a_rotated_refresh_token_replaces_the_old_one(mock_client):
-    handler, state = auth_server(rotate=True)
-    client = mock_client(handler, auth=TokenRefresh("/token/refresh/", refresh="r0"))
+    server = TokenServer(rotate=True)
+    client = mock_client(server, auth=TokenRefresh("/token/refresh/", refresh="r0"))
     list(client.records("/items/"))
-    state["access"].clear()
+    server.expire_access_tokens()
     # Reusing "r0" would now fail: the server accepted the rotated token.
     list(client.records("/items/"))
-    refreshes = [b for _, p, b in state["calls"] if p == "/api/token/refresh/"]
+    refreshes = [
+        b for p, b in zip(server.paths, server.bodies) if p == "/api/token/refresh/"
+    ]
     assert refreshes[0] == {"refresh": "r0"}
     assert refreshes[-1] != {"refresh": "r0"}
 
 
 def test_a_failed_refresh_falls_back_to_logging_in(mock_client):
-    handler, state = auth_server()
+    server = TokenServer()
     auth = TokenRefresh("/token/refresh/", refresh="expired", login=LOGIN)
-    assert list(mock_client(handler, auth=auth).records("/items/")) == [{"id": 1}]
-    assert paths_called(state) == ["/api/token/refresh/", "/api/token/", "/api/items/"]
+    assert list(mock_client(server, auth=auth).records("/items/")) == [{"id": 1}]
+    assert server.paths == ["/api/token/refresh/", "/api/token/", "/api/items/"]
 
 
 def test_a_failed_refresh_without_a_login_names_the_url_and_asks_for_new_tokens(
     mock_client,
 ):
-    handler, state = auth_server()
+    server = TokenServer()
     auth = TokenRefresh("/token/refresh/", refresh="expired")
     with pytest.raises(ApiError, match="Paste new tokens") as raised:
-        list(mock_client(handler, auth=auth).records("/items/"))
+        list(mock_client(server, auth=auth).records("/items/"))
     # Regression: auth errors used to leave out the URL they tried.
     assert "refreshing at http://api.test/api/token/refresh/ returned HTTP 401" in str(
         raised.value
     )
-    assert paths_called(state) == ["/api/token/refresh/"]
+    assert server.paths == ["/api/token/refresh/"]
 
 
 def test_a_failed_login_names_the_url_and_its_status(mock_client):
-    handler, _ = auth_server(login_works=False)
+    server = TokenServer(accept_logins=False)
     auth = TokenRefresh("/token/refresh/", login=LOGIN)
     with pytest.raises(
         ApiError, match="Logging in at http://api.test/api/token/ returned HTTP 401"
     ) as raised:
-        list(mock_client(handler, auth=auth).records("/items/"))
+        list(mock_client(server, auth=auth).records("/items/"))
     assert raised.value.status == 401
 
 
 def test_a_401_that_survives_renewal_fails_without_looping(mock_client):
-    handler, state = auth_server(deny_all=True)
+    server = TokenServer(deny_all=True)
     auth = TokenRefresh("/token/refresh/", refresh="r0")
     with pytest.raises(ApiError) as raised:
-        list(mock_client(handler, auth=auth).records("/items/"))
+        list(mock_client(server, auth=auth).records("/items/"))
     assert raised.value.status == 401
-    assert paths_called(state) == ["/api/token/refresh/", "/api/items/"] * 2
+    assert server.paths == ["/api/token/refresh/", "/api/items/"] * 2
 
 
 def test_a_post_refused_with_401_is_resent_with_its_body(mock_client):
-    handler, state = auth_server()
+    server = TokenServer()
     auth = TokenRefresh("/token/refresh/", refresh="r0", access="stale")
-    response = mock_client(handler, auth=auth).request(
+    response = mock_client(server, auth=auth).request(
         "POST", "/items/", json={"status": "DONE"}
     )
     assert response.json()["results"] == [{"status": "DONE"}]
-    posts = [b for m, p, b in state["calls"] if m == "POST" and p == "/api/items/"]
+    posts = [
+        b
+        for r, b in zip(server.calls, server.bodies)
+        if r.method == "POST" and r.url.path == "/api/items/"
+    ]
     assert posts == [{"status": "DONE"}, {"status": "DONE"}]
 
 
 def test_token_fields_can_have_other_names(mock_client):
-    handler, _ = auth_server(access_field="access_token")
+    server = TokenServer(access_field="access_token")
     auth = TokenRefresh("/token/refresh/", refresh="r0", access_key="access_token")
-    assert list(mock_client(handler, auth=auth).records("/items/")) == [{"id": 1}]
+    assert list(mock_client(server, auth=auth).records("/items/")) == [{"id": 1}]
 
 
 def test_auth_urls_resolve_against_the_base_url_like_endpoints(mock_client):
     # Regression: "token/" used to resolve against the request URL, giving
     # /api/items/token/.
-    handler, state = auth_server()
+    server = TokenServer()
     auth = TokenRefresh(
         "token/refresh", refresh="expired", login=PasswordLogin("token", "me", "pw")
     )
-    list(mock_client(handler, auth=auth).records("/items/"))
-    assert paths_called(state) == ["/api/token/refresh/", "/api/token/", "/api/items/"]
+    list(mock_client(server, auth=auth).records("/items/"))
+    assert server.paths == ["/api/token/refresh/", "/api/token/", "/api/items/"]
 
 
 def test_auth_urls_follow_the_trailing_slash_setting(mock_client):
@@ -196,12 +202,12 @@ def test_secrets_stay_out_of_repr():
 
 
 def test_auth_on_a_client_you_bring_still_resolves_urls_like_endpoints():
-    handler, state = auth_server()
+    server = TokenServer()
     auth = TokenRefresh("token/refresh", refresh="r0")
     http = httpx2.Client(
         base_url="http://api.test/api",
         auth=auth,
-        transport=httpx2.MockTransport(handler),
+        transport=httpx2.MockTransport(server),
     )
     assert list(Client(http=http).records("/items/")) == [{"id": 1}]
-    assert paths_called(state) == ["/api/token/refresh/", "/api/items/"]
+    assert server.paths == ["/api/token/refresh/", "/api/items/"]

@@ -16,7 +16,6 @@ pytest.importorskip("hypothesis", reason="property tests need the dev dependenci
 from conftest import BACKENDS
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from support import offset_api
 
 from api_explorer import (
     Client,
@@ -29,6 +28,7 @@ from api_explorer import (
     select,
     to_frame,
 )
+from api_explorer.testing import offset_api
 
 # JSON as APIs send it: no NaN or infinity, which JSON can't carry.
 SCALARS = (
@@ -115,7 +115,8 @@ def test_explode_gives_each_record_as_many_rows_as_its_longest_list(records):
     assert len(explode(records, columns=columns)) == expected
 
 
-@settings(max_examples=60, deadline=None)
+# 200 examples: at 60, this missed ints beside floats in a list for a while.
+@settings(max_examples=200, deadline=None)
 @given(records=RECORDS, backend=st.sampled_from(BACKENDS))
 def test_to_frame_builds_a_frame_from_any_json_records(records, backend):
     frame = to_frame(records, backend)
@@ -135,7 +136,7 @@ def test_to_frame_builds_a_frame_from_any_json_records(records, backend):
 def test_offset_paging_returns_every_record_once_whatever_the_server_does(
     total, limit, cap, count
 ):
-    handler, calls = offset_api(total, cap=cap, count=count)
+    handler = offset_api(total, cap=cap, count=count)
     client = Client(
         "http://api.test/api",
         transport=httpx2.MockTransport(handler),
@@ -152,7 +153,7 @@ def test_offset_paging_returns_every_record_once_whatever_the_server_does(
     assert records == list(range(total))
     page = min(limit, cap) if cap else limit
     # At most one request beyond the pages the records need.
-    assert len(calls) <= -(-total // page) + 1
+    assert len(handler.queries) <= -(-total // page) + 1
 
 
 @given(sizes=st.lists(st.integers(0, 5), min_size=1, max_size=6))

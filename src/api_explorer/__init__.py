@@ -14,6 +14,7 @@ JSON faster, pydantic or msgspec models type the records, and polars,
 pandas or pyarrow hold the frames.
 
 HTML scraping lives in api_explorer.scrape and needs the "scrape" extra.
+Fake APIs for testing your own code live in api_explorer.testing.
 """
 
 from .auth import PasswordLogin, TokenRefresh, jwt_expiry, token_headers

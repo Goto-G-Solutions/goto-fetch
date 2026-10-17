@@ -7,11 +7,11 @@ import types
 
 import httpx2
 import pytest
-from support import auth_server
 
 import api_explorer
 from api_explorer import Client, FetchPlan, Retry, package_requirement, select, to_frame
 from api_explorer import plan as plan_module
+from api_explorer.testing import TokenServer
 
 SECRETS = {
     "token": "tok-secret",
@@ -168,13 +168,13 @@ def test_a_script_fetches_what_its_plan_fetches(run_script):
 
 
 def test_a_login_script_logs_in_from_environment_variables(run_script):
-    handler, state = auth_server()
+    server = TokenServer()
     plan = FetchPlan(
         "http://api.test/api", "/items/", auth="refresh", username="me", password="pw"
     )
-    namespace = run_script(plan.script(), handler, API_USERNAME="me", API_PASSWORD="pw")
+    namespace = run_script(plan.script(), server, API_USERNAME="me", API_PASSWORD="pw")
     assert namespace["records"] == [{"id": 1}]
-    assert [path for _, path, _ in state["calls"]] == ["/api/token/", "/api/items/"]
+    assert server.paths == ["/api/token/", "/api/items/"]
 
 
 def test_a_script_with_a_backend_builds_that_library_s_frame(run_script, backend):
