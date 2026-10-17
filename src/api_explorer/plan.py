@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from importlib import metadata
 from typing import Any, Literal
 
-from .auth import PasswordLogin, TokenRefresh, token_headers
+from .auth import ClientCredentials, PasswordLogin, TokenRefresh, token_headers
 from .client import Client
 from .paging import Cursor, HeaderLink, NextLink, Offset, Paging
 
@@ -17,9 +17,10 @@ class FetchPlan:
 
     client() and records() run it. script() writes it as a PEP 723 script,
     with uv-installable dependencies, that does the same fetch. Secrets
-    (token, refresh_token, access_token, password) are used to run, kept
-    out of repr, and never written: scripts read $API_TOKEN,
-    $API_REFRESH_TOKEN, $API_USERNAME and $API_PASSWORD instead.
+    (token, refresh_token, access_token, password, client_secret) are used
+    to run, kept out of repr, and never written: scripts read $API_TOKEN,
+    $API_REFRESH_TOKEN, $API_USERNAME, $API_PASSWORD and $API_CLIENT_SECRET
+    instead.
     """
 
     base_url: str
@@ -29,7 +30,7 @@ class FetchPlan:
     retry: bool | None = None
     trailing_slash: bool = True
     timeout: float = 20.0
-    auth: Literal["none", "header", "refresh"] = "none"
+    auth: Literal["none", "header", "refresh", "client"] = "none"
     token: str = field(default="", repr=False)
     scheme: str | None = "Token"
     header: str = "Authorization"
@@ -39,6 +40,10 @@ class FetchPlan:
     login_url: str = "/token/"
     username: str = ""
     password: str = field(default="", repr=False)
+    client_id: str = ""
+    client_secret: str = field(default="", repr=False)
+    scope: str = ""
+    credentials_in: Literal["header", "body"] = "header"
     results_key: str | None = "results"
     count_key: str | None = None
     paging: Literal["next", "offset", "header", "cursor"] = "next"
@@ -67,6 +72,15 @@ class FetchPlan:
                 access=self.access_token or None,
                 login=self._login(),
             )
+        elif self.auth == "client":
+            login = ClientCredentials(
+                self.login_url,
+                self.client_id,
+                self.client_secret,
+                scope=self.scope or None,
+                credentials_in=self.credentials_in,
+            )
+            auth = TokenRefresh(login=login)
         return Client(
             self.base_url,
             headers=headers,
@@ -136,6 +150,28 @@ class FetchPlan:
                     'os.environ["API_USERNAME"], os.environ["API_PASSWORD"])'
                 )
             body += ["auth = TokenRefresh(", *(f"    {p}," for p in parts), ")", ""]
+            client_args.append("auth=auth")
+        elif self.auth == "client":
+            names.update({"TokenRefresh", "ClientCredentials"})
+            parts = [
+                repr(self.login_url),
+                repr(self.client_id),
+                'os.environ["API_CLIENT_SECRET"]',
+                *([f"scope={self.scope!r}"] if self.scope else []),
+                *(
+                    [f"credentials_in={self.credentials_in!r}"]
+                    if self.credentials_in != "header"
+                    else []
+                ),
+            ]
+            body += [
+                "auth = TokenRefresh(",
+                "    login=ClientCredentials(",
+                *(f"        {p}," for p in parts),
+                "    ),",
+                ")",
+                "",
+            ]
             client_args.append("auth=auth")
         client_args.append(f"timeout={self.timeout!r}")
         if not self.trailing_slash:

@@ -16,5 +16,5 @@ The first release.
 - Building blocks for loops of your own: `paginate` (which pages by any request, such as a POST body, with loop protection by `request_key` or your own key), `read_page`, `Client.json_body` and `converter`.
 - Logging: silent until switched on (`enable_logging`, `logging_to`); every line is an event with data (`record.event`, `record.data`), including why paging stopped and why tokens were renewed; `Client(name=...)` labels a client's lines, including those of your own pieces (`log_event`, `ClientFilter`).
 - `FetchPlan`: describe a fetch once, run it, or write it as a script.
-- Scraping (the `scrape` extra), and the explorer notebook (the `explorer` extra).
+- Scraping (the `scrape` extra), and the explorer notebook (the `explorer` extra), which covers the library's auth (header tokens, access/refresh with login, OAuth2 client credentials) and paging styles, and writes the fetch as a script.
 - `api_explorer.testing`: fake APIs for testing code that fetches from APIs (next link, limit/offset, cursor, Link header, a simplejwt-style token server, fixed pages and responses), `flaky` to inject failures, and `FakeApi`, which remembers every request. For pieces you build on the interfaces: `fetched` builds a page to test a paging style on its own, and `check_retry_policy` and `check_paging` check the promises every policy and style must keep.

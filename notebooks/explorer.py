@@ -41,8 +41,8 @@ def _():
 
     Pull records from a paginated JSON API and look through them. Fill in
     the request below, press **Fetch**, then pick columns from the results.
-    Secrets come from `$API_TOKEN`, `$API_REFRESH_TOKEN`, `$API_USERNAME`
-    and `$API_PASSWORD` when set. They live only in this session, never in
+    Secrets come from `$API_TOKEN`, `$API_REFRESH_TOKEN`, `$API_USERNAME`,
+    `$API_PASSWORD`, `$API_CLIENT_ID` and `$API_CLIENT_SECRET` when set. They live only in this session, never in
     the file.
 
     The panel is built on the `api_explorer` package; the examples below
@@ -75,14 +75,16 @@ def _():
     read_only = mo.ui.checkbox(label="Safe to retry: it only reads")
 
     _env_auth = (
-        "Access/refresh"
+        "Client credentials"
+        if os.environ.get("API_CLIENT_ID")
+        else "Access/refresh"
         if os.environ.get("API_REFRESH_TOKEN") or os.environ.get("API_USERNAME")
         else "Header token"
         if os.environ.get("API_TOKEN")
         else "None"
     )
     auth_kind = mo.ui.dropdown(
-        ["None", "Header token", "Access/refresh"],
+        ["None", "Header token", "Access/refresh", "Client credentials"],
         value=_env_auth,
         label="Auth",
     )
@@ -108,6 +110,19 @@ def _():
         value=os.environ.get("API_PASSWORD", ""),
         kind="password",
         label="Password",
+    )
+    token_url = mo.ui.text(value="/oauth/token", label="Token URL")
+    client_id = mo.ui.text(
+        value=os.environ.get("API_CLIENT_ID", ""), label="Client ID"
+    )
+    client_secret = mo.ui.text(
+        value=os.environ.get("API_CLIENT_SECRET", ""),
+        kind="password",
+        label="Client secret",
+    )
+    scope = mo.ui.text(label="Scope (optional)")
+    credentials_in = mo.ui.dropdown(
+        ["header", "body"], value="header", label="Send the ID and secret in the"
     )
 
     results_key = mo.ui.text(value="results", label="Results path")
@@ -145,8 +160,11 @@ def _():
         backend,
         base_url,
         body,
+        client_id,
+        client_secret,
         columns,
         count_key,
+        credentials_in,
         cursor_in,
         cursor_key,
         cursor_param,
@@ -165,8 +183,10 @@ def _():
         refresh_url,
         results_key,
         scheme,
+        scope,
         timeout,
         token,
+        token_url,
         trailing_slash,
         username,
         verbose,
@@ -179,7 +199,10 @@ def _(
     auth_kind,
     base_url,
     body,
+    client_id,
+    client_secret,
     count_key,
+    credentials_in,
     cursor_in,
     cursor_key,
     cursor_param,
@@ -198,8 +221,10 @@ def _(
     refresh_url,
     results_key,
     scheme,
+    scope,
     timeout,
     token,
+    token_url,
     trailing_slash,
     username,
     verbose,
@@ -234,6 +259,17 @@ def _(
                 "Optional. With a username and password it logs in, and "
                 "logs in again whenever the refresh token runs out. URLs "
                 "follow the same rules as the endpoint."
+            ),
+        ]
+    elif auth_kind.value == "Client credentials":
+        _auth_rows = [
+            _row(token_url, client_id, client_secret),
+            _row(scope, credentials_in),
+            _hint(
+                "The OAuth2 client credentials grant, for one service talking "
+                "to another. The ID and secret go in a Basic header, which "
+                "every OAuth server accepts, or in the form. Tokens renew by "
+                "themselves before they expire."
             ),
         ]
     else:
@@ -331,7 +367,10 @@ def _(
     auth_kind,
     base_url,
     body,
+    client_id,
+    client_secret,
     count_key,
+    credentials_in,
     cursor_in,
     cursor_key,
     cursor_param,
@@ -350,8 +389,10 @@ def _(
     refresh_url,
     results_key,
     scheme,
+    scope,
     timeout,
     token,
+    token_url,
     trailing_slash,
     username,
     verbose,
@@ -375,16 +416,24 @@ def _(
         retry=True if _posting and read_only.value else None,
         trailing_slash=trailing_slash.value,
         timeout=float(timeout.value),
-        auth={"Header token": "header", "Access/refresh": "refresh"}.get(
-            auth_kind.value, "none"
-        ),
+        auth={
+            "Header token": "header",
+            "Access/refresh": "refresh",
+            "Client credentials": "client",
+        }.get(auth_kind.value, "none"),
         token=token.value,
         scheme=None if scheme.value == "none" else scheme.value,
         header=header.value,
         refresh_url=refresh_url.value,
         refresh_token=refresh_token.value,
         access_token=access_token.value,
-        login_url=login_url.value,
+        login_url=token_url.value
+        if auth_kind.value == "Client credentials"
+        else login_url.value,
+        client_id=client_id.value,
+        client_secret=client_secret.value,
+        scope=scope.value,
+        credentials_in=credentials_in.value,
         username=username.value,
         password=password.value,
         results_key=results_key.value or None,

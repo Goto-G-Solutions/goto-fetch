@@ -18,6 +18,7 @@ SECRETS = {
     "refresh_token": "refresh-secret",
     "access_token": "access-secret",
     "password": "pw-secret",
+    "client_secret": "client-secret",
 }
 
 
@@ -90,7 +91,7 @@ SEARCH = FetchPlan(
 )
 
 
-@pytest.mark.parametrize("auth", ["header", "refresh"])
+@pytest.mark.parametrize("auth", ["header", "refresh", "client"])
 def test_scripts_and_repr_never_contain_secrets(auth):
     plan = FetchPlan("http://h/api", "/a/", auth=auth, username="me", **SECRETS)
     for text in (plan.script(), repr(plan)):
@@ -109,6 +110,7 @@ def test_scripts_and_repr_never_contain_secrets(auth):
         ),
         FetchPlan("http://h/api", "/a/", results_key=None, paging="header"),
         SEARCH,
+        FetchPlan("http://h/api", "/a/", auth="client", client_id="c", scope="read"),
         KEYED,
     ],
     ids=[
@@ -118,6 +120,7 @@ def test_scripts_and_repr_never_contain_secrets(auth):
         "custom-next",
         "header-link",
         "post-cursor",
+        "client-credentials",
         "header-offset",
     ],
 )
@@ -233,3 +236,21 @@ def test_package_requirement_falls_back_to_the_bare_name(monkeypatch):
 
     monkeypatch.setattr(plan_module.metadata, "distribution", missing)
     assert package_requirement() == "api-explorer"
+
+
+def test_a_client_credentials_script_gets_its_token_from_the_environment(run_script):
+    # Its own script test: the client-credentials branch of script() writes
+    # its own auth lines.
+    server = TokenServer()
+    plan = FetchPlan(
+        "http://api.test/api",
+        "/items/",
+        auth="client",
+        login_url="/token/",
+        client_id="client",
+        client_secret="secret",
+    )
+    with plan.client(transport=httpx2.MockTransport(server)) as client:
+        expected = list(plan.records(client))
+    namespace = run_script(plan.script(), server, API_CLIENT_SECRET="secret")
+    assert namespace["records"] == expected == [{"id": 1}]
