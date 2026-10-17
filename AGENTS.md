@@ -255,6 +255,7 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 
 - Tests: `uv run pytest`. This is the one command that runs every test.
 - Lint: `uvx ruff check` and `uvx ruff format --check`.
+- Types: `uv run pyright`. The package ships its type hints (`py.typed`), so they must be right.
 - The notebook: `uvx marimo check --strict notebooks/explorer.py`.
 - The notebook's formatting belongs to marimo, which formats it on save, so `ruff format` leaves it alone.
 

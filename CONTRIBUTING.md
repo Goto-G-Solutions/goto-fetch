@@ -28,6 +28,7 @@ Writing these down is how we make sure the problem is understood before anyone w
    uv run pytest
    uvx ruff check
    uvx ruff format --check
+   uv run pyright
    uvx marimo check --strict notebooks/explorer.py   # if you changed the notebook
    ```
 

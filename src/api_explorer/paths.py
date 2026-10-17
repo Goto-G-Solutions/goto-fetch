@@ -61,10 +61,10 @@ def parse_path(path: str) -> list[str]:
     Raises ValueError for a path it can't read, such as an unclosed quote,
     or for "|", which only get_path understands.
     """
-    alternatives = _alternatives(path)
-    if len(alternatives) > 1:
+    first, *others = _alternatives(path)
+    if others:
         raise ValueError(f"parse_path reads one path; {path!r} has alternatives")
-    return list(alternatives[0])
+    return list(first)
 
 
 def get_path(data: Any, path: str, default: Any = None) -> Any:

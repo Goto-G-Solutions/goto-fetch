@@ -31,12 +31,17 @@ dev = [
     "parsel>=1.10.0",
     "polars>=1.33",
     "pydantic>=2.11",
+    "pyright>=1.1.400",
     "pytest>=8.4",
 ]
 
 [build-system]
 requires = ["uv_build>=0.13.1,<0.14"]
 build-backend = "uv_build"
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.11"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

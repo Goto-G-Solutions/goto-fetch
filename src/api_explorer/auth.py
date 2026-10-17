@@ -4,7 +4,7 @@ import base64
 import binascii
 import json
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from urllib.parse import urljoin
 
@@ -137,7 +137,9 @@ class TokenRefresh(httpx2.Auth):
     def __repr__(self) -> str:
         return f"TokenRefresh(refresh_url={self.refresh_url!r}, login={self.login!r})"
 
-    def auth_flow(self, request: httpx2.Request) -> Iterator[httpx2.Request]:
+    def auth_flow(
+        self, request: httpx2.Request
+    ) -> Generator[httpx2.Request, httpx2.Response, None]:
         """Sign `request`, renewing the access token before or after as needed."""
         if self._access is None or self._expiring():
             yield from self._renew(str(request.url))
@@ -152,7 +154,7 @@ class TokenRefresh(httpx2.Auth):
         expiry = jwt_expiry(self._access or "")
         return expiry is not None and self.now() >= expiry - self.leeway
 
-    def _renew(self, against: str) -> Iterator[httpx2.Request]:
+    def _renew(self, against: str) -> Generator[httpx2.Request, httpx2.Response, None]:
         failure = "there is no refresh token"
         if self._refresh is not None:
             body = {self.refresh_field: self._refresh}

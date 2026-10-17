@@ -18,6 +18,7 @@ Closes #
 
 - [ ] `uv run pytest` passes.
 - [ ] `uvx ruff check` and `uvx ruff format --check` pass.
+- [ ] `uv run pyright` passes.
 - [ ] `uvx marimo check --strict notebooks/explorer.py` passes, if I changed the notebook.
 - [ ] New behaviour has tests at its interface.
 - [ ] A bug fix has a regression test, marked `# Regression:`.

@@ -6,7 +6,7 @@ import sys
 from collections.abc import Iterable, Sequence
 from importlib.util import find_spec
 from types import ModuleType
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import narwhals.stable.v2 as nw
 
@@ -104,7 +104,10 @@ def to_frame(records: Sequence[Any], backend: str | ModuleType | None = None) ->
     records = [as_dict(record) for record in records]
     columns = list(dict.fromkeys(key for record in records for key in record))
     data = {c: even_out(c, [r.get(c) for r in records]) for c in columns}
-    return nw.from_dict(data, backend=backend or default_backend()).to_native()
+    # narwhals types `backend` with names of its own; any library name or
+    # module it accepts is fine here, and it reports one it doesn't know.
+    chosen = cast("Any", backend or default_backend())
+    return nw.from_dict(data, backend=chosen).to_native()
 
 
 def latest_per_key(
