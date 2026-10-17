@@ -14,7 +14,7 @@ import pytest
 pytest.importorskip("hypothesis", reason="property tests need the dev dependencies")
 
 from conftest import BACKENDS
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, event, given, settings
 from hypothesis import strategies as st
 
 from api_explorer import (
@@ -272,3 +272,102 @@ def test_changes_delivers_exactly_what_differs_from_the_last_run(runs):
         assert got == [r for r in records if before.get(r["id"]) != r["v"]]
         assert sorted(changes.deleted) == sorted(set(before) - set(source))
         state, before = changes.state, source
+
+
+FAILURES = st.sampled_from(["ok", "ok", "ok", "503", "drop", "refused"])
+
+
+def flaky_source(rows: list[dict], data) -> "Client":
+    """A client for changes_api(rows) where each request may fail, as Hypothesis picks.
+
+    A request answers normally, with a 503, or by a dropped or refused
+    connection. Retries (3 tries, no waiting) rescue some failures; three
+    in a row end the run with ApiError.
+    """
+    from api_explorer.testing import FakeApi, changes_api
+
+    api = changes_api(rows, page_size=2)
+
+    def answer(request):
+        outcome = data.draw(FAILURES)
+        if outcome == "503":
+            return httpx2.Response(503)
+        if outcome == "drop":
+            raise httpx2.RemoteProtocolError("connection dropped mid-response")
+        if outcome == "refused":
+            raise httpx2.ConnectError("connection refused")
+        return api(request)
+
+    return FakeApi(answer).client(retry=Retry(attempts=3, backoff=0))
+
+
+BATCHES = st.lists(
+    st.lists(
+        st.tuples(st.integers(0, 5), st.integers(0, 1), st.booleans()), max_size=4
+    ),
+    min_size=1,
+    max_size=6,
+)
+
+
+@settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(
+    batches=BATCHES, tracker=st.sampled_from(["incremental", "changes"]), data=st.data()
+)
+def test_a_warehouse_fed_by_tracked_runs_mirrors_the_source_despite_failures(
+    batches, tracker, data
+):
+    # Between runs, a batch adds, edits or (for Changes, which can see it)
+    # deletes records; the clock moves on by 0 or 1 minute per change, so
+    # ties with the last run's newest value are common. Each run stores
+    # what it delivers into a warehouse, inside tracked_run. After every
+    # run that succeeds, the warehouse must equal the source; after every
+    # run that fails, the saved state must be as it was. The Hypothesis
+    # statistics (--hypothesis-show-statistics) show both kinds of run.
+    from api_explorer import ApiError, Changes, Incremental, tracked_run
+    from api_explorer.testing import MemoryState
+
+    store = MemoryState()
+    source: dict[int, dict] = {}
+    warehouse: dict[int, dict] = {}
+    rows: list[dict] = []
+    clock = version = 0
+    for batch in batches:
+        for id_, step, delete in batch:
+            clock += step
+            version += 1
+            if delete and tracker == "changes":
+                source.pop(id_, None)
+            else:
+                stamp = f"2026-01-01T00:{clock:02d}:00Z"
+                source[id_] = {"id": id_, "updated_at": stamp, "v": version}
+        rows[:] = list(source.values())
+        if tracker == "incremental":
+            args, options = (Incremental, "updated_at", "updated_since"), {}
+        else:
+            args, options = (Changes,), {"key": "id"}
+        before = store.get("orders")
+        client = flaky_source(rows, data)
+        try:
+            with tracked_run(store, "orders", *args, **options) as run:
+                if tracker == "incremental":
+                    # Written as they arrive: a failed run leaves part of
+                    # its records behind, and the next run must set them
+                    # right.
+                    for record in client.records("/orders/", incremental=run):
+                        warehouse[record["id"]] = record
+                else:
+                    # All or nothing, as Changes.deleted needs: records a
+                    # failed run stored would be unknown to the state, so a
+                    # later deletion of one could never be listed.
+                    delivered = list(client.records("/orders/", incremental=run))
+                    for record in delivered:
+                        warehouse[record["id"]] = record
+                    for id_ in run.deleted or []:
+                        warehouse.pop(id_, None)
+        except ApiError:
+            event("a run failed")
+            assert store.get("orders") == before
+            continue
+        event("a run succeeded")
+        assert warehouse == source

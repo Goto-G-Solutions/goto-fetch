@@ -207,6 +207,28 @@ def test_with_a_key_an_edit_at_the_last_value_is_passed_over():
     assert list(Incremental("t", state=by_content.state).track([edited])) == [edited]
 
 
+def test_page_numbers_over_data_that_shifts_mid_run_can_lose_a_record():
+    # The trap the docstring warns about, shown on purpose: record 1 is
+    # edited between pages 1 and 2, so it moves to the end, the records
+    # after it shift forward, and page 2 skips record 3. The run ends past
+    # record 3's time, so the next run doesn't ask for it either.
+    data = [rec(i, i) for i in range(1, 6)]
+    api = changes_api(data, page_size=2)
+    requests = 0
+
+    def answer(request):
+        nonlocal requests
+        requests += 1
+        if requests == 2:
+            data[:] = [*data[1:], rec(1, 9)]
+        return api(request)
+
+    first = orders()
+    assert run(FakeApi(answer), first) == [1, 2, 4, 5, 1]
+    second = Incremental("updated_at", "updated_since", key="id", state=first.state)
+    assert run(FakeApi(answer), second) == []
+
+
 # Settings for APIs that differ
 
 

@@ -138,6 +138,14 @@ class Incremental:
       filter takes a different form from the field (a date, not a time).
     - `missing`: what to do with a record without the field: "raise" (the
       default, since the run can't be tracked safely), "keep" or "drop".
+
+    A trap: paging by page number or offset over data that changes during
+    the run can lose records for good. When a record is edited or deleted
+    between two page requests, the records after it shift one place, so
+    the next page skips one; the run still ends with a newer last value,
+    and later runs never ask for the skipped record. Prefer a paging style
+    the server keeps steady, such as a cursor. Changes doesn't have this
+    problem: its next full fetch finds the record again.
     """
 
     def __init__(
@@ -341,7 +349,12 @@ class Changes:
         """The keys of the last run's records that this run didn't see.
 
         None until the run has seen every record, since only a complete
-        run can say what is gone.
+        run can say what is gone. Exact only when each run's records are
+        stored all or nothing: a failed run that stored part of its
+        records doesn't move the state, so if one of those records is
+        deleted at the source before the next run, no run lists it.
+        Store inside one transaction (as tracked_run's block allows), or
+        write everything at the end of the block.
         """
         return None if self._deleted is None else list(self._deleted)
 

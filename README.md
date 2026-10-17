@@ -104,6 +104,8 @@ with tracked_run(state, "orders", Incremental, "updated_at", "updated_since") as
 
 Two rules keep it from losing data. The state moves on only when a run has read every page, since records may come in any order and a failed run could have skipped older ones. And it asks from the last value itself, not after it, then passes over what it has already seen there, so records that share the last value aren't lost. `created_at` finds new records only; `updated_at` also finds edits, so a record can come back with new values, and storing must replace it by its id rather than add it again.
 
+One trap: paging by page number or offset can skip a record when the data changes during a run, because the records after a changed one shift a place. With `Incremental`, a skipped record is lost for good, since later runs start past it; use a paging style the server keeps steady, such as a cursor. `Changes` finds such a record again on its next run.
+
 When an API has no such field, or doesn't always update it, `Changes` fetches everything and passes on only new and changed records, by a fingerprint (a hash) of each. It also lists the records that disappeared, which a timestamp never shows. Leave out fields that change on every fetch, or every record looks changed:
 
 ```python
