@@ -116,14 +116,16 @@ def read_page(
 
     `results_key` is the path to the records (see get_path), with fallbacks
     such as "results|items"; None means the page itself is the list. An
-    explicit null there is an empty page. `count_key` is the path to the
-    total record count; a value that isn't a whole number counts as no
-    count.
+    explicit null there is an empty page, and so is an empty body (page
+    None, such as a 204). `count_key` is the path to the total record count:
+    a whole number, or digits as text; anything else counts as no count.
 
     Raises ApiError, naming `url` if given, when the results path is missing
     or doesn't hold a list. Missing is an error, not an empty page, so a
     mistyped key can't pass for "no data".
     """
+    if page is None:
+        return Page([], None)  # an empty body, such as a 204 No Content
     items = page if results_key is None else get_path(page, results_key, MISSING)
     if items is MISSING:
         raise ApiError(f"No {results_key!r} in the response", url=url)
@@ -134,6 +136,8 @@ def read_page(
             f"{results_key!r} holds a {type(items).__name__}, not a list", url=url
         )
     total = None if count_key is None else get_path(page, count_key)
+    if isinstance(total, str) and total.strip().isdigit():
+        total = int(total)  # some APIs send the count as text, "250"
     if not isinstance(total, int) or isinstance(total, bool):
         total = None
     return Page(items, total)
@@ -188,28 +192,77 @@ class Paging(Protocol):
     ) -> tuple[PageRequest, NextLinkFunction]: ...
 
 
+class _FollowRules:
+    """What NextLink, HeaderLink and Cursor share, for one run.
+
+    - An empty page ends the run, unless the style has stop_on_empty=False:
+      some APIs keep sending a next link or cursor after the data ends, and
+      would otherwise page forever.
+    - A next-page path missing from the first page (not null: missing) logs
+      a warning once, since it usually means a mistyped path, such as an
+      unquoted "@odata.nextLink"; the run then stops after that page.
+    """
+
+    def __init__(self, read: Callable[[Fetched], Page], stop_on_empty: bool) -> None:
+        self.read = read
+        self.stop_on_empty = stop_on_empty
+        self.first = True
+
+    def empty(self, fetched: Fetched) -> bool:
+        """True when this page has no records and that should end the run."""
+        if self.stop_on_empty and not self.read(fetched).items:
+            _stopped("a page came back empty", "empty page")
+            return True
+        return False
+
+    def check_first(self, fetched: Fetched, key: str) -> None:
+        """Warn once if `key` is missing from the run's first page."""
+        missing = (
+            fetched.body is not None and get_path(fetched.body, key, MISSING) is MISSING
+        )
+        if self.first and missing:
+            log_event(
+                logger,
+                logging.WARNING,
+                "no-next-key",
+                "No %r in the first page, so paging stops after it; check the path "
+                "(keys holding dots go in quotes, such as '[\"@odata.nextLink\"]')",
+                key,
+                data={"key": key},
+            )
+        self.first = False
+
+
 @dataclass(frozen=True)
 class NextLink:
     """Follow a next-page URL that each page carries, at path `key`.
 
     This is Django REST Framework's style, for page numbers and for
-    limit/offset alike: {"results": [...], "next": "...?page=2"}.
+    limit/offset alike: {"results": [...], "next": "...?page=2"}. An empty
+    page ends the run even if it carries a next link, unless
+    stop_on_empty=False (for APIs that send empty pages mid-run).
     """
 
     key: str = "next"
+    stop_on_empty: bool = True
 
     def begin(
         self, first: PageRequest, read: Callable[[Fetched], Page]
     ) -> tuple[PageRequest, NextLinkFunction]:
         """Start a run; the first request is used as given."""
+        rules = _FollowRules(read, self.stop_on_empty)
 
         def next_link(fetched: Fetched, request: PageRequest) -> str | None:
+            rules.check_first(fetched, self.key)
             link = get_path(fetched.body, self.key)
+            # A malformed link is an error even on an empty page.
             if link is not None and not isinstance(link, str):
                 kind = type(link).__name__
                 raise ApiError(
                     f"{self.key!r} holds a {kind}, not a URL", url=request.url
                 )
+            if rules.empty(fetched):
+                return None
             if not link:
                 _stopped("the page has no next link", "no next link")
             return link
@@ -307,17 +360,22 @@ class HeaderLink:
 
     This is GitHub's style, among others: the body holds only the records,
     and the response carries `Link: <...?page=2>; rel="next"`. `rel` names
-    the link to follow.
+    the link to follow. An empty page ends the run, unless
+    stop_on_empty=False.
     """
 
     rel: str = "next"
+    stop_on_empty: bool = True
 
     def begin(
         self, first: PageRequest, read: Callable[[Fetched], Page]
     ) -> tuple[PageRequest, NextLinkFunction]:
         """Start a run; the first request is used as given."""
+        rules = _FollowRules(read, self.stop_on_empty)
 
         def next_link(fetched: Fetched, request: PageRequest) -> str | None:
+            if rules.empty(fetched):
+                return None
             link = fetched.response.links.get(self.rel, {}).get("url")
             if not link:
                 _stopped("the response has no next link", "no next link")
@@ -333,12 +391,15 @@ class Cursor:
     `key` is the path to the next cursor in the body, such as "next_cursor"
     or "meta.next". `param` is the name it goes back under, and `send_in`
     says where: "query" (?cursor=abc) or "body" (a field in the JSON body,
-    for POST searches).
+    for POST searches). An empty page ends the run even if it carries a
+    cursor, unless stop_on_empty=False. A cursor must be one value, text or
+    a number; a path that finds several raises ApiError.
     """
 
     key: str = "next_cursor"
     param: str = "cursor"
     send_in: Literal["query", "body"] = "query"
+    stop_on_empty: bool = True
 
     def __post_init__(self) -> None:
         if self.send_in not in ("query", "body"):
@@ -348,11 +409,23 @@ class Cursor:
         self, first: PageRequest, read: Callable[[Fetched], Page]
     ) -> tuple[PageRequest, NextLinkFunction]:
         """Start a run; the first request is used as given."""
+        rules = _FollowRules(read, self.stop_on_empty)
 
         def next_link(
             fetched: Fetched, request: PageRequest
         ) -> PageRequest | str | None:
+            rules.check_first(fetched, self.key)
             cursor = get_path(fetched.body, self.key)
+            # A malformed cursor is an error even on an empty page.
+            one_value = isinstance(cursor, (str, int)) and not isinstance(cursor, bool)
+            if cursor is not None and not one_value:
+                kind = type(cursor).__name__
+                raise ApiError(
+                    f"{self.key!r} holds a {kind}, not one cursor value",
+                    url=request.url,
+                )
+            if rules.empty(fetched):
+                return None
             if cursor is None or cursor == "":
                 _stopped("the page has no cursor", "no cursor")
                 return None

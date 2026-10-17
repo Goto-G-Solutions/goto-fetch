@@ -178,7 +178,13 @@ class Client:
             error: Exception | None = None
             try:
                 response = self._http.request(method, url, **kwargs)
-            except (httpx2.TimeoutException, httpx2.NetworkError) as exc:
+            # A dropped connection mid-response (RemoteProtocolError) is as
+            # passing as a timeout, so it goes to the retry policy too.
+            except (
+                httpx2.TimeoutException,
+                httpx2.NetworkError,
+                httpx2.RemoteProtocolError,
+            ) as exc:
                 error = exc
                 failure = ApiError(f"{method} {url} failed: {exc}", url=url)
                 failure.__cause__ = exc
@@ -234,7 +240,12 @@ class Client:
         return self.json_body(self.request("GET", endpoint, **kwargs))
 
     def json_body(self, response: httpx2.Response) -> Any:
-        """Parse a response's JSON body with this client's decoder, or raise ApiError."""
+        """Parse a response's JSON body with this client's decoder, or raise ApiError.
+
+        An empty body, such as a 204 No Content, gives None.
+        """
+        if not response.content.strip():
+            return None
         try:
             return self.decode(response.content)
         except ValueError as exc:

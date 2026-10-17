@@ -277,6 +277,7 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 - The package prints nothing until the application asks (a `NullHandler` on the `api_explorer` logger). Never `print`, and never add a handler inside the package.
 - Log only through `log_event(logger, level, event, message, *args, data={...})`, under the module's logger (`logging.getLogger(__name__)`). Every record then carries `event` and plain-value `data`.
 - The list of events lives in one place, the `api_explorer.logs` docstring. Add a new event there, with its level and data keys.
+- **Secrets.** A URL reaches a message only through `ApiError` or `log_event`, which both hide sensitive query values (`redact_url`). Never build a message or log line with a raw URL another way.
 - Levels: INFO for what a run is doing (a line per page, a summary), WARNING for what someone should know (a retry, data changed to fit, a count that doesn't add up), DEBUG for why a decision went the way it did (why paging stopped, why a token was renewed). Keep INFO short: about one line per page.
 
 **Writing.** Plain language, as at the top of this file. No em dashes, anywhere: code, comments, docs, commits, issues or pull requests.

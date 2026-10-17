@@ -23,7 +23,7 @@ from api_explorer import (
     request_key,
     with_query,
 )
-from api_explorer.testing import json_pages, offset_api
+from api_explorer.testing import FakeApi, json_pages, offset_api, replies
 
 BASE = "http://api.test/api/items/"
 
@@ -155,7 +155,7 @@ def test_a_next_url_keeps_the_post_method_and_body(mock_client):
         seen.append((request.method, str(request.url), json.loads(request.content)))
         last = "page=2" in str(request.url)
         return httpx2.Response(
-            200, json={"results": [], "next": None if last else "?page=2"}
+            200, json={"results": [1], "next": None if last else "?page=2"}
         )
 
     list(mock_client(handler).records("/search/", method="post", json={"q": "x"}))
@@ -230,7 +230,7 @@ def test_records_add_params_to_the_first_url_only(mock_client):
         seen.append(str(request.url))
         last = "page=2" in str(request.url)
         return httpx2.Response(
-            200, json={"results": [], "next": None if last else "?page=2&size=5"}
+            200, json={"results": [1], "next": None if last else "?page=2&size=5"}
         )
 
     list(mock_client(handler).records("/items/", params={"size": 5}))
@@ -255,7 +255,7 @@ def test_records_stop_at_max_pages(mock_client):
         ({"data": {"rows": [1]}}, "results|data.rows", None, Page([1], None)),
         ([1, 2], None, None, Page([1, 2], None)),
         ({"results": None}, "results", None, Page([], None)),
-        ({"results": [], "count": "9"}, "results", "count", Page([], None)),
+        ({"results": [], "count": "9"}, "results", "count", Page([], 9)),
         ({"results": [], "count": True}, "results", "count", Page([], None)),
     ],
     ids=[
@@ -440,3 +440,89 @@ def test_offset_refuses_a_limit_below_one():
 def test_with_query_sets_one_parameter_and_keeps_the_rest():
     assert with_query("http://h/a?q=x&page=1", "page", 2) == "http://h/a?q=x&page=2"
     assert with_query("http://h/a", "after", "c 1") == "http://h/a?after=c+1"
+
+
+def endless_api(style_key: str, rows_until: int):
+    """A server that keeps sending a next link or cursor after the data ends."""
+
+    def answer(request):
+        n = int(request.url.params.get("n", 0))
+        rows = [n] if n < rows_until else []
+        following = f"?n={n + 1}" if style_key == "next" else str(n + 1)
+        return httpx2.Response(200, json={"results": rows, style_key: following})
+
+    return answer
+
+
+@pytest.mark.parametrize(
+    ("paging", "key"),
+    [(NextLink(), "next"), (Cursor(key="next_cursor", param="n"), "next_cursor")],
+    ids=["next-link", "cursor"],
+)
+def test_an_empty_page_ends_the_run_even_if_more_is_promised(mock_client, paging, key):
+    # Regression (dlt #3358): an API that keeps sending a cursor or next link
+    # after the data ends made the run page forever.
+    api = FakeApi(endless_api(key, rows_until=2))
+    assert list(mock_client(api).records("/e/", paging=paging, max_pages=50)) == [0, 1]
+    assert len(api.calls) == 3
+
+
+def test_stop_on_empty_false_keeps_paging_past_an_empty_page(mock_client):
+    pages = {
+        BASE: {"results": [1], "next": "?p=2"},
+        f"{BASE}?p=2": {"results": [], "next": "?p=3"},
+        f"{BASE}?p=3": {"results": [3], "next": None},
+    }
+    records = mock_client(json_pages(pages)).records(
+        "/items/", paging=NextLink(stop_on_empty=False)
+    )
+    assert list(records) == [1, 3]
+
+
+def test_a_next_path_missing_from_the_first_page_is_warned_about(mock_client, caplog):
+    # Regression (dlt #2505): an unquoted "@odata.nextLink" is read as a
+    # nested path, so paging stopped after one page without a word.
+    pages = {
+        BASE: {"value": [1], "@odata.nextLink": f"{BASE}?p=2"},
+        f"{BASE}?p=2": {"value": [2]},
+    }
+    client = mock_client(json_pages(pages))
+    assert list(
+        client.records(
+            "/items/", results_key="value", paging=NextLink("@odata.nextLink")
+        )
+    ) == [1]
+    assert any("No '@odata.nextLink' in the first page" in m for m in caplog.messages)
+    quoted = NextLink('["@odata.nextLink"]')
+    assert list(client.records("/items/", results_key="value", paging=quoted)) == [1, 2]
+
+
+def test_a_cursor_path_that_finds_several_values_is_refused(mock_client):
+    # Regression (dlt #3397): the cursor became the text of a list.
+    page = {BASE: {"results": [{"c": "a"}, {"c": "b"}]}}
+    with pytest.raises(
+        ApiError, match=re.escape("'results[*].c' holds a list, not one cursor value")
+    ):
+        list(
+            mock_client(json_pages(page)).records(
+                "/items/", paging=Cursor(key="results[*].c")
+            )
+        )
+
+
+def test_a_malformed_next_link_is_refused_even_on_an_empty_page(mock_client):
+    with pytest.raises(ApiError, match="holds a int, not a URL"):
+        list(
+            mock_client(json_pages({BASE: {"results": [], "next": 2}})).records(
+                "/items/"
+            )
+        )
+
+
+def test_an_empty_body_or_204_is_an_empty_page(mock_client):
+    # Regression (dlt #1849): an empty 204 failed as "did not return JSON".
+    assert list(mock_client(replies(httpx2.Response(204))).records("/items/")) == []
+    assert (
+        list(mock_client(replies(httpx2.Response(200, content=b""))).records("/items/"))
+        == []
+    )

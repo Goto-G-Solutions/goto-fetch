@@ -25,8 +25,16 @@ def test_a_server_error_is_retried_and_each_retry_is_logged(mock_client, caplog)
 
 @pytest.mark.parametrize(
     "first",
-    [httpx2.Response(429), httpx2.Response(408), httpx2.ConnectError("refused")],
-    ids=["rate-limited", "request-timeout", "network-error"],
+    [
+        httpx2.Response(429),
+        httpx2.Response(408),
+        httpx2.ConnectError("refused"),
+        # Regression (dlt b7500775): a connection dropped mid-response wasn't retried.
+        httpx2.RemoteProtocolError(
+            "peer closed connection without sending complete message body"
+        ),
+    ],
+    ids=["rate-limited", "request-timeout", "network-error", "dropped-mid-response"],
 )
 def test_temporary_failures_are_retried(mock_client, first):
     handler = replies(first, OK)
@@ -188,3 +196,13 @@ def test_the_call_s_retry_argument_reaches_the_policy_unless_it_is_false(
     with pytest.raises(ApiError):
         mock_client(handler, retry=policy).request("POST", "/items/", retry=retry)
     assert [f.retry for f in policy.failures] == seen
+
+
+def test_a_retry_after_of_zero_still_backs_off():
+    # Guard (dlt #4036): Retry-After: 0 caused an instant retry loop there.
+    wait = Retry(backoff=1.0).wait(
+        Failure(
+            1, "GET", "http://h/x", httpx2.Response(429, headers={"Retry-After": "0"})
+        )
+    )
+    assert wait is not None and wait >= 0.8

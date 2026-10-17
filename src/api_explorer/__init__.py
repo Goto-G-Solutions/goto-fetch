@@ -29,9 +29,16 @@ from .auth import (
 )
 from .client import Client, ResolvesUrls
 from .decode import Decoder, json_decoder
-from .errors import ApiError
+from .errors import ApiError, redact_url
 from .frames import default_backend, latest_per_key, to_frame
-from .logs import ClientFilter, disable_logging, enable_logging, log_event, logging_to
+from .logs import (
+    ClientFilter,
+    RedactFilter,
+    disable_logging,
+    enable_logging,
+    log_event,
+    logging_to,
+)
 from .models import as_dict, converter
 from .paging import (
     Cursor,
@@ -70,6 +77,7 @@ __all__ = [
     "PageRequest",
     "Paging",
     "PasswordLogin",
+    "RedactFilter",
     "ResolvesUrls",
     "Retry",
     "RetryPolicy",
@@ -93,6 +101,7 @@ __all__ = [
     "parse_datetime",
     "parse_path",
     "read_page",
+    "redact_url",
     "request_key",
     "retry_after_seconds",
     "select",

@@ -158,6 +158,7 @@ def test_offset_paging_returns_every_record_once_whatever_the_server_does(
 
 @given(sizes=st.lists(st.integers(0, 5), min_size=1, max_size=6))
 def test_cursor_paging_by_post_body_returns_every_page_in_order(sizes):
+    # Pages may be empty mid-run here: that is what stop_on_empty=False is for.
     from api_explorer import Cursor
 
     pages = [
@@ -181,6 +182,6 @@ def test_cursor_paging_by_post_body_returns_every_page_in_order(sizes):
         method="POST",
         json={},
         results_key="hits",
-        paging=Cursor(send_in="body"),
+        paging=Cursor(send_in="body", stop_on_empty=False),
     )
     assert list(records) == list(range(sum(sizes)))

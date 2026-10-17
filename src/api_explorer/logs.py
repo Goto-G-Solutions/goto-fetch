@@ -40,6 +40,8 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any
 
+from .errors import redact
+
 ROOT = "api_explorer"
 """The package's logger; every module logs under it."""
 
@@ -69,8 +71,12 @@ def log_event(
     look the same to a handler. `message` and `args` work as in logging.
     """
     if logger.isEnabledFor(level):
+        safe_args = tuple(redact(a) if isinstance(a, str) else a for a in args)
+        safe_data = {
+            k: redact(v) if isinstance(v, str) else v for k, v in (data or {}).items()
+        }
         logger.log(
-            level, message, *args, extra={"event": event, "data": dict(data or {})}
+            level, message, *safe_args, extra={"event": event, "data": safe_data}
         )
 
 
@@ -93,6 +99,21 @@ class ClientFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if getattr(record, "client", None) is None:
             record.client = _client_name.get()
+        return True
+
+
+class RedactFilter(logging.Filter):
+    """Hides secrets in URLs in each record's message (see redact_url).
+
+    enable_logging puts this on its handler, so lines from httpx2 and from
+    your own pieces are covered too, not just the package's.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        safe = redact(message)
+        if safe != message:
+            record.msg, record.args = safe, None
         return True
 
 
@@ -130,8 +151,9 @@ def enable_logging(
 
     `loggers` adds other loggers to the same handler, such as those of
     pieces you build, and `http` adds httpx2's line per request. The
-    handler stamps each record with record.client (see ClientFilter). It
-    is returned, so disable_logging(handler) can take it off again.
+    handler stamps each record with record.client (see ClientFilter) and
+    hides secrets in URLs (see RedactFilter). It is returned, so
+    disable_logging(handler) can take it off again.
     """
     number = _level(level)
     handler = handler or logging.StreamHandler(sys.stderr)
@@ -139,6 +161,7 @@ def enable_logging(
         handler.setFormatter(_Formatter())
     handler.setLevel(number)
     handler.addFilter(ClientFilter())
+    handler.addFilter(RedactFilter())
     names = [ROOT, *loggers, *([HTTP] if http else [])]
     previous = {}
     for name in names:

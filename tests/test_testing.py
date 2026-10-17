@@ -114,7 +114,8 @@ def test_cursor_api_takes_its_cursor_where_it_is_told(send_in):
 
 def test_fetched_builds_the_page_a_paging_style_receives():
     page = fetched(
-        {"next": "?page=2"}, headers={"Link": '<http://h/x?page=2>; rel="next"'}
+        {"results": [1], "next": "?page=2"},
+        headers={"Link": '<http://h/x?page=2>; rel="next"'},
     )
     first = PageRequest("http://api.test/api/items/")
     _, body_link = NextLink().begin(first, read_page_of)
