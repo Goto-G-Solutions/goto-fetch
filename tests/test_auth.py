@@ -1,0 +1,194 @@
+"""Authentication: token_headers, jwt_expiry, PasswordLogin and TokenRefresh."""
+
+import base64
+import json
+
+import httpx2
+import pytest
+from support import auth_server, paths_called
+
+from api_explorer import (
+    ApiError,
+    PasswordLogin,
+    TokenRefresh,
+    jwt_expiry,
+    token_headers,
+)
+
+LOGIN = PasswordLogin("/token/", "me", "pw")
+
+
+def make_jwt(exp: float) -> str:
+    """An unsigned JWT that expires at Unix time `exp`."""
+
+    def part(data: dict) -> str:
+        return base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip("=")
+
+    return f"{part({'alg': 'none'})}.{part({'exp': exp})}.sig"
+
+
+@pytest.mark.parametrize(
+    ("args", "headers"),
+    [
+        (("abc",), {"Authorization": "Token abc"}),
+        (("abc", "Bearer"), {"Authorization": "Bearer abc"}),
+        (("abc", None, "X-API-Key"), {"X-API-Key": "abc"}),
+    ],
+)
+def test_token_headers_build_a_fixed_token_header(args, headers):
+    assert token_headers(*args) == headers
+
+
+@pytest.mark.parametrize(
+    ("token", "expiry"),
+    [(make_jwt(1234.0), 1234.0), ("opaque-token", None), ("a.%%%.c", None)],
+)
+def test_jwt_expiry_reads_the_exp_claim_or_gives_none(token, expiry):
+    assert jwt_expiry(token) == expiry
+
+
+def test_token_refresh_needs_a_refresh_token_or_a_login():
+    with pytest.raises(ValueError, match="needs a refresh token, a login"):
+        TokenRefresh("/token/refresh/")
+
+
+@pytest.mark.parametrize(
+    ("options", "first_calls"),
+    [
+        ({"login": LOGIN}, ["/api/token/"]),
+        ({"refresh": "r0"}, ["/api/token/refresh/"]),
+    ],
+    ids=["logs-in", "refreshes"],
+)
+def test_the_first_request_gets_an_access_token_first(
+    mock_client, options, first_calls
+):
+    handler, state = auth_server()
+    auth = TokenRefresh("/token/refresh/", **options)
+    assert list(mock_client(handler, auth=auth).records("/items/")) == [{"id": 1}]
+    assert paths_called(state) == [*first_calls, "/api/items/"]
+
+
+def test_a_401_renews_the_access_token_and_resends_once(mock_client):
+    handler, state = auth_server()
+    auth = TokenRefresh("/token/refresh/", refresh="r0", access="stale")
+    assert list(mock_client(handler, auth=auth).records("/items/")) == [{"id": 1}]
+    assert paths_called(state) == ["/api/items/", "/api/token/refresh/", "/api/items/"]
+
+
+@pytest.mark.parametrize(
+    ("now", "calls"),
+    [(990.0, ["/api/token/refresh/", "/api/items/"]), (0.0, ["/api/items/"])],
+    ids=["about-to-expire", "fresh"],
+)
+def test_a_jwt_is_renewed_only_when_it_is_about_to_expire(mock_client, now, calls):
+    handler, state = auth_server()
+    token = make_jwt(1000.0)
+    state["access"].add(token)
+    auth = TokenRefresh("/token/refresh/", refresh="r0", access=token, now=lambda: now)
+    list(mock_client(handler, auth=auth).records("/items/"))
+    assert paths_called(state) == calls
+
+
+def test_a_rotated_refresh_token_replaces_the_old_one(mock_client):
+    handler, state = auth_server(rotate=True)
+    client = mock_client(handler, auth=TokenRefresh("/token/refresh/", refresh="r0"))
+    list(client.records("/items/"))
+    state["access"].clear()
+    # Reusing "r0" would now fail: the server accepted the rotated token.
+    list(client.records("/items/"))
+    refreshes = [b for _, p, b in state["calls"] if p == "/api/token/refresh/"]
+    assert refreshes[0] == {"refresh": "r0"}
+    assert refreshes[-1] != {"refresh": "r0"}
+
+
+def test_a_failed_refresh_falls_back_to_logging_in(mock_client):
+    handler, state = auth_server()
+    auth = TokenRefresh("/token/refresh/", refresh="expired", login=LOGIN)
+    assert list(mock_client(handler, auth=auth).records("/items/")) == [{"id": 1}]
+    assert paths_called(state) == ["/api/token/refresh/", "/api/token/", "/api/items/"]
+
+
+def test_a_failed_refresh_without_a_login_names_the_url_and_asks_for_new_tokens(
+    mock_client,
+):
+    handler, state = auth_server()
+    auth = TokenRefresh("/token/refresh/", refresh="expired")
+    with pytest.raises(ApiError, match="Paste new tokens") as raised:
+        list(mock_client(handler, auth=auth).records("/items/"))
+    # Regression: auth errors used to leave out the URL they tried.
+    assert "refreshing at http://api.test/api/token/refresh/ returned HTTP 401" in str(
+        raised.value
+    )
+    assert paths_called(state) == ["/api/token/refresh/"]
+
+
+def test_a_failed_login_names_the_url_and_its_status(mock_client):
+    handler, _ = auth_server(login_works=False)
+    auth = TokenRefresh("/token/refresh/", login=LOGIN)
+    with pytest.raises(
+        ApiError, match="Logging in at http://api.test/api/token/ returned HTTP 401"
+    ) as raised:
+        list(mock_client(handler, auth=auth).records("/items/"))
+    assert raised.value.status == 401
+
+
+def test_a_401_that_survives_renewal_fails_without_looping(mock_client):
+    handler, state = auth_server(deny_all=True)
+    auth = TokenRefresh("/token/refresh/", refresh="r0")
+    with pytest.raises(ApiError) as raised:
+        list(mock_client(handler, auth=auth).records("/items/"))
+    assert raised.value.status == 401
+    assert paths_called(state) == ["/api/token/refresh/", "/api/items/"] * 2
+
+
+def test_a_post_refused_with_401_is_resent_with_its_body(mock_client):
+    handler, state = auth_server()
+    auth = TokenRefresh("/token/refresh/", refresh="r0", access="stale")
+    response = mock_client(handler, auth=auth).request(
+        "POST", "/items/", json={"status": "DONE"}
+    )
+    assert response.json()["results"] == [{"status": "DONE"}]
+    posts = [b for m, p, b in state["calls"] if m == "POST" and p == "/api/items/"]
+    assert posts == [{"status": "DONE"}, {"status": "DONE"}]
+
+
+def test_token_fields_can_have_other_names(mock_client):
+    handler, _ = auth_server(access_field="access_token")
+    auth = TokenRefresh("/token/refresh/", refresh="r0", access_key="access_token")
+    assert list(mock_client(handler, auth=auth).records("/items/")) == [{"id": 1}]
+
+
+def test_auth_urls_resolve_against_the_base_url_like_endpoints(mock_client):
+    # Regression: "token/" used to resolve against the request URL, giving
+    # /api/items/token/.
+    handler, state = auth_server()
+    auth = TokenRefresh(
+        "token/refresh", refresh="expired", login=PasswordLogin("token", "me", "pw")
+    )
+    list(mock_client(handler, auth=auth).records("/items/"))
+    assert paths_called(state) == ["/api/token/refresh/", "/api/token/", "/api/items/"]
+
+
+def test_auth_urls_follow_the_trailing_slash_setting(mock_client):
+    seen = []
+
+    def handler(request):
+        seen.append(request.url.path)
+        if request.url.path == "/api/token/pair":
+            return httpx2.Response(200, json={"access": "a1", "refresh": "r1"})
+        return httpx2.Response(200, json={"results": [], "next": None})
+
+    auth = TokenRefresh(
+        "/token/refresh", login=PasswordLogin("/token/pair", "me", "pw")
+    )
+    list(mock_client(handler, auth=auth, trailing_slash=False).records("/items"))
+    assert seen == ["/api/token/pair", "/api/items"]
+
+
+def test_secrets_stay_out_of_repr():
+    login = PasswordLogin("/token/", "me", "hunter2")
+    auth = TokenRefresh("/token/refresh/", refresh="r-secret", login=login)
+    for text in (repr(login), repr(auth)):
+        assert "hunter2" not in text
+        assert "r-secret" not in text
