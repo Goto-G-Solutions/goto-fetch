@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "api-explorer",
+#     "api-explorer[duckdb]",
 #     "marimo>=0.25.1",
 # ]
 #
@@ -129,7 +129,7 @@ def _():
     count_key = mo.ui.text(placeholder="count", label="Count path")
     error_path = mo.ui.text(placeholder="error|errors", label="Error path")
     paging = mo.ui.dropdown(
-        ["next link", "limit/offset", "header link", "cursor"],
+        ["next link", "limit/offset", "header link", "cursor", "keyset"],
         value="next link",
         label="Paging",
     )
@@ -138,6 +138,21 @@ def _():
     cursor_key = mo.ui.text(value="next_cursor", label="Cursor path")
     cursor_param = mo.ui.text(value="cursor", label="Send it as")
     cursor_in = mo.ui.dropdown(["query", "body"], value="query", label="In the")
+
+    track = mo.ui.dropdown(
+        ["Everything", "Changes, by a field", "Changes, by a hash"],
+        value="Everything",
+        label="Each run fetches",
+    )
+    change_field = mo.ui.text(value="updated_at", label="Change field")
+    change_param = mo.ui.text(placeholder="updated_since", label="Filter parameter")
+    change_in = mo.ui.dropdown(["query", "body"], value="query", label="In the")
+    key = mo.ui.text(placeholder="id", label="Key")
+    ignore = mo.ui.text(
+        placeholder="fetched_at, stats.views", label="Leave out of the hash"
+    )
+    warehouse = mo.ui.text(placeholder="shop.duckdb", label="DuckDB file")
+    table = mo.ui.text(placeholder="orders", label="Table")
 
     max_pages = mo.ui.number(start=0, value=1, step=1, label="Pages (0 = all)")
     timeout = mo.ui.number(start=1, value=20, step=1, label="Timeout (s)")
@@ -161,6 +176,9 @@ def _():
         backend,
         base_url,
         body,
+        change_field,
+        change_in,
+        change_param,
         client_id,
         client_secret,
         columns,
@@ -173,6 +191,8 @@ def _():
         error_path,
         fetch,
         header,
+        ignore,
+        key,
         limit,
         login_url,
         max_pages,
@@ -186,12 +206,15 @@ def _():
         results_key,
         scheme,
         scope,
+        table,
         timeout,
         token,
         token_url,
+        track,
         trailing_slash,
         username,
         verbose,
+        warehouse,
     )
 
 
@@ -201,6 +224,9 @@ def _(
     auth_kind,
     base_url,
     body,
+    change_field,
+    change_in,
+    change_param,
     client_id,
     client_secret,
     count_key,
@@ -212,6 +238,8 @@ def _(
     error_path,
     fetch,
     header,
+    ignore,
+    key,
     limit,
     login_url,
     max_pages,
@@ -225,12 +253,15 @@ def _(
     results_key,
     scheme,
     scope,
+    table,
     timeout,
     token,
     token_url,
+    track,
     trailing_slash,
     username,
     verbose,
+    warehouse,
 ):
     def _section(title: str, *rows: Any) -> Any:
         return mo.vstack([mo.md(f"#### {title}"), *rows], gap=0.5)
@@ -309,6 +340,17 @@ def _(
                 "or the JSON body, until a page gives none."
             ),
         ]
+    elif paging.value == "keyset":
+        _paging_rows = [
+            _row(paging, change_field, change_param, limit, change_in),
+            _hint(
+                "Asks each page from the last change-field value of the one "
+                "before, for an API sorted by that field (add something like "
+                "`?ordering=updated_at` to the endpoint). Unlike page numbers, "
+                "it can't skip a record edited during the run. The filter "
+                "must mean *from* this value on."
+            ),
+        ]
     elif paging.value == "header link":
         _paging_rows = [
             _row(paging),
@@ -323,6 +365,44 @@ def _(
             _hint(
                 "Follows the next-page URL in each page, as Django REST "
                 "Framework gives."
+            ),
+        ]
+
+    _where = _row(warehouse, table, key)
+    if track.value == "Changes, by a field":
+        _store_rows = [
+            _row(track),
+            _row(change_field, change_param, change_in),
+            _where,
+            _hint(
+                "Fetches only what changed since the last run, by a field "
+                "that grows, such as `updated_at`. Leave the filter empty if "
+                "the API can't filter: every page is fetched, and only new "
+                "records come through. Where the last run stopped is kept in "
+                "the DuckDB file, and saved only once the records are stored. "
+                "With a key, a changed record replaces its row."
+            ),
+        ]
+    elif track.value == "Changes, by a hash":
+        _store_rows = [
+            _row(track),
+            _where,
+            _row(ignore),
+            _hint(
+                "Fetches everything and stores only new and changed records, "
+                "by a hash of each, removing rows whose key is gone. For APIs "
+                "without a field that marks changes. Leave out fields that "
+                "change on every fetch, or every record looks changed."
+            ),
+        ]
+    else:
+        _store_rows = [
+            _row(track),
+            _where,
+            _hint(
+                "Optional: a DuckDB file and table to store the records in. "
+                "With a key, a record replaces the row with its key; without "
+                "one, records are added."
             ),
         ]
 
@@ -351,6 +431,7 @@ def _(
                 ),
                 *_paging_rows,
             ),
+            _section("Store (optional)", *_store_rows),
             _section(
                 "Run",
                 _row(max_pages, timeout, verbose),
@@ -372,6 +453,9 @@ def _(
     auth_kind,
     base_url,
     body,
+    change_field,
+    change_in,
+    change_param,
     client_id,
     client_secret,
     count_key,
@@ -383,6 +467,8 @@ def _(
     error_path,
     fetch,
     header,
+    ignore,
+    key,
     limit,
     login_url,
     max_pages,
@@ -396,12 +482,15 @@ def _(
     results_key,
     scheme,
     scope,
+    table,
     timeout,
     token,
     token_url,
+    track,
     trailing_slash,
     username,
     verbose,
+    warehouse,
 ):
     mo.stop(
         not fetch.value,
@@ -449,6 +538,7 @@ def _(
             "limit/offset": "offset",
             "header link": "header",
             "cursor": "cursor",
+            "keyset": "keyset",
         }.get(paging.value, "next"),
         next_key=next_key.value or "next",
         cursor_key=cursor_key.value or "next_cursor",
@@ -456,6 +546,17 @@ def _(
         cursor_in=cursor_in.value,
         limit=int(limit.value),
         max_pages=int(max_pages.value) or None,
+        track={
+            "Changes, by a field": "incremental",
+            "Changes, by a hash": "changes",
+        }.get(track.value, "none"),
+        change_field=change_field.value or "updated_at",
+        change_param=change_param.value,
+        change_in=change_in.value,
+        key=key.value,
+        ignore=tuple(p.strip() for p in ignore.value.split(",") if p.strip()),
+        warehouse=warehouse.value,
+        table=table.value,
     )
 
     # The package logs nothing until asked. Here its "page" events drive the
@@ -477,19 +578,40 @@ def _(
         logging_to(level="DEBUG" if verbose.value else "WARNING", http=verbose.value),
         plan.client() as _client,
     ):
-        fetched = list(plan.records(_client))
+        if plan.warehouse:
+            stored_count = plan.store(_client)
+        else:
+            stored_count = None
+            fetched = list(plan.records(_client))
     fetch_seconds = time.monotonic() - _started
-    return fetch_seconds, fetched, plan
+    if plan.warehouse:
+        # Show what the table now holds, not just this run's changes.
+        import duckdb
+
+        with duckdb.connect(plan.warehouse, read_only=True) as _db:
+            _quoted = '"' + plan.table.replace('"', '""') + '"'
+            _tables = {_name for (_name,) in _db.sql("SHOW TABLES").fetchall()}
+            if plan.table in _tables:
+                _result = _db.sql(f"SELECT * FROM {_quoted} LIMIT 1000")
+                fetched = [dict(zip(_result.columns, _r)) for _r in _result.fetchall()]
+            else:
+                fetched = []
+    return fetch_seconds, fetched, plan, stored_count
 
 
 @app.cell(hide_code=True)
-def _(backend, columns, fetch_seconds, fetched):
+def _(backend, columns, fetch_seconds, fetched, plan, stored_count):
+    if stored_count is None:
+        _summary = f"**{len(fetched):,}** records in {fetch_seconds:.1f}s"
+    else:
+        _summary = (
+            f"Stored **{stored_count:,}** records in `{plan.table}` in "
+            f"{fetch_seconds:.1f}s. Below: the table's first "
+            f"{len(fetched):,} rows."
+        )
     mo.vstack(
         [
-            mo.md(
-                f"#### Results\n\n**{len(fetched):,}** records in "
-                f"{fetch_seconds:.1f}s"
-            ),
+            mo.md(f"#### Results\n\n{_summary}"),
             columns,
             mo.hstack(
                 [

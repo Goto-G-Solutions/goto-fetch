@@ -290,7 +290,9 @@ uvx marimo edit --sandbox notebooks/explorer.py
 
 The notebook's header installs the package from this repo. To use the notebook on its own, outside a clone of the repo, delete its `[tool.uv.sources]` lines, and it installs `api-explorer` from PyPI instead.
 
-Fill in the API, press **Fetch**, and pick the columns you want. The **Code** tab then shows a script that repeats the fetch; `uv run` installs what it needs. Secrets come from `$API_TOKEN`, `$API_REFRESH_TOKEN`, `$API_USERNAME` and `$API_PASSWORD`, and never appear in the script.
+Fill in the API, press **Fetch**, and pick the columns you want. The **Code** tab then shows a script that repeats the fetch; `uv run` installs what it needs. Secrets come from `$API_TOKEN`, `$API_REFRESH_TOKEN`, `$API_USERNAME`, `$API_PASSWORD` and `$API_CLIENT_SECRET`, and never appear in the script.
+
+The **Store** section saves the records in a DuckDB file instead, and can fetch only what changed since the last run, by a field such as `updated_at` or by a hash of each record. Where each run stopped is kept in the same file. The script then does the same, so a scheduled `uv run fetch.py` keeps the table up to date. A tracked fetch reads every page, so set **Pages** to 0.
 
 ## How it is built
 

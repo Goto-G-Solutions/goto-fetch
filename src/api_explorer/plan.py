@@ -9,19 +9,31 @@ from typing import Any, Literal
 from .auth import ClientCredentials, PasswordLogin, TokenRefresh, token_headers
 from .checks import error_at
 from .client import Client
+from .incremental import Changes, Incremental, Keyset, Tracker
 from .paging import Cursor, HeaderLink, NextLink, Offset, Paging
+from .state import tracked_run
+from .warehouse import Warehouse
 
 
 @dataclass(frozen=True)
 class FetchPlan:
     """One fetch, as the Explore panel describes it.
 
-    client() and records() run it. script() writes it as a PEP 723 script,
-    with uv-installable dependencies, that does the same fetch. Secrets
-    (token, refresh_token, access_token, password, client_secret) are used
-    to run, kept out of repr, and never written: scripts read $API_TOKEN,
-    $API_REFRESH_TOKEN, $API_USERNAME, $API_PASSWORD and $API_CLIENT_SECRET
-    instead.
+    client() and records() run it, and store() runs it into a warehouse.
+    script() writes it as a PEP 723 script, with uv-installable
+    dependencies, that does the same. Secrets (token, refresh_token,
+    access_token, password, client_secret) are used to run, kept out of
+    repr, and never written: scripts read $API_TOKEN, $API_REFRESH_TOKEN,
+    $API_USERNAME, $API_PASSWORD and $API_CLIENT_SECRET instead.
+
+    Storing: `warehouse` (a DuckDB file) and `table` say where records go,
+    and `key` which field identifies one. `track` chooses what a run
+    delivers: everything ("none"), what changed by a field ("incremental":
+    `change_field`, filtered by `change_param` if the API can), or what
+    changed by a hash of each record ("changes", which needs `key` and can
+    `ignore` fields). A tracked plan needs a warehouse, since saving where
+    a run stopped without storing its records would skip them, and can't
+    use max_pages. paging="keyset" pages by `change_field` itself.
     """
 
     base_url: str
@@ -48,13 +60,42 @@ class FetchPlan:
     results_key: str | None = "results"
     count_key: str | None = None
     error_path: str = ""
-    paging: Literal["next", "offset", "header", "cursor"] = "next"
+    paging: Literal["next", "offset", "header", "cursor", "keyset"] = "next"
     next_key: str = "next"
     limit: int = 100
     cursor_key: str = "next_cursor"
     cursor_param: str = "cursor"
     cursor_in: Literal["query", "body"] = "query"
     max_pages: int | None = None
+    track: Literal["none", "incremental", "changes"] = "none"
+    change_field: str = "updated_at"
+    change_param: str = ""
+    change_in: Literal["query", "body"] = "query"
+    key: str = ""
+    ignore: tuple[str, ...] = ()
+    warehouse: str = ""
+    table: str = ""
+
+    def __post_init__(self) -> None:
+        if self.track != "none" and not self.warehouse:
+            raise ValueError(
+                "A tracked plan needs a warehouse: saving where a run stopped "
+                "without storing its records would skip them next time"
+            )
+        if self.warehouse and not self.table:
+            raise ValueError("A plan with a warehouse needs a table name")
+        if self.track == "changes" and not self.key:
+            raise ValueError("track='changes' needs a key, such as 'id'")
+        if self.track != "none" and self.max_pages:
+            raise ValueError(
+                "A tracked plan fetches every page: set max_pages to None (0 in "
+                "the explorer), or a run cut short would skip records"
+            )
+        if self.paging == "keyset" and not self.change_param:
+            raise ValueError(
+                "Keyset paging needs change_param, the filter it pages by, such "
+                "as 'updated_since'"
+            )
 
     def _login(self) -> PasswordLogin | None:
         if self.username and self.password:
@@ -101,10 +142,55 @@ class FetchPlan:
             return HeaderLink()
         if self.paging == "cursor":
             return Cursor(self.cursor_key, self.cursor_param, self.cursor_in)
+        if self.paging == "keyset":
+            return Keyset(
+                self.change_field, self.change_param, self.limit, send_in=self.change_in
+            )
         return NextLink(self.next_key)
 
-    def records(self, client: Client) -> Iterator[Any]:
-        """Yield this plan's records through `client`."""
+    def tracker(self) -> tuple[type[Tracker] | None, tuple[Any, ...], dict[str, Any]]:
+        """The tracker class this plan uses, with its arguments for tracked_run.
+
+        (None, (), {}) when the plan tracks nothing. Incremental recognises
+        records by content, the safer default (see Incremental's `key`).
+        """
+        if self.track == "incremental":
+            args = (self.change_field, self.change_param or None)
+            options = {"send_in": self.change_in} if self.change_in != "query" else {}
+            return Incremental, args, options
+        if self.track == "changes":
+            options: dict[str, Any] = {"key": self.key}
+            if self.ignore:
+                options["ignore"] = list(self.ignore)
+            return Changes, (), options
+        return None, (), {}
+
+    def store(self, client: Client) -> int:
+        """Run this plan into its warehouse, and return how many records were stored.
+
+        A tracked plan starts from where its last run stopped (saved in the
+        warehouse under the table's name) and saves where this one stopped
+        only once the records are stored.
+        """
+        if not self.warehouse:
+            raise ValueError("This plan has no warehouse to store into")
+        shop = Warehouse(self.warehouse)
+        key = self.key or None
+        kind, args, options = self.tracker()
+        if kind is None:
+            return shop.write(self.table, self.records(client), key=key)
+        with tracked_run(shop, self.table, kind, *args, **options) as run:
+            return shop.write(
+                self.table,
+                self.records(client, run),
+                key=key,
+                deleted_by=run if isinstance(run, Changes) else None,
+            )
+
+    def records(
+        self, client: Client, incremental: Tracker | None = None
+    ) -> Iterator[Any]:
+        """Yield this plan's records through `client`, through `incremental` if given."""
         return client.records(
             self.endpoint,
             method=self.method,
@@ -114,6 +200,7 @@ class FetchPlan:
             count_key=self.count_key,
             paging=self.paging_strategy(),
             max_pages=self.max_pages,
+            incremental=incremental,
         )
 
     def script(
@@ -132,7 +219,7 @@ class FetchPlan:
         package_requirement) and the backend.
         """
         deps = [requirement, *([backend] if backend else [])]
-        names = {"Client", type(self.paging_strategy()).__name__}
+        names = {"Client"}
         body: list[str] = []
         client_args = [repr(self.base_url)]
         if self.auth == "header" and self.token:
@@ -202,23 +289,40 @@ class FetchPlan:
                 f"paging=Cursor(key={self.cursor_key!r}, param={self.cursor_param!r}, "
                 f"send_in={self.cursor_in!r})"
             )
+        elif self.paging == "keyset":
+            send_in = (
+                f", send_in={self.change_in!r}" if self.change_in != "query" else ""
+            )
+            record_args.append(
+                f"paging=Keyset({self.change_field!r}, {self.change_param!r}, "
+                f"limit={self.limit!r}{send_in})"
+            )
         elif self.next_key != "next":
             record_args.append(f"paging=NextLink({self.next_key!r})")
         if self.max_pages:
             record_args.append(f"max_pages={self.max_pages!r}")
+        if any(a.startswith("paging=") for a in record_args):
+            names.add(type(self.paging_strategy()).__name__)
 
-        body += [
-            "with Client(",
-            *(f"    {a}," for a in client_args),
-            ") as client:",
-            "    records = list(",
-            "        client.records(",
-            *(f"            {a}," for a in record_args),
-            "        )",
-            "    )",
-        ]
+        if self.warehouse:
+            deps.append("duckdb")
+            body += self._storing_lines(client_args, record_args, names)
+            columns, backend = (), None  # the records are in the warehouse
+        else:
+            body += [
+                "with Client(",
+                *(f"    {a}," for a in client_args),
+                ") as client:",
+                "    records = list(",
+                "        client.records(",
+                *(f"            {a}," for a in record_args),
+                "        )",
+                "    )",
+            ]
         result = "records"
-        if columns:
+        if self.warehouse:
+            result = f'f"Stored {{count:,}} records in {self.table!r}"'
+        elif columns:
             names.add("select")
             body += ["", f"rows = select(records, {list(columns)!r})"]
             result = "rows"
@@ -239,11 +343,53 @@ class FetchPlan:
         reads_secrets = any("os.environ" in line for line in body + client_args)
         imports = ["import os", ""] if reads_secrets else []
         imports.append(f"from api_explorer import {', '.join(sorted(names))}")
+        if self.warehouse:
+            imports.append("from api_explorer.warehouse import Warehouse")
         doc = (
             f'"""Fetch {self.endpoint} from {self.base_url}, '
             'as set up in the API explorer."""'
         )
         return "\n".join([*header, doc, "", *imports, "", *body]) + "\n"
+
+    def _storing_lines(
+        self, client_args: list[str], record_args: list[str], names: set[str]
+    ) -> list[str]:
+        """The script lines that run this plan into its warehouse, as store() does."""
+        kind, args, options = self.tracker()
+        clients = ["Client(", *(f"    {a}," for a in client_args), ")"]
+        if kind is None:
+            opening = ["with " + clients[0], *clients[1:-1], ") as client:"]
+        else:
+            names.update({"tracked_run", kind.__name__})
+            run_args = ", ".join(
+                [
+                    "shop",
+                    repr(self.table),
+                    kind.__name__,
+                    *(repr(a) for a in args),
+                    *(f"{k}={v!r}" for k, v in options.items()),
+                ]
+            )
+            record_args = [*record_args, "incremental=run"]
+            opening = [
+                "with (",
+                *(f"    {line}" for line in clients[:-1]),
+                "    ) as client,",
+                f"    tracked_run({run_args}) as run,",
+                "):",
+            ]
+        return [
+            f"shop = Warehouse({self.warehouse!r})",
+            *opening,
+            "    count = shop.write(",
+            f"        {self.table!r},",
+            "        client.records(",
+            *(f"            {a}," for a in record_args),
+            "        ),",
+            *([f"        key={self.key!r},"] if self.key else []),
+            *(["        deleted_by=run,"] if kind is Changes else []),
+            "    )",
+        ]
 
 
 def package_requirement() -> str:

@@ -13,13 +13,14 @@ from api_explorer import (
     ApiError,
     Client,
     FetchPlan,
+    Keyset,
     Retry,
     package_requirement,
     select,
     to_frame,
 )
 from api_explorer import plan as plan_module
-from api_explorer.testing import TokenServer
+from api_explorer.testing import TokenServer, changes_api, keyset_api
 
 SECRETS = {
     "token": "tok-secret",
@@ -288,3 +289,114 @@ def test_a_plan_without_an_error_path_has_no_check():
     assert "error_at" not in plan.script()
     with plan.client() as client:
         assert client.check is None
+
+
+# Storing
+
+
+def test_a_plan_that_stores_nothing_imports_no_paging_it_doesnt_use():
+    assert "NextLink" not in FetchPlan("http://h/api", "/a/").script()
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({"track": "incremental"}, "needs a warehouse"),
+        ({"warehouse": "x.duckdb"}, "needs a table"),
+        ({"track": "changes", "warehouse": "x.duckdb", "table": "t"}, "needs a key"),
+        (
+            {
+                "track": "incremental",
+                "warehouse": "x.duckdb",
+                "table": "t",
+                "max_pages": 1,
+            },
+            "fetches every page",
+        ),
+        ({"paging": "keyset"}, "needs change_param"),
+    ],
+    ids=[
+        "track-without-warehouse",
+        "no-table",
+        "changes-without-key",
+        "max-pages",
+        "keyset",
+    ],
+)
+def test_a_plan_that_could_lose_records_is_refused(options, message):
+    with pytest.raises(ValueError, match=message):
+        FetchPlan("http://h/api", "/a/", **options)
+
+
+def test_keyset_paging_pages_by_the_change_field():
+    plan = FetchPlan(
+        "http://h/api", "/a/", paging="keyset", change_param="since", limit=50
+    )
+    assert plan.paging_strategy() == Keyset("updated_at", "since", 50)
+
+
+def stamped(id_: int, day: int) -> dict:
+    return {"id": id_, "updated_at": f"2026-01-{day:02d}T00:00:00Z"}
+
+
+def stored(path) -> list[tuple]:
+    duckdb = pytest.importorskip("duckdb")
+    with duckdb.connect(str(path)) as connection:
+        return connection.sql(
+            "SELECT id, updated_at FROM orders ORDER BY id"
+        ).fetchall()
+
+
+@pytest.mark.parametrize("track", ["none", "incremental", "changes"])
+def test_store_keeps_the_warehouse_equal_to_the_source_run_after_run(tmp_path, track):
+    pytest.importorskip("duckdb")
+    data = [stamped(1, 1), stamped(2, 2)]
+    api = changes_api(data)
+    plan = FetchPlan(
+        "http://api.test/api",
+        "/orders/",
+        warehouse=str(tmp_path / "shop.duckdb"),
+        table="orders",
+        key="id",
+        track=track,
+        change_param="updated_since",
+    )
+    first = plan.store(api.client())
+    data[0] = stamped(1, 3)
+    data.append(stamped(3, 4))
+    if track == "changes":
+        del data[1]
+    second = plan.store(api.client())
+    assert stored(tmp_path / "shop.duckdb") == [
+        (r["id"], r["updated_at"]) for r in sorted(data, key=lambda r: r["id"])
+    ]
+    # Only a tracked plan fetches less the second time.
+    assert (first, second) == {
+        "none": (2, 3),
+        "incremental": (2, 2),
+        "changes": (2, 2),
+    }[track]
+
+
+def test_a_stored_plan_s_script_stores_the_same_way(tmp_path, run_script):
+    pytest.importorskip("duckdb")
+    data = [stamped(1, 1), stamped(2, 2)]
+    api = changes_api(data)
+    plan = FetchPlan(
+        "http://api.test/api",
+        "/orders/",
+        warehouse=str(tmp_path / "shop.duckdb"),
+        table="orders",
+        track="incremental",
+        change_param="updated_since",
+        paging="keyset",
+        limit=2,
+    )
+    text = plan.script()
+    assert "tracked_run(shop, 'orders', Incremental" in text
+    assert '"duckdb"' in text
+    assert run_script(text, keyset_api(data))["count"] == 2
+    data.append(stamped(3, 3))
+    assert run_script(text, keyset_api(data))["count"] == 1
+    assert [row[0] for row in stored(tmp_path / "shop.duckdb")] == [1, 2, 3]
+    assert api.calls == []
