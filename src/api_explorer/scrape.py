@@ -7,7 +7,13 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from parsel import Selector
+try:
+    from parsel import Selector
+except ImportError as exc:
+    raise ImportError(
+        'api_explorer.scrape needs the "scrape" extra; install it with: '
+        'pip install "api-explorer[scrape]"'
+    ) from exc
 
 from .client import Client
 from .paging import paginate
