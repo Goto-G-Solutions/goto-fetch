@@ -1,6 +1,7 @@
 """The one exception this package raises, and redaction of secrets in URLs."""
 
 import re
+from dataclasses import dataclass
 from urllib.parse import unquote_plus, urlsplit, urlunsplit
 
 SENSITIVE = re.compile(
@@ -61,3 +62,17 @@ class ApiError(Exception):
         super().__init__(redact(message))
         self.url = None if url is None else redact_url(url)
         self.status = status
+
+
+@dataclass(frozen=True)
+class Problem:
+    """A problem a successful response reports in its body, found by a response check.
+
+    Some APIs answer 200 and put the error in the body, such as
+    {"error": "quota exceeded"}. `temporary` marks one worth retrying, such
+    as a rate limit reported that way; the retry policy decides. A
+    permanent one fails the request at once.
+    """
+
+    message: str
+    temporary: bool = False

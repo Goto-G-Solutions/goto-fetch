@@ -8,7 +8,7 @@ from typing import Protocol
 
 import httpx2
 
-from .errors import ApiError
+from .errors import ApiError, Problem
 
 IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
 """Methods that can be repeated safely: doing them twice does what doing them once does."""
@@ -53,10 +53,12 @@ class Failure:
     """One failed try of a request, as a RetryPolicy sees it.
 
     `attempt` counts the tries so far, this one included (1 after the first
-    failure). Exactly one of `response` (the server answered with an error
-    status) and `error` (a network error or timeout) is set. `retry` is the
-    call's own say: True to retry whatever the method, None to leave it to
-    the policy. A call with retry=False never reaches the policy.
+    failure). Exactly one of `response` (the server answered) and `error` (a
+    network error or timeout) is set. A response is a failure either for its
+    status, or because the client's response check found a `problem` in a
+    successful one. `retry` is the call's own say: True to retry whatever
+    the method, None to leave it to the policy. A call with retry=False
+    never reaches the policy.
     """
 
     attempt: int
@@ -65,6 +67,7 @@ class Failure:
     response: httpx2.Response | None = None
     error: Exception | None = None
     retry: bool | None = None
+    problem: Problem | None = None
 
 
 class RetryPolicy(Protocol):
@@ -86,7 +89,8 @@ class Retry:
 
     - `attempts`: tries in all, the first included. At least 1.
     - `statuses`: HTTP statuses worth another try. Network errors and
-      timeouts are always worth one.
+      timeouts are always worth one, and so is a temporary Problem a
+      response check finds; a permanent one never is.
     - `methods`: methods retried unless a call says otherwise. Only
       idempotent ones by default, because repeating a POST can repeat what
       it did.
@@ -120,7 +124,12 @@ class Retry:
         response = failure.response
         if response is None:
             return self.delay(failure.attempt - 1)
-        if response.status_code not in self.statuses:
+        if failure.problem is not None:
+            # A successful response reporting a problem: retry only a
+            # temporary one, such as a rate limit reported in the body.
+            if not failure.problem.temporary:
+                return None
+        elif response.status_code not in self.statuses:
             return None
         asked = retry_after_seconds(response.headers.get("Retry-After")) or 0.0
         if asked > self.max_backoff:

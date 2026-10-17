@@ -7,6 +7,7 @@ from importlib import metadata
 from typing import Any, Literal
 
 from .auth import ClientCredentials, PasswordLogin, TokenRefresh, token_headers
+from .checks import error_at
 from .client import Client
 from .paging import Cursor, HeaderLink, NextLink, Offset, Paging
 
@@ -46,6 +47,7 @@ class FetchPlan:
     credentials_in: Literal["header", "body"] = "header"
     results_key: str | None = "results"
     count_key: str | None = None
+    error_path: str = ""
     paging: Literal["next", "offset", "header", "cursor"] = "next"
     next_key: str = "next"
     limit: int = 100
@@ -87,6 +89,7 @@ class FetchPlan:
             auth=auth,
             timeout=self.timeout,
             trailing_slash=self.trailing_slash,
+            check=error_at(self.error_path) if self.error_path else None,
             **options,
         )
 
@@ -176,6 +179,9 @@ class FetchPlan:
         client_args.append(f"timeout={self.timeout!r}")
         if not self.trailing_slash:
             client_args.append("trailing_slash=False")
+        if self.error_path:
+            names.add("error_at")
+            client_args.append(f"check=error_at({self.error_path!r})")
 
         record_args = [repr(self.endpoint)]
         if self.method.upper() != "GET":

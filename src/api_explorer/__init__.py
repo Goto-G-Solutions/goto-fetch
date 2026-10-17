@@ -27,9 +27,10 @@ from .auth import (
     jwt_expiry,
     token_headers,
 )
+from .checks import ResponseCheck, error_at
 from .client import Client, ResolvesUrls
 from .decode import Decoder, json_decoder
-from .errors import ApiError, redact_url
+from .errors import ApiError, Problem, redact_url
 from .frames import default_backend, latest_per_key, to_frame
 from .logs import (
     ClientFilter,
@@ -77,8 +78,10 @@ __all__ = [
     "PageRequest",
     "Paging",
     "PasswordLogin",
+    "Problem",
     "RedactFilter",
     "ResolvesUrls",
+    "ResponseCheck",
     "Retry",
     "RetryPolicy",
     "TokenRefresh",
@@ -88,6 +91,7 @@ __all__ = [
     "default_backend",
     "disable_logging",
     "enable_logging",
+    "error_at",
     "explode",
     "flatten",
     "get_path",

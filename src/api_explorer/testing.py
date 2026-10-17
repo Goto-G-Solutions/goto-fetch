@@ -25,7 +25,7 @@ from typing import Any, Literal
 import httpx2
 
 from .client import Client
-from .errors import ApiError
+from .errors import ApiError, Problem
 from .paging import Fetched, Paging
 from .retry import Failure, Retry, RetryPolicy
 
@@ -386,7 +386,8 @@ def check_retry_policy(policy: RetryPolicy, *, max_attempts: int = 100) -> None:
     """Check a retry policy keeps the promises every policy must keep.
 
     The policy is shown failures that never go away, of each kind: a 503, a
-    429, a network error, and a POST answered with a 503. For each, it must
+    429, a network error, a POST answered with a 503, and a 200 whose body
+    reports a temporary problem. For each, it must
     give up (return None, or raise ApiError) within `max_attempts` tries,
     and every wait it asks for must be a number of seconds that is neither
     negative nor endless. Nothing sleeps, so this is quick.
@@ -394,15 +395,24 @@ def check_retry_policy(policy: RetryPolicy, *, max_attempts: int = 100) -> None:
     Raises AssertionError, saying which rule broke and how.
     """
     url = "http://api.test/api/items/"
-    kinds: dict[str, tuple[str, httpx2.Response | None, Exception | None]] = {
-        "a 503": ("GET", httpx2.Response(503), None),
-        "a 429": ("GET", httpx2.Response(429), None),
-        "a network error": ("GET", None, httpx2.ConnectError("refused")),
-        "a POST answered with 503": ("POST", httpx2.Response(503), None),
+    busy = Problem("busy", temporary=True)
+    kinds: dict[
+        str, tuple[str, httpx2.Response | None, Exception | None, Problem | None]
+    ] = {
+        "a 503": ("GET", httpx2.Response(503), None, None),
+        "a 429": ("GET", httpx2.Response(429), None, None),
+        "a network error": ("GET", None, httpx2.ConnectError("refused"), None),
+        "a POST answered with 503": ("POST", httpx2.Response(503), None, None),
+        "a 200 reporting a temporary problem": (
+            "GET",
+            httpx2.Response(200),
+            None,
+            busy,
+        ),
     }
-    for kind, (method, response, error) in kinds.items():
+    for kind, (method, response, error, problem) in kinds.items():
         for attempt in range(1, max_attempts + 1):
-            failure = Failure(attempt, method, url, response, error)
+            failure = Failure(attempt, method, url, response, error, problem=problem)
             try:
                 wait = policy.wait(failure)
             except ApiError:

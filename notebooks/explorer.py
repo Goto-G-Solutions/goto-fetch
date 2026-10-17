@@ -127,6 +127,7 @@ def _():
 
     results_key = mo.ui.text(value="results", label="Results path")
     count_key = mo.ui.text(placeholder="count", label="Count path")
+    error_path = mo.ui.text(placeholder="error|errors", label="Error path")
     paging = mo.ui.dropdown(
         ["next link", "limit/offset", "header link", "cursor"],
         value="next link",
@@ -169,6 +170,7 @@ def _():
         cursor_key,
         cursor_param,
         endpoint,
+        error_path,
         fetch,
         header,
         limit,
@@ -207,6 +209,7 @@ def _(
     cursor_key,
     cursor_param,
     endpoint,
+    error_path,
     fetch,
     header,
     limit,
@@ -339,10 +342,12 @@ def _(
             _section("Authentication", _row(auth_kind), *_auth_rows),
             _section(
                 "Response",
-                _row(results_key, count_key),
+                _row(results_key, count_key, error_path),
                 _hint(
-                    "Paths into each page: where the records are, and "
-                    "(optional) the total count, for progress."
+                    "Paths into each page: where the records are, the total "
+                    "count (optional, for progress), and where an API that "
+                    "answers 200 puts an error (optional; a page with one "
+                    "stops the run instead of passing for data)."
                 ),
                 *_paging_rows,
             ),
@@ -375,6 +380,7 @@ def _(
     cursor_key,
     cursor_param,
     endpoint,
+    error_path,
     fetch,
     header,
     limit,
@@ -438,6 +444,7 @@ def _(
         password=password.value,
         results_key=results_key.value or None,
         count_key=count_key.value or None,
+        error_path=error_path.value,
         paging={
             "limit/offset": "offset",
             "header link": "header",

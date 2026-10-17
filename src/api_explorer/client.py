@@ -10,8 +10,9 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx2
 
+from .checks import ResponseCheck
 from .decode import Decoder, json_decoder
-from .errors import ApiError
+from .errors import ApiError, Problem
 from .logs import client_context, log_event
 from .models import converter
 from .paging import (
@@ -71,6 +72,12 @@ class Client:
     refused: each setting has one place. A client you bring stays open
     when this one closes; it is yours to close.
 
+    `check` looks at every successful response and says whether it really
+    failed, for APIs that answer 200 with an error in the body (see
+    error_at). A problem it finds goes to the retry policy like any other
+    failure: Retry retries a temporary one and stops on a permanent one, so
+    a run never carries on past a page that reported an error.
+
     `name` labels this client's log lines (record.client), including those
     from pieces you build that log during its requests: useful when one
     pipeline talks to several APIs. See enable_logging.
@@ -91,11 +98,13 @@ class Client:
         transport: httpx2.BaseTransport | None = None,
         http: httpx2.Client | None = None,
         name: str | None = None,
+        check: ResponseCheck | None = None,
     ) -> None:
         self.retry: RetryPolicy = retry or Retry()
         self.decode = decode or json_decoder()
         self.trailing_slash = trailing_slash
         self.name = name
+        self.check = check
         if http is None:
             self._http = httpx2.Client(
                 base_url=base_url,
@@ -182,6 +191,7 @@ class Client:
             attempt += 1
             response: httpx2.Response | None = None
             error: Exception | None = None
+            problem: Problem | None = None
             try:
                 response = self._http.request(method, url, **kwargs)
             # A dropped connection mid-response (RemoteProtocolError) is as
@@ -205,17 +215,27 @@ class Client:
                 error = failure = exc
             else:
                 if response.is_success:
-                    return response
-                failure = ApiError(
-                    f"{method} {response.url} returned HTTP {response.status_code}: "
-                    f"{response.text[:300]}",
-                    url=str(response.url),
-                    status=response.status_code,
-                )
+                    problem = self._problem(response)
+                    if problem is None:
+                        return response
+                    failure = ApiError(
+                        f"{method} {response.url} returned HTTP "
+                        f"{response.status_code} but reports a problem: "
+                        f"{problem.message}",
+                        url=str(response.url),
+                        status=response.status_code,
+                    )
+                else:
+                    failure = ApiError(
+                        f"{method} {response.url} returned HTTP {response.status_code}: "
+                        f"{response.text[:300]}",
+                        url=str(response.url),
+                        status=response.status_code,
+                    )
             if retry is False:
                 raise failure
             wait = self.retry.wait(
-                Failure(attempt, method, url, response, error, retry)
+                Failure(attempt, method, url, response, error, retry, problem)
             )
             status = None if response is None else response.status_code
             details = {
@@ -247,6 +267,12 @@ class Client:
                 data={**details, "wait": wait},
             )
             time.sleep(wait)
+
+    def _problem(self, response: httpx2.Response) -> Problem | None:
+        if self.check is None:
+            return None
+        verdict = self.check(response)
+        return Problem(verdict) if isinstance(verdict, str) else verdict
 
     def get_json(self, endpoint: str, **kwargs: Any) -> Any:
         """GET `endpoint` and return its parsed JSON body, or raise ApiError."""

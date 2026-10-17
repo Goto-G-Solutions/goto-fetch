@@ -21,6 +21,7 @@ without reading the text:
 | stop        | DEBUG   | reason                                            |
 | renew       | DEBUG   | how ("refresh" or "login"), why                   |
 | no-count    | WARNING | count_key                                         |
+| no-next-key | WARNING | key                                               |
 | count-short | WARNING | records, count                                    |
 | text        | WARNING | column, reason                                    |
 

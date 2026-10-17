@@ -9,7 +9,15 @@ import httpx2
 import pytest
 
 import api_explorer
-from api_explorer import Client, FetchPlan, Retry, package_requirement, select, to_frame
+from api_explorer import (
+    ApiError,
+    Client,
+    FetchPlan,
+    Retry,
+    package_requirement,
+    select,
+    to_frame,
+)
 from api_explorer import plan as plan_module
 from api_explorer.testing import TokenServer
 
@@ -112,6 +120,7 @@ def test_scripts_and_repr_never_contain_secrets(auth):
         SEARCH,
         FetchPlan("http://h/api", "/a/", auth="client", client_id="c", scope="read"),
         KEYED,
+        FetchPlan("http://h/api", "/a/", error_path="meta.error"),
     ],
     ids=[
         "no-auth",
@@ -122,6 +131,7 @@ def test_scripts_and_repr_never_contain_secrets(auth):
         "post-cursor",
         "client-credentials",
         "header-offset",
+        "error-path",
     ],
 )
 def test_every_kind_of_plan_writes_valid_python(plan):
@@ -254,3 +264,27 @@ def test_a_client_credentials_script_gets_its_token_from_the_environment(run_scr
         expected = list(plan.records(client))
     namespace = run_script(plan.script(), server, API_CLIENT_SECRET="secret")
     assert namespace["records"] == expected == [{"id": 1}]
+
+
+def test_an_error_path_stops_the_plan_and_its_script_alike(run_script):
+    # Its own test: error_path adds a check to the client and a line to
+    # the script, and both must refuse a 200 that reports an error.
+    def handler(request):
+        return httpx2.Response(200, json={"error": "quota exceeded"})
+
+    plan = FetchPlan("http://api.test/api", "/items/", error_path="error")
+    with (
+        plan.client(transport=httpx2.MockTransport(handler)) as client,
+        pytest.raises(ApiError, match="quota exceeded"),
+    ):
+        list(plan.records(client))
+    assert "check=error_at('error')" in plan.script()
+    with pytest.raises(ApiError, match="quota exceeded"):
+        run_script(plan.script(), handler)
+
+
+def test_a_plan_without_an_error_path_has_no_check():
+    plan = FetchPlan("http://h/api", "/a/")
+    assert "error_at" not in plan.script()
+    with plan.client() as client:
+        assert client.check is None
