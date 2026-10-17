@@ -13,10 +13,33 @@ from api_explorer import get_path, parse_path
         ("users.0.name", ["users", "0", "name"]),
         ("items[*].url", ["items", "*", "url"]),
         ("a[key].b", ["a", "key", "b"]),
+        ('by_url["https://x.org/a.b"].hits', ["by_url", "https://x.org/a.b", "hits"]),
+        ("by_url['x|y']", ["by_url", "x|y"]),
+        ('a["say \\"hi\\""]', ["a", 'say "hi"']),
+        ("[a.b]", ["a.b"]),
     ],
 )
 def test_parse_path_splits_on_dots_and_brackets_and_keeps_strings(path, segments):
     assert parse_path(path) == segments
+
+
+@pytest.mark.parametrize("path", ['a["b', "a[b", "a]b", "a|b"])
+def test_parse_path_refuses_what_it_cant_read(path):
+    with pytest.raises(ValueError):
+        parse_path(path)
+
+
+def test_a_key_holding_path_characters_is_reached_in_quotes():
+    # Regression: a key such as "a.b" couldn't be reached at all.
+    data = {"by_url": {"https://x.org/a.b": 3, "x|y": 4}}
+    assert get_path(data, 'by_url["https://x.org/a.b"]') == 3
+    assert get_path(data, "missing|by_url['x|y']") == 4
+
+
+def test_every_spelling_of_the_wildcard_falls_through_when_empty():
+    # Regression: "items.*" collected like "[*]" but didn't fall through.
+    data = {"items": [], "backup": [1]}
+    assert get_path(data, "items.*|backup") == [1]
 
 
 @pytest.mark.parametrize(
