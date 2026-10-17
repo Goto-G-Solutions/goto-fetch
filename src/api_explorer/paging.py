@@ -30,6 +30,16 @@ P = TypeVar("P")
 """What fetch returns for one page."""
 
 
+def with_query(url: str, name: str, value: object) -> str:
+    """Return `url` with query parameter `name` set to `value`, others kept.
+
+    The everyday step of a paging style: with_query(request.url, "page", 3).
+    A URL returned from a style keeps the request's method and body (see
+    Paging).
+    """
+    return str(httpx2.URL(url).copy_set_param(name, value))
+
+
 def request_key(request: Any) -> Hashable:
     """Tell requests apart for paginate's loop check: by default, by value.
 
@@ -246,8 +256,8 @@ class Offset:
         """Start a run: set limit and offset on the first request's URL."""
         url = httpx2.URL(first.url)
         start = int(url.params.get(self.offset_param, 0))
-        start_url = url.copy_set_param(self.limit_param, self.limit)
-        start_url = start_url.copy_set_param(self.offset_param, start)
+        start_url = with_query(first.url, self.limit_param, self.limit)
+        start_url = with_query(start_url, self.offset_param, start)
         received = 0
         biggest = 0
         previous: list | None = None
@@ -286,11 +296,9 @@ class Offset:
                 _stopped("a page was shorter than the biggest before it", "short page")
                 return None
             biggest = max(biggest, len(items))
-            return str(
-                httpx2.URL(request.url).copy_set_param(self.offset_param, reached)
-            )
+            return with_query(request.url, self.offset_param, reached)
 
-        return dataclasses.replace(first, url=str(start_url)), next_link
+        return dataclasses.replace(first, url=start_url), next_link
 
 
 @dataclass(frozen=True)
@@ -341,14 +349,15 @@ class Cursor:
     ) -> tuple[PageRequest, NextLinkFunction]:
         """Start a run; the first request is used as given."""
 
-        def next_link(fetched: Fetched, request: PageRequest) -> PageRequest | None:
+        def next_link(
+            fetched: Fetched, request: PageRequest
+        ) -> PageRequest | str | None:
             cursor = get_path(fetched.body, self.key)
             if cursor is None or cursor == "":
                 _stopped("the page has no cursor", "no cursor")
                 return None
             if self.send_in == "query":
-                url = httpx2.URL(request.url).copy_set_param(self.param, cursor)
-                return dataclasses.replace(request, url=str(url))
+                return with_query(request.url, self.param, cursor)
             body = dict(request.json or {})
             body[self.param] = cursor
             return dataclasses.replace(request, json=body)

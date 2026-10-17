@@ -21,6 +21,7 @@ from api_explorer import (
     paginate,
     read_page,
     request_key,
+    with_query,
 )
 from api_explorer.testing import json_pages, offset_api
 
@@ -434,3 +435,8 @@ def test_offset_names_its_own_query_parameters(mock_client):
 def test_offset_refuses_a_limit_below_one():
     with pytest.raises(ValueError, match="limit must be at least 1"):
         Offset(limit=0)
+
+
+def test_with_query_sets_one_parameter_and_keeps_the_rest():
+    assert with_query("http://h/a?q=x&page=1", "page", 2) == "http://h/a?q=x&page=2"
+    assert with_query("http://h/a", "after", "c 1") == "http://h/a?after=c+1"

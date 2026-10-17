@@ -16,6 +16,7 @@ its own, and check_retry_policy() and check_paging() check the promises
 every retry policy and paging style must keep.
 """
 
+import base64
 import json
 import math
 from collections.abc import Callable, Mapping, Sequence
@@ -255,7 +256,10 @@ class TokenServer(FakeApi):
     """A simplejwt-style API: log in, refresh, and fetch with a bearer token.
 
     POST `login_path` with {"username": ..., "password": ...} gives
-    {"access": ..., "refresh": ...}. POST `refresh_path` with
+    {"access": ..., "refresh": ...}. The same path also takes the OAuth2
+    client credentials grant: a form with grant_type=client_credentials and
+    the client's ID and secret (in a Basic header or the form), answered
+    with {"access_token": ..., "token_type": "Bearer"}. POST `refresh_path` with
     {"refresh": ...} gives a new access token, and with `rotate`, a new
     refresh token that replaces the old one. Any other path wants
     "Authorization: Bearer <access>" and answers {"results": [...],
@@ -264,7 +268,8 @@ class TokenServer(FakeApi):
 
     The refresh token "r0" works from the start. `access_tokens` and
     `refresh_tokens` are the tokens it accepts; expire_access_tokens()
-    makes every access token stale, as time passing would.
+    makes every access token stale, as time passing would. With
+    `expires_in`, every token reply says how many seconds it lasts.
     """
 
     def __init__(
@@ -279,6 +284,9 @@ class TokenServer(FakeApi):
         rotate: bool = False,
         accept_logins: bool = True,
         deny_all: bool = False,
+        client_id: str = "client",
+        client_secret: str = "secret",
+        expires_in: int | None = None,
     ) -> None:
         self.access_tokens: set[str] = set()
         self.refresh_tokens: set[str] = {"r0"}
@@ -288,7 +296,33 @@ class TokenServer(FakeApi):
             self._issued += 1
             return f"{prefix}{self._issued}"
 
+        def lasting(reply: dict[str, Any]) -> dict[str, Any]:
+            return reply if expires_in is None else {**reply, "expires_in": expires_in}
+
+        def client_credentials(request: httpx2.Request) -> httpx2.Response:
+            form = dict(httpx2.QueryParams(request.content.decode()))
+            pair = f"{client_id}:{client_secret}".encode()
+            basic = "Basic " + base64.b64encode(pair).decode()
+            in_header = request.headers.get("Authorization") == basic
+            in_body = (form.get("client_id"), form.get("client_secret")) == (
+                client_id,
+                client_secret,
+            )
+            if form.get("grant_type") != "client_credentials" or not (
+                in_header or in_body
+            ):
+                return httpx2.Response(401, json={"error": "invalid_client"})
+            access = issue("a")
+            self.access_tokens.add(access)
+            reply = {"access_token": access, "token_type": "Bearer"}
+            return httpx2.Response(200, json=lasting(reply))
+
         def answer(request: httpx2.Request) -> httpx2.Response:
+            content_type = request.headers.get("Content-Type", "")
+            if request.url.path == login_path and content_type.startswith(
+                "application/x-www-form-urlencoded"
+            ):
+                return client_credentials(request)
             body = json.loads(request.content) if request.content else None
             path = request.url.path
             if path == login_path:
@@ -301,7 +335,7 @@ class TokenServer(FakeApi):
                 self.access_tokens.add(access)
                 self.refresh_tokens.add(refresh)
                 return httpx2.Response(
-                    200, json={access_field: access, "refresh": refresh}
+                    200, json=lasting({access_field: access, "refresh": refresh})
                 )
             if path == refresh_path:
                 old = (body or {}).get("refresh")
@@ -314,7 +348,7 @@ class TokenServer(FakeApi):
                     self.refresh_tokens.discard(old)
                     reply["refresh"] = issue("r")
                     self.refresh_tokens.add(reply["refresh"])
-                return httpx2.Response(200, json=reply)
+                return httpx2.Response(200, json=lasting(reply))
             token = request.headers.get("Authorization", "").removeprefix("Bearer ")
             if deny_all or token not in self.access_tokens:
                 return httpx2.Response(401, json={"detail": "Not authenticated"})

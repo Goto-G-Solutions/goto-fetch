@@ -62,7 +62,8 @@ Each piece works with no extra packages, and uses better ones when you have them
 | Retries | 3 tries, idempotent methods, temporary errors | `Retry(attempts=5, statuses=..., methods=...)`, or your own policy: any object with `wait(failure)` |
 | HTTP | an httpx2 client made for you | `Client(http=httpx2.Client(...))` for proxies, HTTP/2, certificates or event hooks |
 | Logging | silent | `enable_logging()`; every line is an event with data (`record.event`, `record.data`) |
-| Paging and auth | next links (body or `Link` header), cursors, limit/offset, GET or POST; tokens | your own `Paging` (it sees each page's body and response) or `httpx2.Auth` |
+| Paging | next links (body or `Link` header), cursors, limit/offset, GET or POST | your own `Paging`: it sees each page's body and response; `with_query` sets a query parameter |
+| Auth | fixed tokens; access and refresh tokens, renewed safely across threads | log in with `PasswordLogin`, OAuth2 `ClientCredentials`, or your own `Login`; any `httpx2.Auth` |
 
 A search API that pages with POST, with the query and the cursor in the body:
 
@@ -78,6 +79,8 @@ records = client.records(
     retry=True,  # safe here: this POST only reads
 )
 ```
+
+The interfaces are Protocols: your pieces match their shape and never inherit from ours, and a type checker confirms they fit. `Paging`, `RetryPolicy`, `Login` and `ResolvesUrls` (an auth with URLs of its own) are the main ones; `check_paging` and `check_retry_policy` check behaviour the types can't.
 
 `Client.records` is built from public parts, `paginate`, a `Paging`, `read_page` and `converter`, so a loop of your own can reuse the same rules. `paginate` pages by whatever your fetch needs, not only URLs, with the same loop protection:
 

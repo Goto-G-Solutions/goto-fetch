@@ -3,8 +3,8 @@
 import dataclasses
 import logging
 import time
-from collections.abc import Iterator, Mapping
-from typing import Any, Self
+from collections.abc import Callable, Iterator, Mapping
+from typing import Any, Protocol, Self, runtime_checkable
 from urllib.parse import urljoin, urlsplit
 
 import httpx2
@@ -25,6 +25,18 @@ from .paging import (
 from .retry import Failure, Retry, RetryPolicy
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class ResolvesUrls(Protocol):
+    """An auth with URLs of its own, such as TokenRefresh's login and refresh URLs.
+
+    Client calls bind(resolve) with its own url(), so those URLs follow the
+    same rules as endpoints: relative to the base URL, trailing slash
+    included. A custom auth opts in by having this method.
+    """
+
+    def bind(self, resolve: Callable[[str], str]) -> None: ...
 
 
 class Client:
@@ -111,9 +123,8 @@ class Client:
             self._owns_http = False
         # An auth with URLs of its own (TokenRefresh) resolves them the way
         # endpoints are resolved, so one rule covers every URL.
-        bind = getattr(self._http.auth, "bind", None)
-        if callable(bind):
-            bind(self.url)
+        if isinstance(self._http.auth, ResolvesUrls):
+            self._http.auth.bind(self.url)
 
     def __enter__(self) -> Self:
         return self

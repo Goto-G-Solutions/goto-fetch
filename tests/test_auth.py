@@ -2,6 +2,9 @@
 
 import base64
 import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx2
 import pytest
@@ -9,12 +12,14 @@ import pytest
 from api_explorer import (
     ApiError,
     Client,
+    ClientCredentials,
     PasswordLogin,
+    ResolvesUrls,
     TokenRefresh,
     jwt_expiry,
     token_headers,
 )
-from api_explorer.testing import TokenServer
+from api_explorer.testing import TokenServer, replies
 
 LOGIN = PasswordLogin("/token/", "me", "pw")
 
@@ -211,3 +216,84 @@ def test_auth_on_a_client_you_bring_still_resolves_urls_like_endpoints():
     )
     assert list(Client(http=http).records("/items/")) == [{"id": 1}]
     assert server.paths == ["/api/token/refresh/", "/api/items/"]
+
+
+def test_concurrent_requests_renew_a_rotating_token_only_once():
+    # Regression: requests sharing one TokenRefresh each renewed at once,
+    # and with rotation only the first refresh token worked: 1 of 8
+    # requests succeeded. Renewal is one at a time now, and a request that
+    # finds the token already renewed uses it.
+    server = TokenServer(rotate=True)
+    answer = server._answer
+
+    def slow_refresh(request):
+        if request.url.path == "/api/token/refresh/":
+            time.sleep(0.3)  # long enough for every thread to be waiting
+        return answer(request)
+
+    server._answer = slow_refresh
+    client = server.client(auth=TokenRefresh("/token/refresh/", refresh="r0"))
+    start = threading.Barrier(8)
+
+    def fetch(_):
+        start.wait()
+        return list(client.records("/items/"))
+
+    with ThreadPoolExecutor(8) as pool:
+        results = list(pool.map(fetch, range(8)))
+    assert results == [[{"id": 1}]] * 8
+    assert server.paths.count("/api/token/refresh/") == 1
+
+
+@pytest.mark.parametrize("credentials_in", ["header", "body"])
+def test_client_credentials_get_a_token_the_oauth_way(credentials_in):
+    server = TokenServer()
+    login = ClientCredentials(
+        "/token/", "client", "secret", credentials_in=credentials_in
+    )
+    # No refresh_url: client credentials have no refresh step, and the
+    # default access_key reads OAuth's "access_token" as well as "access".
+    auth = TokenRefresh(login=login)
+    assert list(server.client(auth=auth).records("/items/")) == [{"id": 1}]
+    assert server.paths == ["/api/token/", "/api/items/"]
+
+
+def test_client_credentials_keep_the_secret_out_of_repr():
+    assert "s3cret" not in repr(ClientCredentials("/token/", "client", "s3cret"))
+
+
+def test_a_refresh_token_needs_a_refresh_url():
+    with pytest.raises(ValueError, match="needs a refresh_url"):
+        TokenRefresh(refresh="r0")
+
+
+def test_expires_in_renews_a_token_before_it_runs_out():
+    clock = [1000.0]
+    server = TokenServer(expires_in=60)
+    auth = TokenRefresh(
+        login=ClientCredentials("/token/", "client", "secret"), now=lambda: clock[0]
+    )
+    client = server.client(auth=auth)
+    list(client.records("/items/"))
+    clock[0] += 45  # within the 30s leeway of the 60s lifetime
+    list(client.records("/items/"))
+    # Renewed before the second fetch, so no 401 on the way.
+    assert server.paths == ["/api/token/", "/api/items/", "/api/token/", "/api/items/"]
+
+
+def test_a_custom_auth_with_its_own_urls_opts_in_to_endpoint_rules():
+    class Signs(httpx2.Auth):
+        def __init__(self):
+            self.resolve = None
+
+        def bind(self, resolve):
+            self.resolve = resolve
+
+        def auth_flow(self, request):
+            yield request
+
+    auth = Signs()
+    assert isinstance(auth, ResolvesUrls)
+    replies(200).client(auth=auth)
+    assert auth.resolve is not None
+    assert auth.resolve("keys") == "http://api.test/api/keys/"

@@ -19,8 +19,15 @@ Fake APIs for testing your own code live in api_explorer.testing.
 The package logs nothing until asked: enable_logging() switches it on.
 """
 
-from .auth import PasswordLogin, TokenRefresh, jwt_expiry, token_headers
-from .client import Client
+from .auth import (
+    ClientCredentials,
+    Login,
+    PasswordLogin,
+    TokenRefresh,
+    jwt_expiry,
+    token_headers,
+)
+from .client import Client, ResolvesUrls
 from .decode import Decoder, json_decoder
 from .errors import ApiError
 from .frames import default_backend, latest_per_key, to_frame
@@ -38,6 +45,7 @@ from .paging import (
     paginate,
     read_page,
     request_key,
+    with_query,
 )
 from .paths import get_path, parse_path
 from .plan import FetchPlan, package_requirement
@@ -47,6 +55,7 @@ from .retry import Failure, Retry, RetryPolicy, backoff_delay, retry_after_secon
 __all__ = [
     "ApiError",
     "Client",
+    "ClientCredentials",
     "ClientFilter",
     "Cursor",
     "Decoder",
@@ -54,12 +63,14 @@ __all__ = [
     "FetchPlan",
     "Fetched",
     "HeaderLink",
+    "Login",
     "NextLink",
     "Offset",
     "Page",
     "PageRequest",
     "Paging",
     "PasswordLogin",
+    "ResolvesUrls",
     "Retry",
     "RetryPolicy",
     "TokenRefresh",
@@ -87,4 +98,5 @@ __all__ = [
     "select",
     "to_frame",
     "token_headers",
+    "with_query",
 ]
