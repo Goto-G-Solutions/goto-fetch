@@ -109,6 +109,7 @@ assert [r["id"] for r in records] == [0, 1, 2, 3, 4, 5]
 - **Page numbers and offsets with `Incremental`** can lose a record for good when the data changes during a run, since the rest shift a place. Use a cursor, `Keyset`, or `Changes`, which finds such a record on its next run.
 - **`Changes.deleted` needs all-or-nothing storing.** The built-in warehouses are; a store that writes as records arrive can keep a row whose record was deleted.
 - **`max_pages` with a tracker is refused:** a run cut short looks complete.
+- **Three guarantees, three needs.** *No skipped records* is the design: the state moves only after every page, and is saved only after storing. *No duplicate rows* needs `key=` on the write, so a repeated run replaces its rows rather than adds them. *Records and state committed together* is not offered: the built-in warehouses commit the records, then `tracked_run` saves the state, so a crash between the two repeats the run next time, which a key makes harmless. A warehouse of your own can do both inside one transaction.
 - `Incremental`'s `key=` recognises the records seen at the last value by a field; without it, by their whole content, which also notices a record edited twice in the same instant. `Changes` always matches records by its `key`.
 - A record without the tracked field stops the run (`missing="raise"`); pass `missing="keep"` or `"drop"` to allow it.
 - `Changes` needs a run that fetches every record: on a filtered fetch, the records not fetched would look deleted.

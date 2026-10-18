@@ -11,6 +11,9 @@ them):
   one key in a write, the last wins. Without one, records are added.
 - deleted_by's keys are removed only once the records are stored, and a
   tracker whose run isn't complete is refused before anything is written.
+- Records and state commit apart: write() commits, then tracked_run saves
+  the state. A crash between the two repeats the run, never skips it; a
+  key makes the repeat replace rows rather than add them.
 - No value is lost. read() gives each value back as written, or, where a
   column had to change type, as its JSON text ("1", "true", '{"a":1}');
   text stays text. A record without its key, or with no fields at all, is
