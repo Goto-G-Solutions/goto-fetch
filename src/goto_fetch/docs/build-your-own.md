@@ -297,11 +297,12 @@ check_state_store(lambda: JsonFileState(f"state-{os.urandom(4).hex()}"))
 
 **Promises:** one write is all or nothing; with a key, a record replaces the row with its key, the last of a key winning; `deleted_by`'s keys are removed only after storing, and a tracker whose run isn't complete is refused; no value is lost (`read` gives it back as written, or as its JSON text); a record without its key, or with no fields, is refused.
 
-**You get for free:** tracked runs into it (`tracked_run`, `FetchPlan.store(warehouse=...)`), and the checks. `check_write`, `deleted_keys`, `refuse_empty_records` and `last_per_key` from `goto_fetch.warehouse` handle the argument rules.
+**You get for free:** tracked runs into it (`tracked_run`, `FetchPlan.store(warehouse=...)`), and the checks. `check_write`, `check_limit`, `deleted_keys`, `refuse_empty_records` and `last_per_key` from `goto_fetch.warehouse` handle the argument rules.
 
 ```python
 from goto_fetch.testing import check_warehouse
 from goto_fetch.warehouse import (
+    check_limit,
     check_write,
     deleted_keys,
     last_per_key,
@@ -317,6 +318,7 @@ class JsonLinesWarehouse:
         self.folder.mkdir(exist_ok=True)
 
     def read(self, table, limit=None):
+        check_limit(limit)
         path = self.folder / f"{table.encode().hex()}.jsonl"
         rows = (
             [json.loads(line) for line in path.read_text().splitlines()]

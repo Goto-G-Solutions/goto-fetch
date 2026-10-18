@@ -64,8 +64,10 @@ with tracked_run(shop, "orders", Incremental, "updated_at", "updated_since") as 
 ## Traps
 
 - **`key` is a top-level field** of the records (`"id"`), not a path.
+- **`goto_fetch_state` is taken:** the built-in warehouses keep tracked runs' state in a table of that name, in the same file, and refuse it for records.
 - **Fields differing only in case** (`id` and `ID`) are refused: databases treat them as one column.
 - **DuckDB lets one process write to a file at a time.** Each call opens and closes the file, so readers fit between runs.
 - **Memory:** `write` holds `batch_size` records at a time (10,000 by default) while it copies the run to disk; lower it for very wide records.
 - **Two runs under one name at once** are safe but wasteful: the last to finish wins, and at worst the next run fetches some records again.
+- **Records and state commit apart,** even in one file: `write` commits, then `tracked_run` saves. A crash between the two repeats the run, which `key=` makes harmless; see the three guarantees in [incremental](incremental.md).
 - Timestamps stay text, as the API sent them; cast in SQL (`CAST(updated_at AS TIMESTAMPTZ)` in DuckDB).
