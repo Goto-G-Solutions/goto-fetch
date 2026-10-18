@@ -16,20 +16,20 @@ jobs:
     strategy:
       matrix:
         python: ["3.11", "3.14"]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
       - run: uv run --python ${{ matrix.python }} pytest
 
   core:
     name: Tests, with only the core dependencies
     # Proves the core works without the optional extras. Tests that need an
     # extra skip themselves.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
       - run: uv run --isolated --no-dev --with pytest pytest
 
   oldest:
@@ -38,10 +38,10 @@ jobs:
     # lowest-direct picks the lowest version each direct dependency allows,
     # so the minimums have one home. pytest gets a floor of its own, or it
     # would be resolved to a version too old to install.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
       - run: >-
           uv run --isolated --no-dev --python 3.11 --resolution lowest-direct
           --with-editable . --with "pytest>=8.4" pytest
@@ -51,10 +51,10 @@ jobs:
     # The guides are data files beside the code; a packaging change could
     # drop them without any test noticing. This installs the built wheel
     # alone and reads a guide and the skill from it.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
       - run: uv build --wheel --out-dir dist
       - run: |
           cd /tmp
@@ -63,30 +63,30 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
       - run: uvx ruff check
       - run: uvx ruff format --check
       - run: uvx --with pytest marimo check --strict notebooks/explorer.py
 
   types:
     name: Type check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
       - run: uv run pyright
 
   notebook:
     name: Explorer notebook runs on Python 3.11
     # marimo check reads the notebook; this runs every cell, on the oldest
     # Python supported, and fails if any cell does.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
       - run: >-
           uv run --python 3.11 --with marimo --with-editable .
           marimo export html notebooks/explorer.py -o explorer.html
