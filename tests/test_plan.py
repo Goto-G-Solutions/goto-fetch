@@ -2,7 +2,7 @@
 
 The plan and its script must do the same fetch, so several tests run the
 script itself. Also here: store() into a warehouse, tracked or not, and
-the plans refused because they could lose records. api_explorer.calls,
+the plans refused because they could lose records. goto_fetch.calls,
 which keeps the two in step, has its own tests in test_calls.
 """
 
@@ -13,8 +13,8 @@ import types
 
 import pytest
 
-import api_explorer
-from api_explorer import (
+import goto_fetch
+from goto_fetch import (
     ApiError,
     Client,
     FetchPlan,
@@ -26,8 +26,8 @@ from api_explorer import (
     select,
     to_frame,
 )
-from api_explorer import plan as plan_module
-from api_explorer.testing import (
+from goto_fetch import plan as plan_module
+from goto_fetch.testing import (
     FakeApi,
     MemoryState,
     MemoryWarehouse,
@@ -67,18 +67,18 @@ def keyed_offset_api(key: str):
 def run_script(monkeypatch, capsys):
     """Run a generated script against a handler, and return its globals.
 
-    The script's `from api_explorer import ...` gets this package, with a
+    The script's `from goto_fetch import ...` gets this package, with a
     Client whose requests go to the handler.
     """
 
     def run(text: str, handler, **env: str) -> dict:
-        fake = types.ModuleType("api_explorer")
-        fake.__dict__.update(vars(api_explorer))
+        fake = types.ModuleType("goto_fetch")
+        fake.__dict__.update(vars(goto_fetch))
         transport = handler if isinstance(handler, FakeApi) else FakeApi(handler)
         fake.Client = functools.partial(
             Client, transport=transport, retry=Retry(backoff=0.0)
         )
-        monkeypatch.setitem(sys.modules, "api_explorer", fake)
+        monkeypatch.setitem(sys.modules, "goto_fetch", fake)
         for name, value in env.items():
             monkeypatch.setenv(name, value)
         namespace: dict = {"__name__": "__main__"}
@@ -172,9 +172,9 @@ def test_a_post_search_script_fetches_what_its_plan_fetches(run_script):
 
 def test_the_script_header_lists_the_package_and_the_backend():
     text = FetchPlan("http://h/api", "/a/").script(
-        backend="polars", requirement="api-explorer @ file:///x"
+        backend="polars", requirement="goto-fetch @ file:///x"
     )
-    assert '#     "api-explorer @ file:///x",\n#     "polars",' in text
+    assert '#     "goto-fetch @ file:///x",\n#     "polars",' in text
     assert '# requires-python = ">=3.11"' in text
 
 
@@ -227,17 +227,17 @@ class FakeDistribution:
 @pytest.mark.parametrize(
     ("direct_url", "requirement"),
     [
-        (None, "api-explorer==0.1.0"),
+        (None, "goto-fetch==0.1.0"),
         (
-            {"url": "file:///src/api-explorer", "dir_info": {"editable": True}},
-            "api-explorer @ file:///src/api-explorer",
+            {"url": "file:///src/goto-fetch", "dir_info": {"editable": True}},
+            "goto-fetch @ file:///src/goto-fetch",
         ),
         (
             {
-                "url": "https://github.com/me/api-explorer",
+                "url": "https://github.com/me/goto-fetch",
                 "vcs_info": {"vcs": "git", "commit_id": "abc123"},
             },
-            "api-explorer @ git+https://github.com/me/api-explorer@abc123",
+            "goto-fetch @ git+https://github.com/me/goto-fetch@abc123",
         ),
     ],
     ids=["from-an-index", "local-or-editable", "from-git"],
@@ -258,7 +258,7 @@ def test_package_requirement_falls_back_to_the_bare_name(monkeypatch):
         raise plan_module.metadata.PackageNotFoundError(name)
 
     monkeypatch.setattr(plan_module.metadata, "distribution", missing)
-    assert package_requirement() == "api-explorer"
+    assert package_requirement() == "goto-fetch"
 
 
 def test_a_client_credentials_script_gets_its_token_from_the_environment(run_script):
@@ -405,7 +405,7 @@ def test_a_stored_plan_s_script_stores_the_same_way(tmp_path, run_script):
     )
     text = plan.script()
     assert "tracked_run(shop, 'orders', Incremental" in text
-    assert '"api-explorer[duckdb]"' in text
+    assert '"goto-fetch[duckdb]"' in text
     assert run_script(text, keyset_api(data))["count"] == 2
     data.append(stamped(3, 3))
     assert run_script(text, keyset_api(data))["count"] == 1
@@ -488,7 +488,7 @@ def test_a_script_runs_whatever_the_table_is_called(tmp_path, run_script, table)
 
 def test_a_script_s_docstring_hides_secrets_in_its_urls():
     plan = FetchPlan("http://h/api?api_key=S3", "/a/?token=T9")
-    first_lines = plan.script().split("from api_explorer")[0]
+    first_lines = plan.script().split("from goto_fetch")[0]
     assert "S3" not in first_lines.split("dependencies")[1]
     assert "T9" not in first_lines.split("dependencies")[1]
 

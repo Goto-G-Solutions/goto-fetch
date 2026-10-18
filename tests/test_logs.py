@@ -8,7 +8,7 @@ import sys
 import pytest
 from conftest import Collect
 
-from api_explorer import (
+from goto_fetch import (
     ApiError,
     ClientFilter,
     Cursor,
@@ -24,8 +24,8 @@ from api_explorer import (
     logging_to,
     to_frame,
 )
-from api_explorer.logs import log_event
-from api_explorer.testing import (
+from goto_fetch.logs import log_event
+from goto_fetch.testing import (
     TokenServer,
     cursor_api,
     json_pages,
@@ -40,7 +40,7 @@ from api_explorer.testing import (
 def test_nothing_prints_until_logging_is_switched_on():
     # A fresh interpreter, so no test runner's handlers are in the way.
     script = (
-        "from api_explorer.testing import replies\n"
+        "from goto_fetch.testing import replies\n"
         "replies(503, 200).client().request('GET', '/x/')\n"
     )
     result = subprocess.run(
@@ -56,11 +56,11 @@ def test_enable_logging_shows_lines_and_disable_logging_takes_them_off():
     disable_logging(handler)
     replies(503, 200).client().request("GET", "/x/")
     assert stream.getvalue().count("retry 1") == 1
-    assert "WARNING api_explorer.client:" in stream.getvalue()
+    assert "WARNING goto_fetch.client:" in stream.getvalue()
 
 
 def test_enable_logging_lowers_a_logger_s_level_but_never_raises_it():
-    logger = logging.getLogger("api_explorer")
+    logger = logging.getLogger("goto_fetch")
     logger.setLevel(logging.DEBUG)
     try:
         handler = enable_logging("INFO", handler=Collect())
@@ -72,10 +72,10 @@ def test_enable_logging_lowers_a_logger_s_level_but_never_raises_it():
 
 
 def test_a_logger_under_the_package_s_gets_the_handler_once():
-    # Regression: naming "api_explorer.client" in loggers= put the handler
-    # on it and on "api_explorer", so each of its lines showed twice.
+    # Regression: naming "goto_fetch.client" in loggers= put the handler
+    # on it and on "goto_fetch", so each of its lines showed twice.
     collect = Collect()
-    with logging_to(collect, "WARNING", loggers=("api_explorer.client",)):
+    with logging_to(collect, "WARNING", loggers=("goto_fetch.client",)):
         replies(503, 200).client().request("GET", "/x/")
     assert [event for event, _ in collect.events()] == ["retry"]
 
@@ -83,10 +83,10 @@ def test_a_logger_under_the_package_s_gets_the_handler_once():
 def test_disable_logging_restores_a_level_whatever_the_repeats():
     # Regression: a name given twice saved its already-lowered level, so
     # disable_logging put that back instead of the original.
-    logger = logging.getLogger("api_explorer")
+    logger = logging.getLogger("goto_fetch")
     logger.setLevel(logging.ERROR)
     try:
-        handler = enable_logging("INFO", handler=Collect(), loggers=("api_explorer",))
+        handler = enable_logging("INFO", handler=Collect(), loggers=("goto_fetch",))
         disable_logging(handler)
         assert logger.level == logging.ERROR
     finally:
@@ -111,7 +111,7 @@ def test_http_adds_a_request_event_per_request_sent():
     with logging_to(collect, "INFO", http=True):
         replies(200).client().request("GET", "/x/")
     [request] = [r for r in collect.records if getattr(r, "event", None) == "request"]
-    assert request.name == "api_explorer.http"
+    assert request.name == "goto_fetch.http"
     assert {k: request.data[k] for k in ("method", "url", "status")} == {
         "method": "GET",
         "url": "http://api.test/api/x/",
@@ -285,7 +285,7 @@ def test_the_client_name_reaches_lines_logged_by_your_own_pieces():
         list(next_link_api(2).client(name="crm").records("/items/", paging=Chatty()))
     stamped = {(r.name, r.client) for r in collect.records}
     assert ("mypkg.paging", "crm") in stamped
-    assert ("api_explorer.client", "crm") in stamped
+    assert ("goto_fetch.client", "crm") in stamped
     assert ("my-step", {"n": 1}) in collect.events()
 
 
@@ -300,13 +300,13 @@ def test_the_readable_format_shows_the_client_name():
     stream = io.StringIO()
     with logging_to(logging.StreamHandler(stream), "INFO"):
         list(next_link_api(2).client(name="crm").records("/items/"))
-    assert "INFO api_explorer.client [crm]: Page 1:" in stream.getvalue()
+    assert "INFO goto_fetch.client [crm]: Page 1:" in stream.getvalue()
 
 
 def test_client_filter_stamps_records_for_a_handler_of_your_own():
     collect = Collect()
     collect.addFilter(ClientFilter())
-    logger = logging.getLogger("api_explorer")
+    logger = logging.getLogger("goto_fetch")
     logger.addHandler(collect)
     logger.setLevel(logging.INFO)
     try:

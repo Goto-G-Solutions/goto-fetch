@@ -8,8 +8,8 @@ import gzip
 
 import pytest
 
-from api_explorer import Client, Httpx2Transport, Urllib3Transport, http
-from api_explorer.testing import check_transport, next_link_api, serve
+from goto_fetch import Client, Httpx2Transport, Urllib3Transport, http
+from goto_fetch.testing import check_transport, next_link_api, serve
 
 
 def test_the_urllib3_transport_keeps_every_transport_promise():

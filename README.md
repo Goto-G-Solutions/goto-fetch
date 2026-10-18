@@ -1,4 +1,4 @@
-# api-explorer
+# goto-fetch
 
 Pull data from paginated JSON APIs safely, fetch only what changed, and store it for analysis.
 
@@ -11,24 +11,24 @@ Pull data from paginated JSON APIs safely, fetch only what changed, and store it
 
 ## Who it is for
 
-`api-explorer` is a library to embed, not a platform to adopt: a fast start for a pipeline of your own that you can read end to end. The built-in pieces cover what most pipelines share (paging to the end, retries, tokens that renew, incremental runs that never skip a record, storage that is all or nothing), each sits behind a small interface, and you bring your own for the parts you care about: a transport, a paging style, a retry policy, a tracker, a warehouse on your own database. Records are plain dicts, so what comes out works with whatever you use next, and every piece can be tested against the fake APIs that ship with it.
+`goto-fetch` is a library to embed, not a platform to adopt: a fast start for a pipeline of your own that you can read end to end. The built-in pieces cover what most pipelines share (paging to the end, retries, tokens that renew, incremental runs that never skip a record, storage that is all or nothing), each sits behind a small interface, and you bring your own for the parts you care about: a transport, a paging style, a retry policy, a tracker, a warehouse on your own database. Records are plain dicts, so what comes out works with whatever you use next, and every piece can be tested against the fake APIs that ship with it.
 
 It is a fit for one team talking to a few APIs. For dozens of sources, a catalogue of ready-made connectors, nested data unnested into child tables, or parallel loads into many destinations, an ELT platform such as dlt, Airbyte or Meltano fits better: this package is synchronous, fetches one stream at a time, and stores to DuckDB or SQLite out of the box.
 
 ## Guides
 
-Guides for each piece ship with the package, for people and coding agents: `python -m api_explorer.docs` lists them, and `python -m api_explorer.docs paging` prints one. In the repository they are in [src/api_explorer/docs](src/api_explorer/docs/README.md), indexed in [llms.txt](llms.txt). To give a coding agent this package's skill in your own project:
+Guides for each piece ship with the package, for people and coding agents: `python -m goto_fetch.docs` lists them, and `python -m goto_fetch.docs paging` prints one. In the repository they are in [src/goto_fetch/docs](src/goto_fetch/docs/README.md), indexed in [llms.txt](llms.txt). To give a coding agent this package's skill in your own project:
 
 ```bash
-mkdir -p .claude/skills/api-explorer
-python -m api_explorer.docs skill > .claude/skills/api-explorer/SKILL.md
+mkdir -p .claude/skills/goto-fetch
+python -m goto_fetch.docs skill > .claude/skills/goto-fetch/SKILL.md
 ```
 
 ## Install
 
 ```bash
-uv add api-explorer                      # or: pip install api-explorer
-uv add "api-explorer[fast,polars,duckdb]"  # with extras, any mix of them
+uv add goto-fetch                      # or: pip install goto-fetch
+uv add "goto-fetch[fast,polars,duckdb]"  # with extras, any mix of them
 ```
 
 The core needs only `urllib3` and `narwhals`. Optional extras add more, and combine:
@@ -38,7 +38,7 @@ The core needs only `urllib3` and `narwhals`. Optional extras add more, and comb
 | `fast` | faster JSON parsing with msgspec, giving the same results |
 | `polars`, `pandas` | a dataframe library for `to_frame` (pyarrow works too, by name, without an extra) |
 | `duckdb` | storing records and run state in a DuckDB file with `DuckDBWarehouse` |
-| `scrape` | HTML scraping with `api_explorer.scrape` (parsel) |
+| `scrape` | HTML scraping with `goto_fetch.scrape` (parsel) |
 | `httpx2` | sending with httpx2 (`Httpx2Transport`): HTTP/2, an `httpx2.Client` of your own |
 | `explorer` | marimo, to run the explorer notebook from a clone of this repository |
 
@@ -47,7 +47,7 @@ The core needs only `urllib3` and `narwhals`. Optional extras add more, and comb
 ```python
 import os
 
-from api_explorer import Client, Offset, select, to_frame, token_headers
+from goto_fetch import Client, Offset, select, to_frame, token_headers
 
 with Client(
     "https://host/api", headers=token_headers(os.environ["API_TOKEN"])
@@ -90,7 +90,7 @@ Each piece works with no extra packages, and uses better ones when you have them
 A search API that pages with POST, with the query and the cursor in the body:
 
 ```python
-from api_explorer import Cursor
+from goto_fetch import Cursor
 
 records = client.records(
     "/search/",
@@ -105,7 +105,7 @@ records = client.records(
 Some APIs answer 200 and put the error in the body. Left alone, an error page that still holds an empty list of results reads as the last page, and the run ends with part of the data and no warning. A response check turns such a page into an `ApiError`; with `temporary=True`, the retry policy tries again first, as for a 503:
 
 ```python
-from api_explorer import Client, error_at
+from goto_fetch import Client, error_at
 
 client = Client(
     "https://api.example.com", check=error_at("error|errors", temporary=True)
@@ -115,7 +115,7 @@ client = Client(
 To fetch only what changed since the last run, give `records` an `Incremental`: the field that grows when a record is added or changed, and the parameter the API filters by. Field and parameter names are settings, since APIs differ (`created_at` or `updated_at`; `updated_since`, `updated_at__gte` or a key in a POST body). `tracked_run` keeps its state in an SQLite file (Python's own `sqlite3`, so no extra package), and saves it only if the whole block worked, your storing included:
 
 ```python
-from api_explorer import Incremental, SqliteState, tracked_run
+from goto_fetch import Incremental, SqliteState, tracked_run
 
 state = SqliteState("state.db")
 with tracked_run(state, "orders", Incremental, "updated_at", "updated_since") as since:
@@ -127,7 +127,7 @@ Two rules keep it from losing data. The state moves on only when a run has read 
 One trap: paging by page number or offset can skip a record when the data changes during a run, because the records after a changed one shift a place. With `Incremental`, a skipped record is lost for good, since later runs start past it. Use a paging style that doesn't shift: a server cursor (`Cursor`), or, when the API can sort by the field, `Keyset`, which asks each page from the last value of the one before. `Changes` finds such a record again on its next run, so it suits APIs that offer neither.
 
 ```python
-from api_explorer import Keyset
+from goto_fetch import Keyset
 
 with tracked_run(state, "orders", Incremental, "updated_at", "updated_since") as since:
     store(
@@ -144,7 +144,7 @@ Keyset pages overlap at each page's last value, and `Incremental` passes the rep
 When an API has no such field, or doesn't always update it, `Changes` fetches everything and passes on only new and changed records, by a fingerprint (a hash) of each. It also lists the records that disappeared, which a timestamp never shows. Leave out fields that change on every fetch, or every record looks changed. For an API that gives each record a version or ETag, `fingerprint=lambda r: str(r["version"])` replaces the hash:
 
 ```python
-from api_explorer import Changes
+from goto_fetch import Changes
 
 with tracked_run(
     state, "products", Changes, key="id", ignore=["fetched_at"]
@@ -153,12 +153,12 @@ with tracked_run(
 remove(changes.deleted)  # ids gone since the last run
 ```
 
-The state can live anywhere with `get(name)` and `put(name, value)`; `api_explorer.testing.check_state_store` checks such a store, and `MemoryState` keeps it in memory for tests.
+The state can live anywhere with `get(name)` and `put(name, value)`; `goto_fetch.testing.check_state_store` checks such a store, and `MemoryState` keeps it in memory for tests.
 
 To keep the records too, store them in a warehouse. A `DuckDBWarehouse` (the `duckdb` extra) or an `SqliteWarehouse` (nothing to install) is one file that holds both the tables and the state:
 
 ```python
-from api_explorer import DuckDBWarehouse
+from goto_fetch import DuckDBWarehouse
 
 shop = DuckDBWarehouse("shop.duckdb")  # or SqliteWarehouse("shop.db")
 with tracked_run(shop, "products", Changes, key="id") as changes:
@@ -176,16 +176,16 @@ Every warehouse keeps the same promises, and these are what make tracked runs sa
 
 The two database warehouses first copy a run to temporary files, so a failed request never touches the database, then make one transaction of it. Columns follow the records: nested objects and lists become JSON columns (`customer->>'name'` in DuckDB's SQL), text stays text, timestamps included, new fields add columns, and a column whose values change type is widened (integers beside floats to floats when a float holds every one exactly, anything else to text, with a warning). Read the file with its own tools too, such as `duckdb.connect("shop.duckdb").sql("SELECT * FROM products").pl()`.
 
-Any object with `write` and `read` that keeps those promises is a `Warehouse`, and works with `FetchPlan.store(client, warehouse=...)`; `api_explorer.testing.check_warehouse` checks one, and `MemoryWarehouse` stands in for tests. For another SQL database, implement `SqlTables` (open a transaction, describe a table, alter it, load a file, delete keys) and call `write_run`, which keeps the promises; the DuckDB and SQLite warehouses are built that way.
+Any object with `write` and `read` that keeps those promises is a `Warehouse`, and works with `FetchPlan.store(client, warehouse=...)`; `goto_fetch.testing.check_warehouse` checks one, and `MemoryWarehouse` stands in for tests. For another SQL database, implement `SqlTables` (open a transaction, describe a table, alter it, load a file, delete keys) and call `write_run`, which keeps the promises; the DuckDB and SQLite warehouses are built that way.
 
 `FetchPlan` describes one fetch as data (the API, its auth, paging, tracking and where to store), which is what the explorer builds. `plan.records(client)` runs it, `plan.store(client)` runs it into its warehouse, and `plan.script()` writes a uv script that does the same, from the same description, with secrets read from environment variables.
 
 The interfaces are Protocols: your pieces match their shape and never inherit from ours, and a type checker confirms they fit. `Paging`, `RetryPolicy`, `Login`, `ResolvesUrls` (an auth with URLs of its own), `Tracker` (what a run delivers: `apply`, `track`, `state`), `ReportsDeletions` (a tracker that knows what is gone), `StateStore` and `Warehouse` are the main ones; one-function seams are plain function types (`Decoder`, `ResponseCheck`, `Fingerprint`). `check_paging`, `check_retry_policy`, `check_tracker`, `check_state_store`, `check_warehouse` and `check_transport` check behaviour the types can't.
 
-`Client.records` is built from public parts, `paginate`, a `Paging`, `read_page` and `api_explorer.models.converter`, so a loop of your own can reuse the same rules. `paginate` pages by whatever your fetch needs, not only URLs, with the same loop protection:
+`Client.records` is built from public parts, `paginate`, a `Paging`, `read_page` and `goto_fetch.models.converter`, so a loop of your own can reuse the same rules. `paginate` pages by whatever your fetch needs, not only URLs, with the same loop protection:
 
 ```python
-from api_explorer import paginate, read_page
+from goto_fetch import paginate, read_page
 
 
 def fetch(body):
@@ -203,7 +203,7 @@ for page in paginate(fetch, {"query": "late orders"}, next_request):
 ```python
 from pydantic import BaseModel
 
-from api_explorer import Client, Retry, to_frame
+from goto_fetch import Client, Retry, to_frame
 
 
 class Item(BaseModel):
@@ -221,10 +221,10 @@ df = to_frame(items)
 
 ## Scraping
 
-For pages without an API, `api_explorer.scrape` (the `scrape` extra) follows "next" links through HTML with the same paging loop and retries:
+For pages without an API, `goto_fetch.scrape` (the `scrape` extra) follows "next" links through HTML with the same paging loop and retries:
 
 ```python
-from api_explorer.scrape import CSSField, ScraperConfig, scrape
+from goto_fetch.scrape import CSSField, ScraperConfig, scrape
 
 config = ScraperConfig(
     item_selector="article.product",
@@ -239,7 +239,7 @@ rows = list(scrape(client, "/shop/", config))
 The package prints nothing until you switch logging on:
 
 ```python
-from api_explorer import enable_logging, logging_to
+from goto_fetch import enable_logging, logging_to
 
 enable_logging()  # INFO and up on stderr: a line per page, and retries
 enable_logging("DEBUG", http=True)  # every decision, and each request
@@ -248,19 +248,19 @@ with logging_to(my_handler, "INFO"):  # for a while, to a handler of yours
     ...
 ```
 
-Each line the package logs is an event: `record.event` is a short name (`page`, `done`, `retry`, `stop`, `renew`, and so on) and `record.data` holds its numbers, so a progress bar or a log shipper can act on events without reading text. The full list is in the `api_explorer.logs` docstring.
+Each line the package logs is an event: `record.event` is a short name (`page`, `done`, `retry`, `stop`, `renew`, and so on) and `record.data` holds its numbers, so a progress bar or a log shipper can act on events without reading text. The full list is in the `goto_fetch.logs` docstring.
 
 Secrets in URLs, such as `?api_key=...` or `?access_token=...`, show as `***` in errors and in the lines `enable_logging` prints, including each request's.
 
-`Client(name="crm")` labels every line from that client's requests, `[crm]` in the readable format and `record.client` for handlers. That includes lines your own pieces log during a request: log under your own logger, add it with `enable_logging(loggers=("mypkg",))`, and use `api_explorer.logs.log_event` for the same `event` and `data` fields.
+`Client(name="crm")` labels every line from that client's requests, `[crm]` in the readable format and `record.client` for handlers. That includes lines your own pieces log during a request: log under your own logger, add it with `enable_logging(loggers=("mypkg",))`, and use `goto_fetch.logs.log_event` for the same `event` and `data` fields.
 
 ## Testing your code
 
-`api_explorer.testing` has fake APIs that page, fail and authenticate like real ones, in memory. Use them to test code that fetches from APIs, with any test framework and without the network. Each fake is a `Transport`, so it goes straight into `Client(transport=...)`; mocking libraries built for httpx or requests don't see these requests.
+`goto_fetch.testing` has fake APIs that page, fail and authenticate like real ones, in memory. Use them to test code that fetches from APIs, with any test framework and without the network. Each fake is a `Transport`, so it goes straight into `Client(transport=...)`; mocking libraries built for httpx or requests don't see these requests.
 
 ```python
-from api_explorer import Offset
-from api_explorer.testing import flaky, offset_api
+from goto_fetch import Offset
+from goto_fetch.testing import flaky, offset_api
 
 
 def test_my_pipeline_survives_a_capped_server_and_a_hiccup():
@@ -291,8 +291,8 @@ Each returns a `FakeApi`, which remembers every request (`.calls`, `.paths`, `.q
 Pieces you build on the package's interfaces test the same way: point them at a fake, and check what happened. Six checks cover the promises every retry policy, paging style, tracker, state store, warehouse and transport must keep.
 
 ```python
-from api_explorer import Client, PageRequest, http, read_page
-from api_explorer.testing import (
+from goto_fetch import Client, PageRequest, http, read_page
+from goto_fetch.testing import (
     MemoryState,
     check_paging,
     check_retry_policy,
@@ -357,7 +357,7 @@ def read(page):
 uvx marimo edit --sandbox notebooks/explorer.py
 ```
 
-The notebook's header installs the package from this repo. To use the notebook on its own, outside a clone of the repo, delete its `[tool.uv.sources]` lines, and it installs `api-explorer` from PyPI instead.
+The notebook's header installs the package from this repo. To use the notebook on its own, outside a clone of the repo, delete its `[tool.uv.sources]` lines, and it installs `goto-fetch` from PyPI instead.
 
 Fill in the API, press **Fetch**, and pick the columns you want. The **Code** tab then shows a script that repeats the fetch; `uv run` installs what it needs. Secrets come from `$API_TOKEN`, `$API_REFRESH_TOKEN`, `$API_ACCESS_TOKEN`, `$API_USERNAME`, `$API_PASSWORD` and `$API_CLIENT_SECRET`, and never appear in the script.
 

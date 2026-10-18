@@ -18,8 +18,8 @@ a small part of a run. Rerun after changing a transport.
 import sys
 import time
 
-from api_explorer import Httpx2Transport, Urllib3Transport, http
-from api_explorer.testing import serve
+from goto_fetch import Httpx2Transport, Urllib3Transport, http
+from goto_fetch.testing import serve
 
 PAGE = {
     "results": [

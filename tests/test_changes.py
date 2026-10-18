@@ -11,13 +11,13 @@ import json
 import pytest
 from conftest import Collect
 
-from api_explorer import (
+from goto_fetch import (
     ApiError,
     Changes,
     logging_to,
     tracked_run,
 )
-from api_explorer.testing import MemoryState, next_link_api
+from goto_fetch.testing import MemoryState, next_link_api
 
 
 def product(id_, price=10, **extra) -> dict:

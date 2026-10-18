@@ -1,5 +1,5 @@
 [project]
-name = "api-explorer"
+name = "goto-fetch"
 version = "0.1.0"
 description = "Pull data from paginated JSON APIs safely, fetch only what changed, and store it for analysis."
 readme = "README.md"
@@ -25,14 +25,14 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/dario-j-c/api-explorer"
-Issues = "https://github.com/dario-j-c/api-explorer/issues"
-Changelog = "https://github.com/dario-j-c/api-explorer/blob/main/CHANGELOG.md"
+Repository = "https://github.com/Goto-G-Solutions/goto-fetch"
+Issues = "https://github.com/Goto-G-Solutions/goto-fetch/issues"
+Changelog = "https://github.com/Goto-G-Solutions/goto-fetch/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # Faster JSON parsing, with the same results (see json_decoder)
 fast = ["msgspec>=0.22"]
-# HTML scraping (api_explorer.scrape)
+# HTML scraping (goto_fetch.scrape)
 scrape = ["parsel>=1.10.0"]
 # The explorer notebook
 explorer = ["marimo>=0.25.1"]

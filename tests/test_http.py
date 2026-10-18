@@ -1,4 +1,4 @@
-"""api_explorer.http: the package's own requests, responses, headers and URLs.
+"""goto_fetch.http: the package's own requests, responses, headers and URLs.
 
 Everything above the transports speaks these types, so their rules are
 checked here once: how parameters are encoded and URLs joined, how
@@ -8,7 +8,7 @@ The transports' own promises are in test_transports.
 
 import pytest
 
-from api_explorer.http import (
+from goto_fetch.http import (
     URL,
     Headers,
     Request,

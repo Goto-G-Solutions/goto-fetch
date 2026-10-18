@@ -58,8 +58,8 @@ jobs:
       - run: uv build --wheel --out-dir dist
       - run: |
           cd /tmp
-          uv run --isolated --with "$GITHUB_WORKSPACE"/dist/*.whl python -m api_explorer.docs paging | head -1 | grep -qx "# Paging"
-          uv run --isolated --with "$GITHUB_WORKSPACE"/dist/*.whl python -m api_explorer.docs skill | grep -q "name: api-explorer"
+          uv run --isolated --with "$GITHUB_WORKSPACE"/dist/*.whl python -m goto_fetch.docs paging | head -1 | grep -qx "# Paging"
+          uv run --isolated --with "$GITHUB_WORKSPACE"/dist/*.whl python -m goto_fetch.docs skill | grep -q "name: goto-fetch"
 
   lint:
     name: Lint

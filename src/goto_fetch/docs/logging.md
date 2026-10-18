@@ -6,8 +6,8 @@ The package logs nothing until you ask. Then every line is an event with data, s
 
 ```python
 import logging
-from api_explorer import enable_logging, disable_logging, logging_to
-from api_explorer.testing import next_link_api
+from goto_fetch import enable_logging, disable_logging, logging_to
+from goto_fetch.testing import next_link_api
 
 handler = enable_logging("INFO")  # pages and a summary, on stderr
 disable_logging(handler)  # off again, levels and handler as they were
@@ -40,9 +40,9 @@ assert events[-1][1] == {
 
 ## The events
 
-The full table, with levels and data keys, is in the `api_explorer.logs` docstring (`python -c "import api_explorer.logs as l; help(l)"`). The ones to know: `page` and `done` (INFO, progress), `retry` (WARNING), `stop` (DEBUG, why paging ended), `renew` (DEBUG), `request` (INFO, with `http=True`), `no-count`, `count-short`, `text` and `widen` (WARNING, data that didn't fit), `stored` (INFO).
+The full table, with levels and data keys, is in the `goto_fetch.logs` docstring (`python -c "import goto_fetch.logs as l; help(l)"`). The ones to know: `page` and `done` (INFO, progress), `retry` (WARNING), `stop` (DEBUG, why paging ended), `renew` (DEBUG), `request` (INFO, with `http=True`), `no-count`, `count-short`, `text` and `widen` (WARNING, data that didn't fit), `stored` (INFO).
 
-A piece of your own logs the same way, with `log_event(logger, level, event, message, *args, data={...})` from `api_explorer.logs`, under a logger in the `api_explorer` tree or one you pass to `enable_logging(loggers=[...])`.
+A piece of your own logs the same way, with `log_event(logger, level, event, message, *args, data={...})` from `goto_fetch.logs`, under a logger in the `goto_fetch` tree or one you pass to `enable_logging(loggers=[...])`.
 
 ## Traps
 

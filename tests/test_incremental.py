@@ -13,8 +13,8 @@ import json
 import pytest
 from conftest import Collect
 
-from api_explorer import ApiError, Incremental, Keyset, PageRequest, http, logging_to
-from api_explorer.testing import FakeApi, changes_api, keyset_api, replies
+from goto_fetch import ApiError, Incremental, Keyset, PageRequest, http, logging_to
+from goto_fetch.testing import FakeApi, changes_api, keyset_api, replies
 
 
 def at(day: int, hour: int = 0) -> str:

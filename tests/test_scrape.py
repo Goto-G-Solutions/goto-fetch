@@ -2,13 +2,13 @@
 
 import pytest
 
-from api_explorer import http
+from goto_fetch import http
 
 pytest.importorskip("parsel", reason='needs the "scrape" extra')
 
 from parsel import Selector
 
-from api_explorer.scrape import CSSField, ScraperConfig, XPathField, scrape
+from goto_fetch.scrape import CSSField, ScraperConfig, XPathField, scrape
 
 PAGE_1 = """
 <article class="post"><h2><a href="/post/1">First</a></h2><span class="author">Ann</span></article>

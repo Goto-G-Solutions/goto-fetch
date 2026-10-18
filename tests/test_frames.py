@@ -7,7 +7,7 @@ from typing import Any
 import narwhals.stable.v2 as nw
 import pytest
 
-from api_explorer import (
+from goto_fetch import (
     default_backend,
     frames,
     latest_per_key,
@@ -187,6 +187,6 @@ def test_to_frame_refuses_records_that_aren_t_dicts(backend):
 def test_a_warning_names_a_nested_key_holding_a_dot_in_quotes(backend, caplog):
     # The name reads back with get_path: meta["a.b"], not meta, a, then b.
     records = [{"meta": {"a.b": 1}}, {"meta": {"a.b": "x"}}]
-    with caplog.at_level("WARNING", logger="api_explorer"):
+    with caplog.at_level("WARNING", logger="goto_fetch"):
         to_frame(records, backend)
     assert "Column 'meta[\"a.b\"]' mixes" in caplog.text

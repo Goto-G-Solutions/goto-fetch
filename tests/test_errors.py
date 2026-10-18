@@ -6,8 +6,8 @@ import logging
 import pytest
 from conftest import Collect
 
-from api_explorer import ApiError, Retry, logging_to, redact_url
-from api_explorer.testing import replies
+from goto_fetch import ApiError, Retry, logging_to, redact_url
+from goto_fetch.testing import replies
 
 
 @pytest.mark.parametrize(

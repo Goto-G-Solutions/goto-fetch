@@ -9,8 +9,8 @@ import time
 
 import pytest
 
-from api_explorer import Client, PasswordLogin, RateLimit, Retry, TokenRefresh
-from api_explorer.testing import TokenServer, flaky, next_link_api
+from goto_fetch import Client, PasswordLogin, RateLimit, Retry, TokenRefresh
+from goto_fetch.testing import TokenServer, flaky, next_link_api
 
 
 class FakeTime:

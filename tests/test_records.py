@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from api_explorer import explode, flatten, parse_datetime, select
+from goto_fetch import explode, flatten, parse_datetime, select
 
 
 def test_select_names_each_column_by_its_path():

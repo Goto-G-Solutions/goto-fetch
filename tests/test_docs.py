@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from api_explorer import docs
-from api_explorer.docs.__main__ import main
+from goto_fetch import docs
+from goto_fetch.docs.__main__ import main
 
 ROOT = Path(__file__).parent.parent
 FENCE = re.compile(r"^```python( skip)?\n(.*?)^```$", re.MULTILINE | re.DOTALL)
@@ -55,7 +55,7 @@ def test_the_index_and_llms_txt_list_every_guide():
     llms = (ROOT / "llms.txt").read_text()
     for page in GUIDES:
         assert f"({page}.md)" in index, page
-        assert f"src/api_explorer/docs/{page}.md" in llms, page
+        assert f"src/goto_fetch/docs/{page}.md" in llms, page
 
 
 def test_a_guide_prints_from_a_shell(capsys):
@@ -73,5 +73,5 @@ def test_an_unknown_page_lists_the_pages(capsys):
 def test_the_skill_names_itself_and_says_when_to_use_it():
     skill = docs.read("skill")
     front = skill.split("---")[1]
-    assert "name: api-explorer" in front
+    assert "name: goto-fetch" in front
     assert "description:" in front

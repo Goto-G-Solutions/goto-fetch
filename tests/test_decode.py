@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from api_explorer import json_decoder
+from goto_fetch import json_decoder
 
 # Bodies where strict parsers and the standard library differ. Each decoder
 # must give what the standard library gives.

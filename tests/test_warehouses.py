@@ -11,15 +11,15 @@ import math
 
 import pytest
 
-from api_explorer import (
+from goto_fetch import (
     ApiError,
     Changes,
     DuckDBWarehouse,
     SqliteWarehouse,
     Warehouse,
 )
-from api_explorer.testing import MemoryWarehouse, check_warehouse
-from api_explorer.warehouse import write_run
+from goto_fetch.testing import MemoryWarehouse, check_warehouse
+from goto_fetch.warehouse import write_run
 
 
 @pytest.fixture(params=["duckdb", "sqlite"])

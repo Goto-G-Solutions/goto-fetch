@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from api_explorer import (
+from goto_fetch import (
     ApiError,
     Failure,
     Retry,
@@ -12,7 +12,7 @@ from api_explorer import (
     http,
     retry_after_seconds,
 )
-from api_explorer.testing import replies
+from goto_fetch.testing import replies
 
 OK = http.Response(200, json={"ok": True})
 

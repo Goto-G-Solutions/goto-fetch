@@ -13,8 +13,8 @@ A retry policy decides whether a failed request is tried again, and after how lo
 ## Examples
 
 ```python
-from api_explorer import ApiError, Retry
-from api_explorer.testing import flaky, next_link_api, replies
+from goto_fetch import ApiError, Retry
+from goto_fetch.testing import flaky, next_link_api, replies
 
 # two 503s, then the pages: the run carries on
 api = flaky(next_link_api(5), 503, 503)
@@ -44,7 +44,7 @@ A server that can't take a fast run needs a rate limit rather than more retries:
 
 ```python
 import time
-from api_explorer import Client, RateLimit
+from goto_fetch import Client, RateLimit
 
 api = next_link_api(30, page_size=10)  # three pages
 client = Client("http://api.test/api", transport=api, rate_limit=RateLimit(20))

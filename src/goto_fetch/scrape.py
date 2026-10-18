@@ -1,6 +1,6 @@
 """Scrape items from HTML pages, following next-page links.
 
-Needs the "scrape" extra: pip install "api-explorer[scrape]".
+Needs the "scrape" extra: pip install "goto-fetch[scrape]".
 """
 
 from collections.abc import Iterator
@@ -11,8 +11,8 @@ try:
     from parsel import Selector
 except ImportError as exc:
     raise ImportError(
-        'api_explorer.scrape needs the "scrape" extra; install it with: '
-        'pip install "api-explorer[scrape]"'
+        'goto_fetch.scrape needs the "scrape" extra; install it with: '
+        'pip install "goto-fetch[scrape]"'
     ) from exc
 
 from .client import Client

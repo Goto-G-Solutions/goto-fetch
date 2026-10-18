@@ -12,8 +12,8 @@ import json
 
 import pytest
 
-from api_explorer import ApiError, Problem, Retry, error_at, http
-from api_explorer.testing import FakeApi, replies
+from goto_fetch import ApiError, Problem, Retry, error_at, http
+from goto_fetch.testing import FakeApi, replies
 
 
 def ok(body) -> http.Response:

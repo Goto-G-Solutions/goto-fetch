@@ -1,13 +1,13 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "api-explorer[duckdb]",
+#     "goto-fetch[duckdb]",
 #     "marimo>=0.25.1",
 # ]
 #
 # # The package from this repo, installed editable so changes show at once.
 # [tool.uv.sources]
-# api-explorer = { path = "..", editable = true }
+# goto-fetch = { path = "..", editable = true }
 # ///
 
 import marimo
@@ -26,7 +26,7 @@ with app.setup:
 
     import marimo as mo
 
-    from api_explorer import (
+    from goto_fetch import (
         FetchPlan,
         logging_to,
         package_requirement,
@@ -48,7 +48,7 @@ def _():
     Secrets live only in this session, never in the file, and the script
     the **Code** tab writes reads them from the same variables.
 
-    The panel is built on the `api_explorer` package; the examples below
+    The panel is built on the `goto_fetch` package; the examples below
     show the same calls in your own code, and the README shows storing and
     incremental fetching.
     """)
@@ -689,7 +689,7 @@ def _():
     import os
 
     import polars as pl
-    from api_explorer import (
+    from goto_fetch import (
         ApiError, Client, Cursor, Offset, PasswordLogin, TokenRefresh,
         explode, select, to_frame, token_headers,
     )

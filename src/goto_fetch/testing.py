@@ -847,7 +847,7 @@ def check_warehouse(make: Callable[[], Warehouse]) -> None:
 
     `make()` gives a new, empty warehouse each time it is called (a fresh
     file, say). Raises AssertionError naming the first promise broken. The
-    promises are in api_explorer.warehouse; values may come back as
+    promises are in goto_fetch.warehouse; values may come back as
     written or as their JSON text.
     """
 

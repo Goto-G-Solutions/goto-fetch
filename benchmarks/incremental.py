@@ -10,7 +10,7 @@ about 0.08s. Rerun after changing how values are compared.
 
 import time
 
-from api_explorer import Incremental
+from goto_fetch import Incremental
 
 RECORDS = [
     {

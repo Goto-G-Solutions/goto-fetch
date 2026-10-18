@@ -1,6 +1,6 @@
-# api-explorer guides
+# goto-fetch guides
 
-`api_explorer` pulls data from paginated JSON APIs safely, can fetch only what changed since the last run, and stores it for analysis. It is a library to embed, not a platform to adopt: a fast start for a pipeline of your own, with each piece behind a small interface, so you bring your own for the parts you care about. These guides ship with the package, so they match the version you have. Read one from a shell with `python -m api_explorer.docs <page>`.
+`goto_fetch` pulls data from paginated JSON APIs safely, can fetch only what changed since the last run, and stores it for analysis. It is a library to embed, not a platform to adopt: a fast start for a pipeline of your own, with each piece behind a small interface, so you bring your own for the parts you care about. These guides ship with the package, so they match the version you have. Read one from a shell with `python -m goto_fetch.docs <page>`.
 
 ## Start here
 
@@ -42,6 +42,6 @@ Use the built-in pieces and these come with them, so code that uses the package 
 
 ## For coding agents
 
-- Prefer the built-in pieces; when one doesn't fit, build your own on its interface ([build-your-own](build-your-own.md)) and run its `check_*` from `api_explorer.testing`.
-- Test against the fake APIs in `api_explorer.testing`, never the network ([testing](testing.md)).
-- `python -m api_explorer.docs skill` prints an Agent Skill for this package; save it as `.claude/skills/api-explorer/SKILL.md` in a project to have an agent use it.
+- Prefer the built-in pieces; when one doesn't fit, build your own on its interface ([build-your-own](build-your-own.md)) and run its `check_*` from `goto_fetch.testing`.
+- Test against the fake APIs in `goto_fetch.testing`, never the network ([testing](testing.md)).
+- `python -m goto_fetch.docs skill` prints an Agent Skill for this package; save it as `.claude/skills/goto-fetch/SKILL.md` in a project to have an agent use it.

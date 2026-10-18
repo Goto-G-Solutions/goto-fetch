@@ -36,7 +36,7 @@ class Httpx2Transport:
             import httpx2
         except ImportError as exc:
             raise ImportError(
-                "Httpx2Transport needs httpx2: install the extra, api-explorer[httpx2]"
+                "Httpx2Transport needs httpx2: install the extra, goto-fetch[httpx2]"
             ) from exc
         self._httpx2 = httpx2
         self._owned = http is None

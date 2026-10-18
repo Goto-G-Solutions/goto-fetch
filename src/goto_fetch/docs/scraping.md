@@ -1,14 +1,14 @@
 <!-- needs: parsel -->
 # Scraping
 
-For pages without an API, `api_explorer.scrape` (the `scrape` extra) follows "next" links through HTML, with the same paging loop, retries and auth as JSON.
+For pages without an API, `goto_fetch.scrape` (the `scrape` extra) follows "next" links through HTML, with the same paging loop, retries and auth as JSON.
 
 ## Examples
 
 ```python
-from api_explorer import Client, http
-from api_explorer.scrape import CSSField, ScraperConfig, XPathField, scrape
-from api_explorer.testing import FakeApi
+from goto_fetch import Client, http
+from goto_fetch.scrape import CSSField, ScraperConfig, XPathField, scrape
+from goto_fetch.testing import FakeApi
 
 pages = {
     "/shop/": '<article class="product"><h2>Mug</h2><a href="/mug">x</a></article>'

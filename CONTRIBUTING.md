@@ -24,9 +24,9 @@ Writing these down is how we make sure the problem is understood before anyone w
    - a defence learned from another library's bug is marked `# Guard (source):`;
    - keep tests orthogonal, and explain any overlap in a comment;
    - a rule that should hold for any input belongs in `tests/test_properties.py`, as a property test.
-4. Update the guides. The guides in `src/api_explorer/docs/` ship with the package, and people and coding agents rely on them, so a valid change keeps them true:
+4. Update the guides. The guides in `src/goto_fetch/docs/` ship with the package, and people and coding agents rely on them, so a valid change keeps them true:
    - a change to what a piece does, or to its public interface, updates that piece's guide, and `build-your-own.md` if it changes an interface;
-   - a new piece or guide is added to the index (`src/api_explorer/docs/README.md`), to `llms.txt`, and to `SKILL.md` if an agent needs to know of it;
+   - a new piece or guide is added to the index (`src/goto_fetch/docs/README.md`), to `llms.txt`, and to `SKILL.md` if an agent needs to know of it;
    - every example in a guide runs as part of `uv run pytest` (`tests/test_docs.py`), so a stale example fails the tests;
    - update `README.md` and `CHANGELOG.md` the same way, under "Unreleased".
 5. Run the checks:
@@ -60,7 +60,7 @@ The workflow checks the tag matches the version, runs the tests, builds, and pub
 
 **Once, before the first release:**
 
-1. On PyPI, under your account's Publishing settings, add a pending trusted publisher: project `api-explorer`, owner `dario-j-c`, repository `api-explorer`, workflow `release.yml`, environment `pypi`.
+1. On PyPI, under your account's Publishing settings, add a pending trusted publisher: project `goto-fetch`, owner `Goto-G-Solutions`, repository `goto-fetch`, workflow `release.yml`, environment `pypi`.
 2. On GitHub, in the repository's Settings, create an environment named `pypi`. Adding yourself as a required reviewer there makes every release wait for your approval.
 
 ## Setting up

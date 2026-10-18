@@ -22,12 +22,12 @@ Optional packages make it faster or richer when installed: msgspec parses
 JSON faster, pydantic or msgspec models type the records, polars, pandas
 or pyarrow hold the frames, and DuckDB holds a warehouse.
 
-HTML scraping lives in api_explorer.scrape and needs the "scrape" extra.
+HTML scraping lives in goto_fetch.scrape and needs the "scrape" extra.
 Records are kept in a Warehouse: SqliteWarehouse needs nothing more, and
 DuckDBWarehouse needs the "duckdb" extra. Fake APIs and checks for
-testing your own code live in api_explorer.testing.
+testing your own code live in goto_fetch.testing.
 
-Guides for each piece ship in api_explorer.docs: python -m api_explorer.docs
+Guides for each piece ship in goto_fetch.docs: python -m goto_fetch.docs
 prints the index.
 
 The package logs nothing until asked: enable_logging() switches it on.

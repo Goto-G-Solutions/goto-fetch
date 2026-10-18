@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from api_explorer import Client
-from api_explorer.testing import FakeApi
+from goto_fetch import Client
+from goto_fetch.testing import FakeApi
 
 # A deeper search for the property tests, for occasional runs:
 #   uv run pytest tests/test_properties.py --hypothesis-profile=thorough
@@ -66,5 +66,5 @@ def mock_client() -> Callable[..., Client]:
 @pytest.fixture
 def log_info(caplog: pytest.LogCaptureFixture) -> pytest.LogCaptureFixture:
     """caplog set to keep this package's INFO lines, such as page progress."""
-    caplog.set_level(logging.INFO, logger="api_explorer")
+    caplog.set_level(logging.INFO, logger="goto_fetch")
     return caplog

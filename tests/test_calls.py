@@ -7,8 +7,8 @@ secrets, script-only names, and the names a script imports.
 
 import pytest
 
-from api_explorer.calls import Call, Name, Secret, build, code, names, reads_environment
-from api_explorer.plan import _with_extra
+from goto_fetch.calls import Call, Name, Secret, build, code, names, reads_environment
+from goto_fetch.plan import _with_extra
 
 
 def pair(a, b=0, *, c=None):
@@ -72,13 +72,13 @@ def test_reads_environment_finds_a_secret_at_any_depth():
 @pytest.mark.parametrize(
     ("requirement", "with_duckdb"),
     [
-        ("api-explorer", "api-explorer[duckdb]"),
-        ("api-explorer==0.1.0", "api-explorer[duckdb]==0.1.0"),
-        ("api-explorer @ file:///src/x", "api-explorer[duckdb] @ file:///src/x"),
-        ("api-explorer[fast]==0.1.0", "api-explorer[fast,duckdb]==0.1.0"),
+        ("goto-fetch", "goto-fetch[duckdb]"),
+        ("goto-fetch==0.1.0", "goto-fetch[duckdb]==0.1.0"),
+        ("goto-fetch @ file:///src/x", "goto-fetch[duckdb] @ file:///src/x"),
+        ("goto-fetch[fast]==0.1.0", "goto-fetch[fast,duckdb]==0.1.0"),
         # Regression: another package starting with this one's name got
         # the extra too.
-        ("api-explorer-tools==1", "api-explorer-tools==1"),
+        ("goto-fetch-tools==1", "goto-fetch-tools==1"),
     ],
     ids=["bare", "pinned", "local", "other-extra", "other-package"],
 )

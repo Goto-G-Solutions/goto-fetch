@@ -1,4 +1,4 @@
-"""Print a page of the guides: python -m api_explorer.docs [page | --path]."""
+"""Print a page of the guides: python -m goto_fetch.docs [page | --path]."""
 
 import sys
 

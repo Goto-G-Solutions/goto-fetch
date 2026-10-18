@@ -16,8 +16,8 @@ A `FetchPlan` describes one fetch as data: the API, its auth, paging, tracking a
 ## Examples
 
 ```python
-from api_explorer import FetchPlan
-from api_explorer.testing import changes_api
+from goto_fetch import FetchPlan
+from goto_fetch.testing import changes_api
 
 plan = FetchPlan(
     "http://api.test/api",
@@ -41,7 +41,7 @@ assert "tracked_run(" in script
 
 `rate_limit=2` keeps every request the plan sends to two a second, in its script too. Without a warehouse, `plan.records(client)` yields the records, and `plan.script(columns=[...], backend="polars")` writes a script that selects columns and builds a frame. `plan.store(client, warehouse=...)` stores into any `Warehouse` of your own.
 
-The script's header installs `requirement`, `"api-explorer"` by default, with the `duckdb` extra when needed. Pass `package_requirement()` to install this package the way it is installed here: an editable checkout, a git commit or a pinned version.
+The script's header installs `requirement`, `"goto-fetch"` by default, with the `duckdb` extra when needed. Pass `package_requirement()` to install this package the way it is installed here: an editable checkout, a git commit or a pinned version.
 
 ```python skip
 print(plan.script(requirement=package_requirement()))

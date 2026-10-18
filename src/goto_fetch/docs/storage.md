@@ -23,7 +23,7 @@ Every warehouse keeps these promises (and `check_warehouse` checks them):
 ## Examples
 
 ```python
-from api_explorer import SqliteWarehouse
+from goto_fetch import SqliteWarehouse
 
 shop = SqliteWarehouse("shop.db")
 shop.write("orders", [{"id": 1, "total": 9.5, "customer": {"name": "Ann"}}], key="id")

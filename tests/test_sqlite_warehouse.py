@@ -11,8 +11,8 @@ import sys
 
 import pytest
 
-from api_explorer import SqliteWarehouse
-from api_explorer.testing import check_state_store
+from goto_fetch import SqliteWarehouse
+from goto_fetch.testing import check_state_store
 
 
 @pytest.fixture
@@ -95,7 +95,7 @@ def test_replacing_by_key_uses_an_index_that_survives_a_rebuild(shop):
 def test_a_sqlite_warehouse_keeps_state_in_the_same_file(shop):
     check_state_store(lambda: shop)
     tables = raw(shop, "SELECT name FROM sqlite_master WHERE type = 'table'")
-    assert ("api_explorer_state",) in tables
+    assert ("goto_fetch_state",) in tables
 
 
 def test_a_sqlite_warehouse_without_sqlite3_says_what_is_missing(shop, monkeypatch):

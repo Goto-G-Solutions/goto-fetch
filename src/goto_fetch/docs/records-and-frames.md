@@ -11,7 +11,7 @@ Records are parsed JSON: lists of dicts. These functions reshape them without a 
 ## Examples
 
 ```python
-from api_explorer import explode, flatten, get_path, select, to_frame
+from goto_fetch import explode, flatten, get_path, select, to_frame
 
 records = [
     {"id": 1, "user": {"name": "Ann"}, "tags": [{"name": "new"}, {"name": "vip"}]},
@@ -42,7 +42,7 @@ assert frame.shape == (2, 3)
 `latest_per_key` keeps one row per key on any frame, the one with the latest (or earliest) value of another column:
 
 ```python
-from api_explorer import latest_per_key
+from goto_fetch import latest_per_key
 
 versions = to_frame([{"id": 1, "v": 1}, {"id": 1, "v": 2}, {"id": 2, "v": 1}], "polars")
 assert latest_per_key(versions, "id", "v")["v"].to_list() == [2, 1]

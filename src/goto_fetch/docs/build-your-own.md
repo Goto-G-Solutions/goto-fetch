@@ -4,7 +4,7 @@ Every piece you might replace sits behind a small interface, and the built-in on
 
 1. **Match the shape**, a few methods or one function. Don't inherit from our classes: interfaces are `Protocol`s, so any object with the right methods fits, and a type checker confirms it.
 2. **Keep its promises**, listed below for each piece.
-3. **Run its check** from `api_explorer.testing`, where there is one: it tries each promise and names the first one broken.
+3. **Run its check** from `goto_fetch.testing`, where there is one: it tries each promise and names the first one broken.
 4. **Leave the rest to the package.** Each section says what you get without writing it.
 
 | To change... | Implement | Check |
@@ -35,8 +35,8 @@ Every piece you might replace sits behind a small interface, and the built-in on
 **You get for free:** fetching, retries, auth, reading the records, loop detection, page events, and `records()`'s whole interface.
 
 ```python
-from api_explorer import with_param
-from api_explorer.testing import check_paging, next_link_api
+from goto_fetch import with_param
+from goto_fetch.testing import check_paging, next_link_api
 
 
 class PageNumber:
@@ -69,7 +69,7 @@ check_paging(PageNumber(), next_link_api(250), list(range(250)))
 **You get for free:** the loop that waits and tries again, logging, and the final `ApiError`.
 
 ```python
-from api_explorer.testing import check_retry_policy
+from goto_fetch.testing import check_retry_policy
 
 
 class FixedWait:
@@ -90,7 +90,7 @@ check_retry_policy(FixedWait())
 
 ## A transport
 
-A transport sends one request and gives back the response: `send(request, timeout)` and `close()`. `Request`, `Response` and `Timeout` (`timeout.connect` and `timeout.read`, in seconds, or None for no limit) come from `api_explorer.http`, and so do the errors to raise.
+A transport sends one request and gives back the response: `send(request, timeout)` and `close()`. `Request`, `Response` and `Timeout` (`timeout.connect` and `timeout.read`, in seconds, or None for no limit) come from `goto_fetch.http`, and so do the errors to raise.
 
 **Promises:** what is sent arrives as sent; the response is the server's (status, headers by any case, body unpacked); an error status is returned, never raised; redirects are followed; the connect and read timeouts apply apart (a short connect limit never cuts a slow read short); a refused connection raises `ConnectError`, a timeout `TimeoutError` and a reply cut short `ConnectionDropped` (the three `NetworkError`s, which the retry policy sees as worth another try), and anything else that sent nothing raises `TransportError`.
 
@@ -99,8 +99,8 @@ A transport sends one request and gives back the response: `send(request, timeou
 A transport can also wrap another, to add something to every request:
 
 ```python
-from api_explorer import Urllib3Transport
-from api_explorer.testing import check_transport
+from goto_fetch import Urllib3Transport
+from goto_fetch.testing import check_transport
 
 
 class Counting:
@@ -120,7 +120,7 @@ class Counting:
 check_transport(lambda: Counting(Urllib3Transport()))  # over real HTTP, on this machine
 ```
 
-For another library, translate its exceptions into those errors by meaning (worth retrying or not), follow redirects, and unpack the body; `api_explorer/urllib3_transport.py` is a short model.
+For another library, translate its exceptions into those errors by meaning (worth retrying or not), follow redirects, and unpack the body; `goto_fetch/urllib3_transport.py` is a short model.
 
 ## A login
 
@@ -129,8 +129,8 @@ A login has a `token_url` and `build_request(url)`, which builds the request tha
 **You get for free:** renewal before expiry and after a 401, safety across threads, URL resolution, and retries at the token endpoint.
 
 ```python
-from api_explorer import Client, TokenRefresh, http
-from api_explorer.testing import TokenServer
+from goto_fetch import Client, TokenRefresh, http
+from goto_fetch.testing import TokenServer
 
 
 class TeamLogin:
@@ -159,7 +159,7 @@ An `Auth` has `auth_flow(request)`, a generator as in httpx: it yields the reque
 ```python
 import hashlib
 import hmac
-from api_explorer.testing import replies
+from goto_fetch.testing import replies
 
 
 class Signed:
@@ -182,7 +182,7 @@ assert "X-Signature" in api.calls[0].headers
 A function from a successful response to `None` (fine), a message (a permanent problem) or `Problem(message, temporary=True)` (worth retrying). Pass it as `Client(check=...)`.
 
 ```python
-from api_explorer import ApiError, Problem
+from goto_fetch import ApiError, Problem
 
 
 def status_is_ok(response):
@@ -225,7 +225,7 @@ A tracker has `state` (plain JSON to save), `apply(request)` (change the first r
 **You get for free:** saving and loading the state at the right moment (`tracked_run`), and storing with deletions.
 
 ```python
-from api_explorer.testing import check_tracker
+from goto_fetch.testing import check_tracker
 
 
 class NewIds:
@@ -267,7 +267,7 @@ check_tracker(NewIds, [{"id": 1}, {"id": 2}, {"id": 3}])
 ```python
 import os
 from pathlib import Path
-from api_explorer.testing import check_state_store
+from goto_fetch.testing import check_state_store
 
 
 class JsonFileState:
@@ -297,11 +297,11 @@ check_state_store(lambda: JsonFileState(f"state-{os.urandom(4).hex()}"))
 
 **Promises:** one write is all or nothing; with a key, a record replaces the row with its key, the last of a key winning; `deleted_by`'s keys are removed only after storing, and a tracker whose run isn't complete is refused; no value is lost (`read` gives it back as written, or as its JSON text); a record without its key, or with no fields, is refused.
 
-**You get for free:** tracked runs into it (`tracked_run`, `FetchPlan.store(warehouse=...)`), and the checks. `check_write`, `deleted_keys`, `refuse_empty_records` and `last_per_key` from `api_explorer.warehouse` handle the argument rules.
+**You get for free:** tracked runs into it (`tracked_run`, `FetchPlan.store(warehouse=...)`), and the checks. `check_write`, `deleted_keys`, `refuse_empty_records` and `last_per_key` from `goto_fetch.warehouse` handle the argument rules.
 
 ```python
-from api_explorer.testing import check_warehouse
-from api_explorer.warehouse import (
+from goto_fetch.testing import check_warehouse
+from goto_fetch.warehouse import (
     check_write,
     deleted_keys,
     last_per_key,
@@ -356,10 +356,10 @@ check_warehouse(lambda: JsonLinesWarehouse(f"shop-{os.urandom(4).hex()}"))
 
 ### An SQL database
 
-For an SQL database, don't write the promises again: implement `SqlTables` and call `write_run`, which owns the order that keeps them (stage the run to disk, change columns, store rows, remove deletions) and decides each column's kind. `SqlTables` has five methods: `transaction()` (a DB-API connection, committed or rolled back), `columns(connection, table)`, `alter(...)`, `load(connection, table, part, fields, columns, key)` and `delete(connection, table, column, keys)`. The SQLite warehouse's `SqlTables` is about a hundred lines; read `api_explorer/sqlite_warehouse.py` as the model.
+For an SQL database, don't write the promises again: implement `SqlTables` and call `write_run`, which owns the order that keeps them (stage the run to disk, change columns, store rows, remove deletions) and decides each column's kind. `SqlTables` has five methods: `transaction()` (a DB-API connection, committed or rolled back), `columns(connection, table)`, `alter(...)`, `load(connection, table, part, fields, columns, key)` and `delete(connection, table, column, keys)`. The SQLite warehouse's `SqlTables` is about a hundred lines; read `goto_fetch/sqlite_warehouse.py` as the model.
 
 ```python skip
-from api_explorer import SqlTables, write_run
+from goto_fetch import SqlTables, write_run
 
 
 class PostgresWarehouse:

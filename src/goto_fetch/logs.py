@@ -1,7 +1,7 @@
 """Logging: silent unless switched on, one switch, and events every handler can read.
 
-The package logs under "api_explorer", each module under its own name
-(api_explorer.client, api_explorer.paging and so on), and prints nothing
+The package logs under "goto_fetch", each module under its own name
+(goto_fetch.client, goto_fetch.paging and so on), and prints nothing
 until the application asks:
 
     enable_logging()                      # INFO and up, on stderr
@@ -29,7 +29,7 @@ without reading the text:
 | text        | WARNING | column, reason                                    |
 | widen       | WARNING | table, column, type                               |
 | stored      | INFO    | table, records                                    |
-| request     | INFO    | method, url, status, seconds, error (logger api_explorer.http, shown with http=True) |
+| request     | INFO    | method, url, status, seconds, error (logger goto_fetch.http, shown with http=True) |
 
 `record.client` is the name of the Client whose request was running when
 the record was logged (Client(name=...)), or None. The handlers that
@@ -50,10 +50,10 @@ from typing import Any
 
 from .errors import redact
 
-ROOT = "api_explorer"
+ROOT = "goto_fetch"
 """The package's logger; every module logs under it."""
 
-HTTP = ("api_explorer.http", "httpx2")
+HTTP = ("goto_fetch.http", "httpx2")
 """The loggers of each request sent: the package's "request" events, and
 httpx2's own lines when Httpx2Transport sends. enable_logging(http=True)
 shows them; otherwise they are held back."""
@@ -63,7 +63,7 @@ shows them; otherwise they are held back."""
 logging.getLogger(ROOT).addHandler(logging.NullHandler())
 
 _client_name: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "api_explorer_client", default=None
+    "goto_fetch_client", default=None
 )
 
 
@@ -140,7 +140,7 @@ class _Formatter(logging.Formatter):
         return super().format(record)
 
 
-_ATTACHED = "_api_explorer_attached"
+_ATTACHED = "_goto_fetch_attached"
 """The attribute enable_logging marks a handler with, to undo its changes."""
 
 

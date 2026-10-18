@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from api_explorer import (
+from goto_fetch import (
     ApiError,
     Client,
     ClientCredentials,
@@ -26,7 +26,7 @@ from api_explorer import (
     jwt_expiry,
     token_headers,
 )
-from api_explorer.testing import FakeApi, TokenServer, flaky, replies
+from goto_fetch.testing import FakeApi, TokenServer, flaky, replies
 
 LOGIN = PasswordLogin("/token/", "me", "pw")
 

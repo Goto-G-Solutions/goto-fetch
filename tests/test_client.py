@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-from api_explorer import ApiError, Client, http
-from api_explorer.testing import replies, serve
+from goto_fetch import ApiError, Client, http
+from goto_fetch.testing import replies, serve
 
 OK = http.Response(200, json={"ok": True})
 

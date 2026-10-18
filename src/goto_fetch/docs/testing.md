@@ -1,6 +1,6 @@
 # Testing
 
-`api_explorer.testing` has fake APIs that page, filter, fail and authenticate like real ones, in memory. Each fake is a `Transport`, so it goes straight into `Client(transport=...)`: code that fetches is tested with any test framework and without the network. `serve(api)` puts a fake behind a real server on this machine, to test a real transport against it.
+`goto_fetch.testing` has fake APIs that page, filter, fail and authenticate like real ones, in memory. Each fake is a `Transport`, so it goes straight into `Client(transport=...)`: code that fetches is tested with any test framework and without the network. `serve(api)` puts a fake behind a real server on this machine, to test a real transport against it.
 
 ## The fakes
 
@@ -23,8 +23,8 @@ Each returns a `FakeApi`, which remembers every request (`.calls`, `.paths`, `.q
 ## Examples
 
 ```python
-from api_explorer import Offset
-from api_explorer.testing import flaky, offset_api
+from goto_fetch import Offset
+from goto_fetch.testing import flaky, offset_api
 
 
 def test_my_pipeline_survives_a_capped_server_and_a_hiccup():
@@ -42,8 +42,8 @@ test_my_pipeline_survives_a_capped_server_and_a_hiccup()
 A client set up elsewhere, with its own auth or settings, takes the fake as its transport:
 
 ```python
-from api_explorer import Client, http
-from api_explorer.testing import replies
+from goto_fetch import Client, http
+from goto_fetch.testing import replies
 
 api = replies(http.Response(200, json={"results": [1], "next": None}))
 client = Client("http://api.test/api", transport=api)
@@ -60,8 +60,8 @@ Each interface with promises the types can't state has a check, which raises `As
 `serve(api)` puts a fake behind a real HTTP server on this machine, for testing a real transport, or code that only takes a URL:
 
 ```python
-from api_explorer import Urllib3Transport
-from api_explorer.testing import next_link_api, serve
+from goto_fetch import Urllib3Transport
+from goto_fetch.testing import next_link_api, serve
 
 with serve(next_link_api(15, page_size=10)) as base:
     over_http = Client(f"{base}/api", transport=Urllib3Transport())

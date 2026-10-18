@@ -12,8 +12,8 @@ import sys
 
 import pytest
 
-from api_explorer import Incremental, SqliteState, StateStore, tracked_run
-from api_explorer.testing import MemoryState, changes_api, check_state_store
+from goto_fetch import Incremental, SqliteState, StateStore, tracked_run
+from goto_fetch.testing import MemoryState, changes_api, check_state_store
 
 
 def rec(id_: int, day: int) -> dict:

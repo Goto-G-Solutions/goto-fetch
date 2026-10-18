@@ -6,9 +6,9 @@ from datetime import datetime
 import narwhals.stable.v2 as nw
 import pytest
 
-from api_explorer import ApiError, to_frame
-from api_explorer.models import as_dict, converter
-from api_explorer.testing import json_pages
+from goto_fetch import ApiError, to_frame
+from goto_fetch.models import as_dict, converter
+from goto_fetch.testing import json_pages
 
 BASE = "http://api.test/api/items/"
 

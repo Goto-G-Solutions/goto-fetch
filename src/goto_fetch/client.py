@@ -40,7 +40,7 @@ from .retry import Failure, Retry, RetryPolicy
 from .urllib3_transport import Urllib3Transport
 
 logger = logging.getLogger(__name__)
-http_logger = logging.getLogger("api_explorer.http")
+http_logger = logging.getLogger("goto_fetch.http")
 """Where each request sent logs its "request" event (enable_logging(http=True))."""
 
 
@@ -77,7 +77,7 @@ class Client:
     installed.
 
     `auth` signs every request, for tokens that change, such as
-    TokenRefresh: any Auth (see api_explorer.http). Its own URLs (login,
+    TokenRefresh: any Auth (see goto_fetch.http). Its own URLs (login,
     refresh) follow the endpoint rules. A fixed token can go in `headers`
     instead (token_headers).
 

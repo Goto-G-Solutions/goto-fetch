@@ -8,7 +8,7 @@ Mac; with it, about 0.5s. Rerun after changing how paths are parsed.
 
 import time
 
-from api_explorer import select
+from goto_fetch import select
 
 RECORDS = [
     {"id": i, "user": {"name": f"u{i}", "tags": [{"n": 1}]}, "meta": {"a": i}}

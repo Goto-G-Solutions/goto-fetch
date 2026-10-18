@@ -14,8 +14,8 @@ from conftest import Collect
 
 duckdb = pytest.importorskip("duckdb", reason="the warehouse needs the duckdb extra")
 
-from api_explorer import DuckDBWarehouse, logging_to
-from api_explorer.testing import check_state_store
+from goto_fetch import DuckDBWarehouse, logging_to
+from goto_fetch.testing import check_state_store
 
 
 @pytest.fixture
@@ -128,7 +128,7 @@ def test_typed_records_are_stored_like_dicts(shop):
 def test_a_duckdb_warehouse_keeps_state_in_the_same_file(shop):
     check_state_store(lambda: shop)
     with duckdb.connect(str(shop.path)) as connection:
-        assert ("api_explorer_state",) in connection.sql("SHOW TABLES").fetchall()
+        assert ("goto_fetch_state",) in connection.sql("SHOW TABLES").fetchall()
 
 
 def test_a_duckdb_warehouse_needs_a_file():
@@ -138,5 +138,5 @@ def test_a_duckdb_warehouse_needs_a_file():
 
 def test_without_duckdb_the_error_says_what_to_install(shop, monkeypatch):
     monkeypatch.setitem(sys.modules, "duckdb", None)
-    with pytest.raises(ImportError, match=r"api-explorer\[duckdb\]"):
+    with pytest.raises(ImportError, match=r"goto-fetch\[duckdb\]"):
         shop.write("t", [{"id": 1}])

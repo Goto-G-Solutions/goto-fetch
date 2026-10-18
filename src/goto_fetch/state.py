@@ -42,7 +42,7 @@ class StateStore(Protocol):
         ...
 
 
-STATE_TABLE = "api_explorer_state"
+STATE_TABLE = "goto_fetch_state"
 """The table the built-in stores keep state in, in a database of their own or a warehouse's."""
 
 
@@ -58,7 +58,7 @@ class SqliteState:
     Each call opens the file, does its work in one transaction and closes
     it, so a crash leaves either the old value or the new one, never half
     of either, and several processes can share the file. The table,
-    `api_explorer_state`, is made on first use; the file's folder must
+    `goto_fetch_state`, is made on first use; the file's folder must
     exist.
 
     Two runs under one name at once are safe but wasteful: the last to
@@ -74,7 +74,7 @@ class SqliteState:
             # database every time. testing.MemoryState is the in-memory store.
             raise ValueError(
                 "SqliteState needs a file; for a store in memory, use "
-                "api_explorer.testing.MemoryState"
+                "goto_fetch.testing.MemoryState"
             )
         self.path = Path(path)
         self.timeout = timeout

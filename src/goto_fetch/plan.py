@@ -126,7 +126,7 @@ class FetchPlan:
             )
 
     def client_call(self) -> Call:
-        """The Client this plan uses, described once (see api_explorer.calls)."""
+        """The Client this plan uses, described once (see goto_fetch.calls)."""
         options: dict[str, Any] = {}
         if self.auth == "header" and self.token:
             options["headers"] = Call(
@@ -314,7 +314,7 @@ class FetchPlan:
         *,
         columns: Sequence[str] = (),
         backend: str | None = None,
-        requirement: str = "api-explorer",
+        requirement: str = "goto-fetch",
         requires_python: str = ">=3.11",
     ) -> str:
         """Write this fetch as a script that `uv run` can run, doing what store() or records() do.
@@ -416,26 +416,26 @@ class FetchPlan:
 
 
 def _import_line(imported: list[str]) -> str:
-    """`from api_explorer import ...`, wrapped one name a line when it is long."""
-    line = f"from api_explorer import {', '.join(imported)}"
+    """`from goto_fetch import ...`, wrapped one name a line when it is long."""
+    line = f"from goto_fetch import {', '.join(imported)}"
     if len(line) <= LINE:
         return line
     return "\n".join(
-        ["from api_explorer import (", *(f"    {n}," for n in imported), ")"]
+        ["from goto_fetch import (", *(f"    {n}," for n in imported), ")"]
     )
 
 
-# The rest can't start with a name character: "api-explorer-tools" is
+# The rest can't start with a name character: "goto-fetch-tools" is
 # another package.
 _REQUIREMENT = re.compile(
-    r"(?P<name>api-explorer)(\[(?P<extras>[^\]]*)\])?(?P<rest>(?![\w.-]).*)"
+    r"(?P<name>goto-fetch)(\[(?P<extras>[^\]]*)\])?(?P<rest>(?![\w.-]).*)"
 )
 
 
 def _with_extra(requirement: str, extra: str) -> str:
     """`requirement` for this package with `extra` added, so its version floor has one home.
 
-    "api-explorer==0.1.0" gives "api-explorer[duckdb]==0.1.0", and extras
+    "goto-fetch==0.1.0" gives "goto-fetch[duckdb]==0.1.0", and extras
     already there are kept. Another requirement is returned as it is.
     """
     found = _REQUIREMENT.fullmatch(requirement)
@@ -449,20 +449,20 @@ def _with_extra(requirement: str, extra: str) -> str:
 def package_requirement() -> str:
     """Return how scripts should install this package, matching how it is installed here.
 
-    An editable or local install gives "api-explorer @ file:///...", one from
-    git gives "api-explorer @ git+URL@commit", and one from an index gives
-    "api-explorer==VERSION". When the package can't be found, it gives the
+    An editable or local install gives "goto-fetch @ file:///...", one from
+    git gives "goto-fetch @ git+URL@commit", and one from an index gives
+    "goto-fetch==VERSION". When the package can't be found, it gives the
     bare name.
     """
     try:
-        dist = metadata.distribution("api-explorer")
+        dist = metadata.distribution("goto-fetch")
     except metadata.PackageNotFoundError:
-        return "api-explorer"
+        return "goto-fetch"
     direct = dist.read_text("direct_url.json")
     if not direct:
-        return f"api-explorer=={dist.version}"
+        return f"goto-fetch=={dist.version}"
     info = json.loads(direct)
     if "vcs_info" in info:
         commit = info["vcs_info"].get("commit_id")
-        return f"api-explorer @ git+{info['url']}" + (f"@{commit}" if commit else "")
-    return f"api-explorer @ {info['url']}"
+        return f"goto-fetch @ git+{info['url']}" + (f"@{commit}" if commit else "")
+    return f"goto-fetch @ {info['url']}"

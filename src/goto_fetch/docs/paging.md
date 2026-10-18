@@ -23,8 +23,8 @@ A paging style tells `client.records()` how to reach the next page. Pick the one
 ## Examples
 
 ```python
-from api_explorer import Cursor, HeaderLink, Offset
-from api_explorer.testing import cursor_api, link_header_api, offset_api
+from goto_fetch import Cursor, HeaderLink, Offset
+from goto_fetch.testing import cursor_api, link_header_api, offset_api
 
 # limit/offset, with a server that caps pages at 25 whatever is asked
 api = offset_api(120, cap=25)
@@ -56,8 +56,8 @@ assert list(records) == list(range(7))
 `records()` is built from public parts, so a loop that does something else reuses the same rules. `paginate` follows pages by whatever your fetch needs, a style's `begin` gives the first request and a `next_link`, and `follow` turns its answers into the next request:
 
 ```python
-from api_explorer import Fetched, NextLink, PageRequest, follow, paginate, read_page
-from api_explorer.testing import next_link_api
+from goto_fetch import Fetched, NextLink, PageRequest, follow, paginate, read_page
+from goto_fetch.testing import next_link_api
 
 api = next_link_api(25, page_size=10)
 client = api.client()

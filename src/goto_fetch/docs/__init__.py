@@ -4,10 +4,10 @@ Each page covers one piece: what it is for, what the package already
 handles, examples that run, and the traps. build-your-own covers making
 a piece of your own on each interface. From a shell:
 
-    python -m api_explorer.docs              # the index
-    python -m api_explorer.docs paging       # one page
-    python -m api_explorer.docs --path       # where the pages are
-    python -m api_explorer.docs skill        # an Agent Skill for this package
+    python -m goto_fetch.docs              # the index
+    python -m goto_fetch.docs paging       # one page
+    python -m goto_fetch.docs --path       # where the pages are
+    python -m goto_fetch.docs skill        # an Agent Skill for this package
 
 The pages match the installed version, and need no network.
 """

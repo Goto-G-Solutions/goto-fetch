@@ -15,10 +15,10 @@ Always: make one `Client` per API and reuse it. It keeps one connection pool, an
 
 ## Examples
 
-The examples use a fake API from `api_explorer.testing`, so they run as written; with a real API, give `Client` its URL instead.
+The examples use a fake API from `goto_fetch.testing`, so they run as written; with a real API, give `Client` its URL instead.
 
 ```python skip
-from api_explorer import Client, Timeout
+from goto_fetch import Client, Timeout
 
 with Client("https://api.example.com/v1", timeout=30) as client:
     item = client.get_json("/items/42/")
@@ -28,7 +28,7 @@ client = Client("https://api.example.com/v1", timeout=Timeout(connect=5, read=60
 ```
 
 ```python
-from api_explorer.testing import next_link_api
+from goto_fetch.testing import next_link_api
 
 api = next_link_api(250, page_size=100)  # 250 records, 100 a page
 client = api.client()  # a Client wired to the fake
@@ -53,7 +53,7 @@ assert api.queries == [{}, {"page": "2"}, {"page": "3"}]
 A missing results path is an error, not an empty page, so a mistyped key can't pass for "no data":
 
 ```python
-from api_explorer import ApiError
+from goto_fetch import ApiError
 
 try:
     list(client.records("/items/", results_key="data"))
@@ -66,8 +66,8 @@ except ApiError as error:
 Some APIs answer 200 and put the error in the body. Without a check, such a page can read as the last, empty page, and a run ends early with no warning. A response check turns it into an `ApiError`; with `temporary=True`, the retry policy tries again first:
 
 ```python
-from api_explorer import error_at, http
-from api_explorer.testing import replies
+from goto_fetch import error_at, http
+from goto_fetch.testing import replies
 
 api = replies(http.Response(200, json={"error": "quota exceeded"}))
 checked = api.client(check=error_at("error|errors"))
@@ -92,7 +92,7 @@ A transport sends each request: everything the client sends goes through it, tok
 
 ```python skip
 import httpx2
-from api_explorer import Httpx2Transport
+from goto_fetch import Httpx2Transport
 
 transport = Httpx2Transport(http=httpx2.Client(http2=True, proxy="http://proxy:8080"))
 client = Client("https://api.example.com", transport=transport)

@@ -2,7 +2,7 @@
 
 import pytest
 
-from api_explorer import get_path, parse_path
+from goto_fetch import get_path, parse_path
 
 
 @pytest.mark.parametrize(

@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from api_explorer import http
+from goto_fetch import http
 
 pytest.importorskip("hypothesis", reason="property tests need the dev dependencies")
 
@@ -18,7 +18,7 @@ from conftest import BACKENDS
 from hypothesis import HealthCheck, event, given, settings
 from hypothesis import strategies as st
 
-from api_explorer import (
+from goto_fetch import (
     Client,
     Offset,
     Retry,
@@ -29,7 +29,7 @@ from api_explorer import (
     select,
     to_frame,
 )
-from api_explorer.testing import FakeApi, offset_api
+from goto_fetch.testing import FakeApi, offset_api
 
 # JSON as APIs send it: no NaN or infinity, which JSON can't carry.
 SCALARS = (
@@ -181,7 +181,7 @@ def test_offset_paging_returns_every_record_once_whatever_the_server_does(
 @given(sizes=st.lists(st.integers(0, 5), min_size=1, max_size=6))
 def test_cursor_paging_by_post_body_returns_every_page_in_order(sizes):
     # Pages may be empty mid-run here: that is what stop_on_empty=False is for.
-    from api_explorer import Cursor
+    from goto_fetch import Cursor
 
     pages = [
         list(range(sum(sizes[:i]), sum(sizes[: i + 1]))) for i in range(len(sizes))
@@ -223,8 +223,8 @@ def test_incremental_runs_never_lose_or_repeat_a_version_of_a_record(
     # moves the clock on by 0 or 1 minute, so changes often share a time
     # with the last run's newest. Each run must yield every version it
     # hasn't yielded before, and none twice.
-    from api_explorer import Incremental
-    from api_explorer.testing import changes_api
+    from goto_fetch import Incremental
+    from goto_fetch.testing import changes_api
 
     data: dict[int, dict] = {}
     rows: list[dict] = []
@@ -261,7 +261,7 @@ def test_changes_delivers_exactly_what_differs_from_the_last_run(runs):
     # Each run is the whole source: {id: value}. Changes must pass on the
     # records that are new or differ from the last run, and list as
     # deleted the ids the last run had and this one lacks.
-    from api_explorer import Changes
+    from goto_fetch import Changes
 
     state, before = None, {}
     for source in runs:
@@ -283,7 +283,7 @@ def flaky_source(rows: list[dict], data) -> "Client":
     connection. Retries (3 tries, no waiting) rescue some failures; three
     in a row end the run with ApiError.
     """
-    from api_explorer.testing import changes_api
+    from goto_fetch.testing import changes_api
 
     api = changes_api(rows, page_size=2)
 
@@ -323,8 +323,8 @@ def test_a_warehouse_fed_by_tracked_runs_mirrors_the_source_despite_failures(
     # run that succeeds, the warehouse must equal the source; after every
     # run that fails, the saved state must be as it was. The Hypothesis
     # statistics (--hypothesis-show-statistics) show both kinds of run.
-    from api_explorer import ApiError, Changes, Incremental, tracked_run
-    from api_explorer.testing import MemoryState
+    from goto_fetch import ApiError, Changes, Incremental, tracked_run
+    from goto_fetch.testing import MemoryState
 
     store = MemoryState()
     source: dict[int, dict] = {}
@@ -385,8 +385,8 @@ def test_keyset_runs_mirror_the_source_while_it_changes_mid_run(sizes, limit, da
     # equal to the source after every run that succeeds. A run fails when
     # retries run out, or when more records share a time than a page
     # holds (Keyset refuses those); then the state must not move.
-    from api_explorer import ApiError, Incremental, Keyset, tracked_run
-    from api_explorer.testing import MemoryState, keyset_api
+    from goto_fetch import ApiError, Incremental, Keyset, tracked_run
+    from goto_fetch.testing import MemoryState, keyset_api
 
     store = MemoryState()
     source: dict[int, dict] = {}
@@ -474,7 +474,7 @@ def test_a_warehouse_mirrors_the_source_despite_failures(batches, tracker, kind,
     import tempfile
     from pathlib import Path
 
-    from api_explorer import (
+    from goto_fetch import (
         ApiError,
         Changes,
         DuckDBWarehouse,
@@ -482,7 +482,7 @@ def test_a_warehouse_mirrors_the_source_despite_failures(batches, tracker, kind,
         SqliteWarehouse,
         tracked_run,
     )
-    from api_explorer.testing import MemoryWarehouse
+    from goto_fetch.testing import MemoryWarehouse
 
     if kind == "duckdb":
         pytest.importorskip("duckdb")

@@ -1,4 +1,4 @@
-"""api_explorer.testing: the fake APIs' own promises, and three of the checks.
+"""goto_fetch.testing: the fake APIs' own promises, and three of the checks.
 
 The fakes are used throughout the other tests, which check their options
 as they test the package. This file covers what those don't: FakeApi's
@@ -13,7 +13,7 @@ import re
 
 import pytest
 
-from api_explorer import (
+from goto_fetch import (
     ApiError,
     Changes,
     Cursor,
@@ -26,7 +26,7 @@ from api_explorer import (
     http,
     read_page,
 )
-from api_explorer.testing import (
+from goto_fetch.testing import (
     FakeApi,
     check_paging,
     check_retry_policy,

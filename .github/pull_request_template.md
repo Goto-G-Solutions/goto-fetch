@@ -26,7 +26,7 @@ Closes #
 
 ## Guides
 
-<!-- Which guides in src/api_explorer/docs/ this changes, or "none: nothing a user sees changed". -->
+<!-- Which guides in src/goto_fetch/docs/ this changes, or "none: nothing a user sees changed". -->
 
 - [ ] Every guide this change makes untrue is updated, with examples that run (`tests/test_docs.py`).
 - [ ] A new piece or guide is in the index, `llms.txt` and, if agents need it, `SKILL.md`.

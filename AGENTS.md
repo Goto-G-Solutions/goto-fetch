@@ -233,7 +233,7 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 
 ## 12. This project
 
-**Purpose.** `api_explorer` pulls data from paginated JSON APIs safely, keeps only what changed if asked, and stores it for analysis, with a marimo notebook for exploring an API and copying the fetch as a script.
+**Purpose.** `goto_fetch` pulls data from paginated JSON APIs safely, keeps only what changed if asked, and stores it for analysis, with a marimo notebook for exploring an API and copying the fetch as a script.
 
 **Layers.** Each module imports only from modules in the layers before it. Dependencies point inward, as in section 2.
 
@@ -246,13 +246,13 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 7. `duckdb_warehouse`, `sqlite_warehouse`, `scrape`, `testing`: the built-in warehouses, HTML scraping, and the fakes and checks for users' tests.
 8. `plan`: `FetchPlan`, describing one fetch to run, store or write as a script.
 
-`api_explorer.docs` stands apart: it only reads the guide pages shipped beside it, and imports nothing from the package.
+`goto_fetch.docs` stands apart: it only reads the guide pages shipped beside it, and imports nothing from the package.
 
 **Dependencies.**
 
 - The core needs only `urllib3` and `narwhals`.
 - Anything else is an optional extra: `fast` (msgspec), `polars`, `pandas`, `duckdb`, `scrape` (parsel), `httpx2`, `explorer` (marimo). Extras combine; there is no `all`, since `httpx2` is an alternative and `explorer` a tool.
-- No module but a transport imports an HTTP library: the rest speaks `api_explorer.http`'s types, so the library that sends stays a choice.
+- No module but a transport imports an HTTP library: the rest speaks `goto_fetch.http`'s types, so the library that sends stays a choice.
 - An optional package, or a standard module some Python builds leave out (`sqlite3`), is imported only where it is used, never at import time, so the core runs without it, and its absence gives an error that names the fix.
 - An upgrade happens by itself only if it gives exactly the same results, such as msgspec for JSON. Anything that can change results is chosen by name, such as orjson, which turns integers beyond 64 bits into floats.
 
@@ -260,23 +260,23 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 
 - **Extension points.** Each piece a user might replace sits behind a small interface, and the built-in version is one implementation of it: `Decoder` (JSON parsing), `ResponseCheck` (built in: `error_at`), `model` (typed records), `backend` (the dataframe library), `RetryPolicy` (built in: `Retry`), `Paging` (built in: `NextLink`, `Offset`, `HeaderLink`, `Cursor`, `Keyset`), `Login` (built in: `PasswordLogin`, `ClientCredentials`), `ResolvesUrls`, `Auth` (built in: `TokenRefresh`), `Transport` (built in: `Urllib3Transport`, `Httpx2Transport`), `Tracker` (built in: `Incremental`, `Changes`), `ReportsDeletions` (built in: `Changes`), `Fingerprint` (built in: a hash of the record), `StateStore` (built in: `SqliteState`, `DuckDBWarehouse`, `SqliteWarehouse`), `Warehouse` (built in: `DuckDBWarehouse`, `SqliteWarehouse`), `SqlTables` (for a warehouse on another SQL database, with `write_run`), and `FieldExtractor` (built in: `CSSField`, `XPathField`).
 - **Protocols and function types.** A seam that takes an object is a `Protocol`, even with one method (`RetryPolicy`, `Paging`), so users match its shape without inheriting, and pyright checks the fit. A seam that takes a bare function is a function type (`Decoder`, `ResponseCheck`, `Fingerprint`). Never type a seam as one concrete class: it refuses every implementation but ours.
-- **Checked.** Each interface and its built-ins go in `tests/test_protocols.py`, which pyright checks, with a piece built as a user would where it helps. Each interface with promises the types can't state gets a `check_*` in `api_explorer.testing` that takes a factory where the piece holds state, and is tested on both sides: good pieces pass, each kind of broken one fails.
+- **Checked.** Each interface and its built-ins go in `tests/test_protocols.py`, which pyright checks, with a piece built as a user would where it helps. Each interface with promises the types can't state gets a `check_*` in `goto_fetch.testing` that takes a factory where the piece holds state, and is tested on both sides: good pieces pass, each kind of broken one fails.
 - **Built from public parts.** `Client.records` is composed of public pieces (`paginate`, a `Paging` with `follow`, `read_page`, `converter`), and the warehouses of `write_run` and `SqlTables`, so a user's own loop or warehouse reuses them. Keep it that way.
-- **Described once.** `FetchPlan` describes each piece as a `Call` (`api_explorer.calls`), which both runs and is written into scripts. Never write a piece into a script by hand: the script would drift from what the plan runs.
+- **Described once.** `FetchPlan` describes each piece as a `Call` (`goto_fetch.calls`), which both runs and is written into scripts. Never write a piece into a script by hand: the script would drift from what the plan runs.
 - **One place for each setting.** When two ways to set the same thing meet, such as `Changes(ignore=..., fingerprint=...)`, refuse the pair with a clear error instead of picking one. The exception is a setting the `Client` owns outright, such as the timeout: `Httpx2Transport` sends each request with the Client's, replacing any set on the `httpx2.Client` inside, as its docstring says.
 
 **Invariants.** These keep data safe; tests guard each, and none may be weakened.
 
 - **Tracker state.** A tracker's state moves on only at the end of a complete run, and the package never saves it: the caller saves it after storing the records, or `tracked_run` saves it when the whole block worked. `records()` refuses `max_pages` with a tracker, since a run cut short looks complete. `Incremental` asks from the last value (>=) and passes over what it already saw there, so ties are safe. The property tests in `tests/test_properties.py` guard all of this through flaky connections and data that changes during a run.
-- **Warehouses.** The `Warehouse` promises live in the `api_explorer.warehouse` docstring and in `check_warehouse`, which every warehouse runs in `tests/test_warehouses.py`. `write_run` holds the order that keeps them: stage the run to disk before opening the transaction, change columns before any row (DuckDB keeps the old versions of rows a transaction replaced, so retyping a column after writing rows can fail on values no longer visible), then store rows, then remove deletions. Values go in as their column's kind (`to_kind`), because SQLite would otherwise convert them on its own.
+- **Warehouses.** The `Warehouse` promises live in the `goto_fetch.warehouse` docstring and in `check_warehouse`, which every warehouse runs in `tests/test_warehouses.py`. `write_run` holds the order that keeps them: stage the run to disk before opening the transaction, change columns before any row (DuckDB keeps the old versions of rows a transaction replaced, so retyping a column after writing rows can fail on values no longer visible), then store rows, then remove deletions. Values go in as their column's kind (`to_kind`), because SQLite would otherwise convert them on its own.
 - **No value lost.** A column whose values change kind is widened, never truncated: integers beside floats become floats only when a float holds every one exactly, and anything else becomes text.
 - **Secrets.** A URL reaches a message only through `ApiError` or `log_event`, which both hide passwords in URLs and sensitive query values (`redact_url`). Never build a message or log line with a raw URL another way. Scripts read secrets from environment variables, through `Secret`, and redact the URLs in their docstring.
 
 **Guides.**
 
-- The user guides live in `src/api_explorer/docs/`, one page per piece, and ship with the package: `python -m api_explorer.docs <page>` prints one, so an agent in a user's project reads the version installed. `llms.txt` indexes them, and `SKILL.md` is the Agent Skill.
+- The user guides live in `src/goto_fetch/docs/`, one page per piece, and ship with the package: `python -m goto_fetch.docs <page>` prints one, so an agent in a user's project reads the version installed. `llms.txt` indexes them, and `SKILL.md` is the Agent Skill.
 - They are part of the code: a valid issue or pull request updates every guide it makes untrue, in the same change. A new piece or interface gets its section (and its `build-your-own.md` entry), and is added to the index, `llms.txt` and, if an agent needs it, `SKILL.md`.
-- Each page says what a piece is for, what the package already handles, runnable examples, and its traps. Examples use the fakes from `api_explorer.testing`, so they run offline; one that needs a real API is fenced `python skip`, and a page needing an optional package names it on its first line (`<!-- needs: duckdb -->`).
+- Each page says what a piece is for, what the package already handles, runnable examples, and its traps. Examples use the fakes from `goto_fetch.testing`, so they run offline; one that needs a real API is fenced `python skip`, and a page needing an optional package names it on its first line (`<!-- needs: duckdb -->`).
 - `tests/test_docs.py` runs every example and checks every page is indexed, so a stale guide fails the tests.
 - These differ from section 10's `docs/guide/`, which holds working notes for developing the package.
 
@@ -297,14 +297,14 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 - **Features.** Every new feature comes with tests at its interface.
 - **Reasonable.** Don't test what the language or a library already guarantees, such as a dataclass storing its fields.
 - **Dataframes.** Frame tests take the `backend` fixture, so they run once per installed library. Warehouse tests take the `database` fixture, so they run on DuckDB and SQLite.
-- **Fakes.** Fake servers live in `api_explorer.testing`, which is public: users test their own code with the same fakes. A fake our tests need belongs there, unless it only makes sense for one test. Tests never touch the network.
+- **Fakes.** Fake servers live in `goto_fetch.testing`, which is public: users test their own code with the same fakes. A fake our tests need belongs there, unless it only makes sense for one test. Tests never touch the network.
 - **Properties.** `tests/test_properties.py` states rules that must hold for any input (any JSON, any page size, any server cap, any failure), and Hypothesis tries to break them. When it finds a failing input, fix the code and add the smallest failing input as a regression test with the example tests. Check a new property test can fail, by breaking the code on purpose once. Run a deeper search now and then: `uv run pytest tests/test_properties.py --hypothesis-profile=thorough`.
 
 **Logging.**
 
-- The package prints nothing until the application asks (a `NullHandler` on the `api_explorer` logger). Never `print`, and never add a handler inside the package.
+- The package prints nothing until the application asks (a `NullHandler` on the `goto_fetch` logger). Never `print`, and never add a handler inside the package.
 - Log only through `log_event(logger, level, event, message, *args, data={...})`, under the module's logger (`logging.getLogger(__name__)`). Every record then carries `event` and plain-value `data`, and each event has one shape wherever it is logged.
-- The list of events lives in one place, the `api_explorer.logs` docstring. Add a new event there, with its level and data keys.
+- The list of events lives in one place, the `goto_fetch.logs` docstring. Add a new event there, with its level and data keys.
 - Levels: INFO for what a run is doing (a line per page, a summary), WARNING for what someone should know (a retry, data changed to fit, a count that doesn't add up), DEBUG for why a decision went the way it did (why paging stopped, why a token was renewed). Keep INFO short: about one line per page.
 
 **Writing.** Plain language, as at the top of this file. No em dashes, anywhere: code, comments, docs, commits, issues or pull requests.

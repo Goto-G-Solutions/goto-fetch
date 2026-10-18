@@ -6,7 +6,7 @@
         shop.write("orders", client.records("/orders/", incremental=since),
                    key="id")
 
-Columns follow the records (see api_explorer.warehouse): nested objects
+Columns follow the records (see goto_fetch.warehouse): nested objects
 and lists are JSON columns, which DuckDB can query (meta->>'x'); text
 stays text, timestamps included; integers are BIGINT and floats DOUBLE.
 
@@ -48,7 +48,7 @@ class DuckDBWarehouse:
     Each call opens the file and closes it again, so other programs can
     read it between runs; DuckDB lets one process write to a file at a
     time. Tracked runs' state lives in a table of its own,
-    api_explorer_state.
+    goto_fetch_state.
     """
 
     def __init__(self, path: str | Path) -> None:
@@ -57,7 +57,7 @@ class DuckDBWarehouse:
             # every time.
             raise ValueError(
                 "DuckDBWarehouse needs a file; for one in memory, use "
-                "api_explorer.testing.MemoryWarehouse"
+                "goto_fetch.testing.MemoryWarehouse"
             )
         self.path = Path(path)
         self._tables = _DuckDBTables(self.path)
@@ -142,7 +142,7 @@ class _DuckDBTables:
             import duckdb
         except ImportError as exc:
             raise ImportError(
-                "DuckDBWarehouse needs DuckDB: install the extra, api-explorer[duckdb]"
+                "DuckDBWarehouse needs DuckDB: install the extra, goto-fetch[duckdb]"
             ) from exc
         return duckdb.connect(str(self.path))
 

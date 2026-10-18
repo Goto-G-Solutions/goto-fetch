@@ -12,7 +12,7 @@ records are fingerprinted.
 import json
 import time
 
-from api_explorer import Changes
+from goto_fetch import Changes
 
 RECORDS = [
     {

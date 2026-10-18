@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from api_explorer import (
+from goto_fetch import (
     Auth,
     Changes,
     ClientCredentials,
@@ -50,7 +50,7 @@ from api_explorer import (
     json_decoder,
     tracked_run,
 )
-from api_explorer.testing import (
+from goto_fetch.testing import (
     FakeApi,
     MemoryState,
     MemoryWarehouse,
@@ -148,7 +148,7 @@ def test_built_in_pieces_fit_their_interfaces(tmp_path):
 
 def test_the_scraping_fields_fit_their_interface():
     pytest.importorskip("parsel")
-    from api_explorer.scrape import CSSField, FieldExtractor, XPathField
+    from goto_fetch.scrape import CSSField, FieldExtractor, XPathField
 
     fields: list[FieldExtractor] = [CSSField("h2"), XPathField("//h2/text()")]
     del fields  # for pyright

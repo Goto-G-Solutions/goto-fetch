@@ -22,8 +22,8 @@ A tracker makes a run deliver only what changed since the last one. Pass it to `
 ## Examples
 
 ```python
-from api_explorer import Changes, Incremental, SqliteWarehouse, tracked_run
-from api_explorer.testing import changes_api
+from goto_fetch import Changes, Incremental, SqliteWarehouse, tracked_run
+from goto_fetch.testing import changes_api
 
 data = [
     {"id": 1, "updated_at": "2026-01-01T00:00:00Z"},
@@ -53,7 +53,7 @@ assert api.queries[-1] == {"updated_since": "2026-01-02T00:00:00Z"}
 `Changes` fetches everything and compares a fingerprint of each record:
 
 ```python
-from api_explorer.testing import next_link_api
+from goto_fetch.testing import next_link_api
 
 products = [{"id": i, "price": 10, "fetched_at": "now"} for i in range(3)]
 
@@ -85,8 +85,8 @@ assert sync() == (1, [2])  # one change, one deletion
 For an API sorted by the tracked field, `Keyset` asks each page from the last value of the one before. Unlike page numbers, it can't skip a record edited during the run. Pair it with a tracker, which passes over the repeats where pages overlap:
 
 ```python
-from api_explorer import Keyset
-from api_explorer.testing import keyset_api
+from goto_fetch import Keyset
+from goto_fetch.testing import keyset_api
 
 rows = [{"id": i, "updated_at": f"2026-01-01T00:0{i}:00Z"} for i in range(6)]
 since = Incremental("updated_at", "updated_since")

@@ -6,7 +6,7 @@
         shop.write("orders", client.records("/orders/", incremental=since),
                    key="id")
 
-Columns follow the records (see api_explorer.warehouse), declared as
+Columns follow the records (see goto_fetch.warehouse), declared as
 INTEGER, REAL, TEXT, BOOLEAN (stored as 1 and 0, read back as True and
 False) and JSON (stored as text, read back parsed). SQLite can't change a
 column's type, so widening one rebuilds the table, inside the same
@@ -73,7 +73,7 @@ class SqliteWarehouse:
             # time.
             raise ValueError(
                 "SqliteWarehouse needs a file; for one in memory, use "
-                "api_explorer.testing.MemoryWarehouse"
+                "goto_fetch.testing.MemoryWarehouse"
             )
         self._state = SqliteState(path, timeout=timeout)
         self._tables = _SqliteTables(self._state.path, timeout)
@@ -258,7 +258,7 @@ def _rebuild(
 
     SQLite can't change a column's type in place. Each value is read back
     in its old kind and stored in its new one, as the Warehouse promise
-    says (see api_explorer.warehouse), REBUILD_BATCH rows at a time.
+    says (see goto_fetch.warehouse), REBUILD_BATCH rows at a time.
     """
     names = list(before)
     temporary = f"{table}__rebuilding"

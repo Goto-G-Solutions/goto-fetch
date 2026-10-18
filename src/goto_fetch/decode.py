@@ -36,7 +36,7 @@ def json_decoder(
         return _with_fallback(msgspec.json.decode)
     if prefer == "msgspec":
         return _with_fallback(
-            _require("msgspec", 'pip install "api-explorer[fast]"').json.decode
+            _require("msgspec", 'pip install "goto-fetch[fast]"').json.decode
         )
     if prefer == "orjson":
         return _with_fallback(_require("orjson", "pip install orjson").loads)

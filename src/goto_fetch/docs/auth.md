@@ -27,8 +27,8 @@ Every request it makes, renewals included, goes through the client's transport, 
 ## Examples
 
 ```python
-from api_explorer import Client, PasswordLogin, TokenRefresh, token_headers
-from api_explorer.testing import TokenServer
+from goto_fetch import Client, PasswordLogin, TokenRefresh, token_headers
+from goto_fetch.testing import TokenServer
 
 # a header of the API's own, with the bare token
 assert token_headers("k-123", None, "X-API-Key") == {"X-API-Key": "k-123"}
@@ -46,7 +46,7 @@ assert server.paths == ["/api/token/", "/api/items/"]
 
 ```python skip
 import os
-from api_explorer import ClientCredentials
+from goto_fetch import ClientCredentials
 
 auth = TokenRefresh(
     login=ClientCredentials(

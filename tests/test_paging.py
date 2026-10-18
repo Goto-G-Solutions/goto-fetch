@@ -13,7 +13,7 @@ import re
 
 import pytest
 
-from api_explorer import (
+from goto_fetch import (
     ApiError,
     Cursor,
     HeaderLink,
@@ -27,8 +27,8 @@ from api_explorer import (
     read_page,
     with_query,
 )
-from api_explorer.paging import Page, request_key
-from api_explorer.testing import FakeApi, cursor_api, json_pages, offset_api, replies
+from goto_fetch.paging import Page, request_key
+from goto_fetch.testing import FakeApi, cursor_api, json_pages, offset_api, replies
 
 BASE = "http://api.test/api/items/"
 
