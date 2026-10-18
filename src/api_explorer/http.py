@@ -14,6 +14,7 @@ same here. Only the standard library is used.
 import json as jsonlib
 import re
 from collections.abc import Generator, Iterable, Iterator, Mapping, MutableMapping
+from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import (
     parse_qsl,
@@ -267,6 +268,35 @@ class Response:
         return f"<Response [{self.status_code}]>"
 
 
+@dataclass(frozen=True)
+class Timeout:
+    """How long to wait: `connect` seconds to make a connection, `read` seconds for each read.
+
+    None means no limit. Timeout.of(20) waits 20 seconds at each stage;
+    Timeout(connect=5, read=60) gives up quickly when a server is down but
+    waits for a slow page.
+    """
+
+    connect: float | None = None
+    read: float | None = None
+
+    @classmethod
+    def of(cls, value: "float | Timeout | None") -> "Timeout":
+        """`value` as a Timeout: a number applies to both stages, None to neither."""
+        if isinstance(value, Timeout):
+            return value
+        if value is not None and value < 0:
+            raise ValueError(f"A timeout can't be negative, got {value}")
+        return cls(value, value)
+
+    def __post_init__(self) -> None:
+        for stage, seconds in (("connect", self.connect), ("read", self.read)):
+            if seconds is not None and seconds < 0:
+                raise ValueError(
+                    f"The {stage} timeout can't be negative, got {seconds}"
+                )
+
+
 class TransportError(Exception):
     """A request that got no response: a final failure, unless it is a NetworkError."""
 
@@ -298,8 +328,8 @@ class Transport(Protocol):
     which the Client judges. close() releases its connections.
     """
 
-    def send(self, request: Request, timeout: float | None) -> Response:
-        """Send `request`, waiting at most `timeout` seconds at each stage."""
+    def send(self, request: Request, timeout: Timeout) -> Response:
+        """Send `request`, waiting at most `timeout.connect` to connect and `timeout.read` for each read."""
         ...
 
     def close(self) -> None:

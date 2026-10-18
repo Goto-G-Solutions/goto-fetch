@@ -59,7 +59,15 @@ class NeverWaits(Urllib3Transport):
     """Broken: ignores the timeout, so a slow server hangs the run."""
 
     def send(self, request, timeout):
-        return super().send(request, None)
+        return super().send(request, http.Timeout())  # no limits at all
+
+
+class OneLimit(Urllib3Transport):
+    """Broken: one limit for both stages, the shorter, as a total timeout would be."""
+
+    def send(self, request, timeout):
+        shorter = min(timeout.connect, timeout.read)
+        return super().send(request, http.Timeout(shorter, shorter))
 
 
 class StopsAtRedirects(Urllib3Transport):
@@ -86,10 +94,11 @@ class StopsAtRedirects(Urllib3Transport):
     ("broken", "message"),
     [
         (RaisesOnErrors, "a 404 came back as"),
-        (NeverWaits, "a timeout didn't raise NetworkError"),
+        (NeverWaits, "a read timeout didn't raise NetworkError"),
+        (OneLimit, "a short connect timeout cut a slow read short"),
         (StopsAtRedirects, "a redirect wasn't followed"),
     ],
-    ids=["raises-on-errors", "never-waits", "stops-at-redirects"],
+    ids=["raises-on-errors", "never-waits", "one-limit", "stops-at-redirects"],
 )
 def test_check_transport_catches_a_broken_transport(broken, message):
     with pytest.raises(AssertionError, match=message):

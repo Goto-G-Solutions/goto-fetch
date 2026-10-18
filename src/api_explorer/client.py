@@ -16,6 +16,7 @@ from .http import (
     NetworkError,
     Request,
     Response,
+    Timeout,
     Transport,
     TransportError,
     join_url,
@@ -62,8 +63,10 @@ class Client:
     `trailing_slash`, a relative endpoint gets a "/" before any query, as
     Django REST Framework expects.
 
-    `timeout` is seconds to wait at each stage of a request: connecting,
-    and each read (20 by default).
+    `timeout` is seconds to wait at each stage of a request, connecting
+    and each read (20 by default), or a Timeout for separate limits, such
+    as Timeout(connect=5, read=60): give up quickly when a server is down,
+    but wait for a slow page.
 
     `retry` decides when a failed request is tried again: any RetryPolicy.
     The default, Retry(), gives up to 3 tries for network errors, timeouts,
@@ -101,7 +104,7 @@ class Client:
         base_url: str = "",
         *,
         headers: Mapping[str, str] | None = None,
-        timeout: float | None = 20.0,
+        timeout: float | Timeout | None = 20.0,
         retry: RetryPolicy | None = None,
         decode: Decoder | None = None,
         trailing_slash: bool = True,
@@ -112,7 +115,7 @@ class Client:
     ) -> None:
         self.base_url = base_url
         self.headers = dict(headers or {})
-        self.timeout = timeout
+        self.timeout = Timeout.of(timeout)
         self.retry: RetryPolicy = retry or Retry()
         self.decode = decode or json_decoder()
         self.trailing_slash = trailing_slash

@@ -14,7 +14,7 @@ import threading
 import time
 from collections.abc import Callable
 
-from .http import Request, Response, Transport
+from .http import Request, Response, Timeout, Transport
 
 
 class RateLimit:
@@ -75,7 +75,7 @@ class Limited:
     def __repr__(self) -> str:
         return f"Limited({self.transport!r}, {self.limit!r})"
 
-    def send(self, request: Request, timeout: float | None) -> Response:
+    def send(self, request: Request, timeout: Timeout) -> Response:
         """Wait for the rate limit, then send `request`."""
         self.limit.wait()
         return self.transport.send(request, timeout)

@@ -31,13 +31,14 @@ N = 2000
 
 def best_of(transport: http.Transport, url: str, runs: int = 3) -> float:
     """Pages a second, the best of `runs` runs of N sequential GETs."""
+    timeout = http.Timeout.of(10)
     for _ in range(50):
-        transport.send(http.Request("GET", url), 10)
+        transport.send(http.Request("GET", url), timeout)
     best = float("inf")
     for _ in range(runs):
         started = time.perf_counter()
         for _ in range(N):
-            transport.send(http.Request("GET", url), 10)
+            transport.send(http.Request("GET", url), timeout)
         best = min(best, time.perf_counter() - started)
     return N / best
 

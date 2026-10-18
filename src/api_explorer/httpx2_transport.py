@@ -10,6 +10,7 @@ from .http import (
     ConnectionDropped,
     Request,
     Response,
+    Timeout,
     TimeoutError,
     TransportError,
 )
@@ -38,7 +39,7 @@ class Httpx2Transport:
         self._owned = http is None
         self.http = http or httpx2.Client(follow_redirects=True)
 
-    def send(self, request: Request, timeout: float | None) -> Response:
+    def send(self, request: Request, timeout: Timeout) -> Response:
         """Send `request` and return the response."""
         httpx2 = self._httpx2
         try:
@@ -47,7 +48,13 @@ class Httpx2Transport:
                 str(request.url),
                 content=request.content or None,
                 headers=request.headers.raw(),
-                timeout=timeout,
+                # httpx2's write and pool limits follow the read and connect ones.
+                timeout=httpx2.Timeout(
+                    connect=timeout.connect,
+                    read=timeout.read,
+                    write=timeout.read,
+                    pool=timeout.connect,
+                ),
             )
         except httpx2.TimeoutException as exc:
             raise TimeoutError(str(exc)) from exc

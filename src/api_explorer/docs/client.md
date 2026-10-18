@@ -18,10 +18,13 @@ Always: make one `Client` per API and reuse it. It keeps one connection pool, an
 The examples use a fake API from `api_explorer.testing`, so they run as written; with a real API, give `Client` its URL instead.
 
 ```python skip
-from api_explorer import Client
+from api_explorer import Client, Timeout
 
 with Client("https://api.example.com/v1", timeout=30) as client:
     item = client.get_json("/items/42/")
+
+# give up quickly when the server is down, but wait for a slow page
+client = Client("https://api.example.com/v1", timeout=Timeout(connect=5, read=60))
 ```
 
 ```python

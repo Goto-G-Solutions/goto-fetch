@@ -94,7 +94,7 @@ class FakeApi:
         response.request, response.url = request, request.url
         return response
 
-    def send(self, request: http.Request, timeout: float | None) -> http.Response:
+    def send(self, request: http.Request, timeout: http.Timeout) -> http.Response:
         """Answer `request`, as a Transport does; an exception the answer raises passes through."""
         return self(request)
 
@@ -1031,7 +1031,8 @@ def check_transport(make: Callable[[], http.Transport]) -> None:
     - an error status is returned, never raised;
     - redirects are followed, and the response names the final URL;
     - a gzip body (Content-Encoding: gzip) comes back unpacked;
-    - a refused connection and a timeout raise NetworkError.
+    - the connect and read timeouts apply apart, and a read timeout and a
+      refused connection raise NetworkError.
     """
     import gzip
     import socket
@@ -1056,13 +1057,14 @@ def check_transport(make: Callable[[], http.Transport]) -> None:
         return http.Response(200, json={"echo": True}, headers={"X-Answer": "42"})
 
     api = FakeApi(answer)
+    ample = http.Timeout.of(10)
     transport = make()
     try:
         with serve(api) as base:
             sent = http.Request(
                 "POST", f"{base}/items/?a=1", headers={"X-Team": "data"}, json={"q": 1}
             )
-            response = transport.send(sent, 10)
+            response = transport.send(sent, ample)
             got = api.calls[-1]
             if (got.method, got.url.path, got.url.params) != (
                 "POST",
@@ -1086,36 +1088,51 @@ def check_transport(make: Callable[[], http.Transport]) -> None:
                 )
 
             try:
-                missing = transport.send(http.Request("GET", f"{base}/missing"), 10)
+                missing = transport.send(http.Request("GET", f"{base}/missing"), ample)
             except http.TransportError as exc:
                 raise AssertionError(f"a 404 came back as an error: {exc}") from exc
             if missing.status_code != 404:
                 raise AssertionError(f"a 404 came back as {missing.status_code}")
 
-            moved = transport.send(http.Request("GET", f"{base}/old"), 10)
+            moved = transport.send(http.Request("GET", f"{base}/old"), ample)
             if moved.status_code != 200 or not moved.url.endswith("/new"):
                 raise AssertionError(
                     f"a redirect wasn't followed: {moved.status_code} at {moved.url}"
                 )
 
-            zipped = transport.send(http.Request("GET", f"{base}/zipped"), 10)
+            zipped = transport.send(http.Request("GET", f"{base}/zipped"), ample)
             if zipped.content != b'{"zipped": true}':
                 raise AssertionError(
                     f"a gzip body came back packed: {zipped.content[:20]!r}"
                 )
 
             try:
-                transport.send(http.Request("GET", f"{base}/slow"), 0.2)
+                transport.send(
+                    http.Request("GET", f"{base}/slow"),
+                    http.Timeout(connect=5, read=0.2),
+                )
             except http.NetworkError:
                 pass
             else:
-                raise AssertionError("a timeout didn't raise NetworkError")
+                raise AssertionError("a read timeout didn't raise NetworkError")
+            try:
+                transport.send(
+                    http.Request("GET", f"{base}/slow"),
+                    http.Timeout(connect=0.2, read=5),
+                )
+            except http.NetworkError as exc:
+                raise AssertionError(
+                    "a short connect timeout cut a slow read short: the two limits "
+                    f"must apply apart ({exc})"
+                ) from exc
 
         with socket.socket() as spare:
             spare.bind(("127.0.0.1", 0))
             closed_port = spare.getsockname()[1]
         try:
-            transport.send(http.Request("GET", f"http://127.0.0.1:{closed_port}/"), 2)
+            transport.send(
+                http.Request("GET", f"http://127.0.0.1:{closed_port}/"), ample
+            )
         except http.NetworkError:
             pass
         else:

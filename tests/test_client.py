@@ -72,7 +72,24 @@ def test_the_timeout_and_every_request_go_through_the_transport():
     transport = Recording()
     Client("http://h/api", timeout=7.5, transport=transport).get_json("/items/")
     [(request, timeout)] = transport.sent
-    assert (str(request.url), timeout) == ("http://h/api/items/", 7.5)
+    assert (str(request.url), timeout) == (
+        "http://h/api/items/",
+        http.Timeout(7.5, 7.5),
+    )
+
+
+def test_connect_and_read_timeouts_can_be_set_apart():
+    transport = Recording()
+    limits = http.Timeout(connect=5, read=60)
+    Client("http://h", timeout=limits, transport=transport).get_json("/x/")
+    assert transport.sent[0][1] == limits
+
+
+def test_a_negative_timeout_is_refused():
+    with pytest.raises(ValueError, match="can't be negative"):
+        Client("http://h", timeout=-1)
+    with pytest.raises(ValueError, match="connect timeout can't be negative"):
+        http.Timeout(connect=-1)
 
 
 def test_client_headers_and_a_call_s_headers_both_reach_the_request():

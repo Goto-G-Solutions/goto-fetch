@@ -12,6 +12,7 @@ from .http import (
     ConnectionDropped,
     Request,
     Response,
+    Timeout,
     TimeoutError,
     TransportError,
 )
@@ -35,7 +36,7 @@ class Urllib3Transport:
         self._urllib3 = urllib3
         self.pool = pool or urllib3.PoolManager()
 
-    def send(self, request: Request, timeout: float | None) -> Response:
+    def send(self, request: Request, timeout: Timeout) -> Response:
         """Send `request` and return the response, following redirects."""
         urllib3 = self._urllib3
         try:
@@ -44,7 +45,9 @@ class Urllib3Transport:
                 str(request.url),
                 body=request.content or None,
                 headers=dict(request.headers),
-                timeout=urllib3.Timeout(total=None, connect=timeout, read=timeout),
+                timeout=urllib3.Timeout(
+                    total=None, connect=timeout.connect, read=timeout.read
+                ),
                 # No retries of urllib3's own (the Client's policy decides),
                 # but redirects followed: total=False would turn those off too.
                 retries=urllib3.Retry(

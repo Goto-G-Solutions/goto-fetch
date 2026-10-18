@@ -46,7 +46,7 @@ from .decode import Decoder, json_decoder
 from .duckdb_warehouse import DuckDBWarehouse
 from .errors import ApiError, Problem, redact_url
 from .frames import default_backend, latest_per_key, to_frame
-from .http import Auth, Request, Response, Transport
+from .http import Auth, Request, Response, Timeout, Transport
 from .httpx2_transport import Httpx2Transport
 from .incremental import (
     Changes,
@@ -133,6 +133,7 @@ __all__ = [
     "SqliteState",
     "SqliteWarehouse",
     "StateStore",
+    "Timeout",
     "TokenRefresh",
     "Tracker",
     "Transport",
