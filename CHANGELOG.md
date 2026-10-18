@@ -4,6 +4,8 @@ Each release lists what changed for people using the package. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-18
+
 ### Fixed
 
 - A `Client` sent its headers and let its `auth` sign a request to any host, so an absolute next link on another host carried the API's credential there. They now stay on the `base_url`'s host (same host name and port, never down from https to http); a request elsewhere goes with the call's own headers only, and a `withheld` warning says so.

@@ -1,6 +1,6 @@
 [project]
 name = "goto-fetch"
-version = "0.1.0"
+version = "0.1.1"
 description = "Pull data from paginated JSON APIs safely, fetch only what changed, and store it for analysis."
 readme = "README.md"
 license = "MIT"
