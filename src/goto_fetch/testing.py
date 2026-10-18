@@ -41,6 +41,7 @@ from .retry import Failure, Retry, RetryPolicy
 from .state import StateStore
 from .warehouse import (
     Warehouse,
+    check_limit,
     check_write,
     deleted_keys,
     last_per_key,
@@ -821,6 +822,7 @@ class MemoryWarehouse:
 
     def read(self, table: str, limit: int | None = None) -> list[dict[str, Any]]:
         """`table`'s rows as dicts, at most `limit`, each with every column."""
+        check_limit(limit)
         rows = [json.loads(text) for text in self._tables.get(table, [])]
         names = list(dict.fromkeys(n for row in rows for n in row))
         full = [{n: row.get(n) for n in names} for row in rows]
@@ -889,6 +891,13 @@ def check_warehouse(make: Callable[[], Warehouse]) -> None:
     shop = make()
     if shop.read("orders") != []:
         raise fail("a table never written must read as []", shop.read("orders"))
+    refused = False
+    try:
+        shop.read("orders", limit=-1)
+    except ValueError:
+        refused = True
+    if not refused:
+        raise AssertionError("a negative limit must be refused with ValueError")
     stored = shop.write("orders", [varied, {**varied, "id": 2}])
     if stored != 2:
         raise AssertionError(f"write must return how many it stored: 2, got {stored!r}")

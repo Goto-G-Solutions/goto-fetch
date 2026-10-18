@@ -30,7 +30,9 @@ gives each column one of a few kinds (Kind), widening it when its values
 change kind, and changes columns before any row. A warehouse for another
 database implements SqlTables and calls write_run; the helpers here
 (kind_of, widen, to_kind, as_text, quote, matching, read_part and the
-checks) are its building blocks.
+checks) are its building blocks. The state table's name (state.STATE_TABLE)
+is reserved in the built-in warehouses, which keep records and state in
+one file: check_table refuses it.
 """
 
 import json
@@ -48,6 +50,7 @@ from .errors import ApiError
 from .incremental import ReportsDeletions
 from .logs import log_event
 from .models import as_dict
+from .state import STATE_TABLE
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +75,10 @@ class Warehouse(Protocol):
         ...
 
     def read(self, table: str, limit: int | None = None) -> list[dict[str, Any]]:
-        """`table`'s rows as dicts (at most `limit`), in no set order; [] if none."""
+        """`table`'s rows as dicts (at most `limit`), in no set order; [] if none.
+
+        A negative limit is refused with ValueError (check_limit).
+        """
         ...
 
 
@@ -189,6 +195,24 @@ def keys_of_kind(keys: Iterable[Any], kind: Kind) -> list[Any]:
     """
     converted = (to_kind(key, kind) for key in keys)
     return [key for key in converted if key is not None]
+
+
+def check_limit(limit: int | None) -> None:
+    """Refuse a negative read limit, which each database would read differently."""
+    if limit is not None and limit < 0:
+        raise ValueError(f"limit can't be negative, got {limit}")
+
+
+def check_table(table: str) -> None:
+    """Refuse the state table's name: the built-in warehouses keep tracked runs' state in it.
+
+    Without regard to case, as SQL matches table names.
+    """
+    if table.lower() == STATE_TABLE.lower():
+        raise ValueError(
+            f"{table!r} is the table tracked runs' state lives in; give the "
+            "records a table of their own"
+        )
 
 
 def check_write(key: str | None, deleted_by: ReportsDeletions | None) -> None:
@@ -446,6 +470,7 @@ def write_run(
     The temporary files need about as much disk as the run's records as
     JSON.
     """
+    check_table(table)
     check_write(key, deleted_by)
     if batch_size < 1:
         raise ValueError(f"batch_size must be at least 1, got {batch_size}")

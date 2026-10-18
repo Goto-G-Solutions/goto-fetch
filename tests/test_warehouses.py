@@ -78,6 +78,14 @@ class StoresEmpty(MemoryWarehouse):
         return stored + len(records) - len(kept)
 
 
+class TakesAnyLimit(MemoryWarehouse):
+    """Broken: slices with whatever limit it is given."""
+
+    def read(self, table, limit=None):
+        rows = super().read(table)
+        return rows if limit is None else rows[:limit]
+
+
 class Rounds(MemoryWarehouse):
     """Broken: stores floats as whole numbers."""
 
@@ -97,8 +105,16 @@ class Rounds(MemoryWarehouse):
         (KeepsDeleted, "deleted_by's keys must be removed"),
         (Rounds, "read must give back what was written"),
         (StoresEmpty, "a record with no fields must be refused"),
+        (TakesAnyLimit, "a negative limit must be refused"),
     ],
-    ids=["ignores-key", "partial", "keeps-deleted", "rounds", "stores-empty"],
+    ids=[
+        "ignores-key",
+        "partial",
+        "keeps-deleted",
+        "rounds",
+        "stores-empty",
+        "any-limit",
+    ],
 )
 def test_check_warehouse_catches_a_broken_warehouse(broken, message):
     with pytest.raises(AssertionError, match=message):
@@ -175,6 +191,29 @@ def test_a_field_lands_in_an_existing_column_whatever_its_case(database):
     shop.write("t", [{"Name": "a"}])
     shop.write("t", [{"name": "b"}])
     assert sorted(r["Name"] for r in shop.read("t")) == ["a", "b"]
+
+
+def test_a_negative_limit_is_refused_the_same_way_everywhere(database):
+    # Regression: SQLite read -1 as no limit, DuckDB raised its own error,
+    # and MemoryWarehouse sliced off the last row.
+    for shop in (database(), MemoryWarehouse()):
+        shop.write("t", [{"id": 1}, {"id": 2}])
+        with pytest.raises(ValueError, match="limit can't be negative"):
+            shop.read("t", limit=-1)
+        assert shop.read("t", limit=0) == []
+
+
+@pytest.mark.parametrize("name", ["goto_fetch_state", "GOTO_FETCH_STATE"])
+def test_the_state_table_s_name_is_refused_for_records(database, name):
+    # Regression: records written to a table of that name replaced the
+    # tracked runs' state kept in it.
+    shop = database()
+    shop.put("orders", {"last": "2026-01-01", "seen": []})
+    with pytest.raises(ValueError, match="tracked runs' state lives in"):
+        shop.write(name, [{"name": "orders", "value": "{}"}], key="name")
+    with pytest.raises(ValueError, match="tracked runs' state lives in"):
+        shop.read(name)
+    assert shop.get("orders") == {"last": "2026-01-01", "seen": []}
 
 
 def test_read_takes_a_limit(database):
