@@ -66,3 +66,4 @@ Through a `Client`, the refresh and login URLs resolve like endpoints: the clien
 
 - Keep secrets in environment variables, not in code or URLs. Generated scripts read them from `$API_TOKEN`, `$API_REFRESH_TOKEN`, `$API_ACCESS_TOKEN`, `$API_USERNAME`, `$API_PASSWORD` and `$API_CLIENT_SECRET`.
 - A login of your own is any object with `token_url` and `build_request(url)`; see [build-your-own](build-your-own.md).
+- A credential never follows a redirect to another host: the transports drop `Authorization`, `Cookie` and any header whose name says it carries a secret (`X-API-Key`, `X-Auth-Token` and the like, see `http.credential_headers`) before following one. A header named otherwise, such as `X-Team`, is kept, so name credential headers for what they are.

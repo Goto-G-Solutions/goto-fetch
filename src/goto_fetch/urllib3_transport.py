@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin
 
 from .http import (
+    MAX_REDIRECTS,
     ConnectError,
     ConnectionDropped,
     Request,
@@ -16,6 +17,7 @@ from .http import (
     Timeout,
     TimeoutError,
     TransportError,
+    credential_headers,
 )
 
 if TYPE_CHECKING:
@@ -29,8 +31,9 @@ class Urllib3Transport:
     ProxyManager), certificates or connection limits; it stays open when
     this transport closes, and is yours to close. urllib3's own retries are
     off: the Client's retry policy decides. Redirects are followed, up to
-    10, and compressed replies are asked for and unpacked. Safe to share
-    across threads.
+    MAX_REDIRECTS, without the credential headers when they lead to
+    another host, and compressed replies are asked for and unpacked. Safe
+    to share across threads.
     """
 
     def __init__(self, pool: "urllib3.PoolManager | None" = None) -> None:
@@ -66,8 +69,10 @@ class Urllib3Transport:
                     read=0,
                     status=0,
                     other=0,
-                    redirect=10,
+                    redirect=MAX_REDIRECTS,
                     raise_on_redirect=False,
+                    # urllib3 drops these only when the host changes.
+                    remove_headers_on_redirect=credential_headers(request.headers),
                 ),
                 redirect=True,
                 preload_content=True,

@@ -25,6 +25,8 @@ from urllib.parse import (
     urlunsplit,
 )
 
+from .errors import SENSITIVE
+
 # One link of a Link header: <target> then attributes, up to the next link;
 # quoted values may hold "," or ";".
 _LINK = re.compile(r'<([^>]*)>((?:\s*;\s*[^;,=\s]+\s*(?:=\s*(?:"[^"]*"|[^;,]*))?)*)')
@@ -201,6 +203,29 @@ class Headers(MutableMapping[str, str]):
         return f"Headers({self._items!r})"
 
 
+MAX_REDIRECTS = 10
+"""How many redirects a transport follows before giving back the last reply as it is."""
+
+
+def credential_headers(headers: Headers) -> list[str]:
+    """The names in `headers` that may carry a credential, as written.
+
+    Those matching SENSITIVE (Authorization, X-API-Key, X-Auth-Token and
+    the like: the same rule that hides query values), plus Cookie. A
+    transport drops them from a request it sends on to another host after
+    a redirect, so a credential never leaves the host it was meant for.
+    """
+    return [
+        name for name in headers if name.lower() == "cookie" or SENSITIVE.search(name)
+    ]
+
+
+def same_host(url: str, other: str) -> bool:
+    """Whether two URLs name one host: the same scheme, host name and port."""
+    a, b = urlsplit(url), urlsplit(other)
+    return (a.scheme, a.hostname, a.port) == (b.scheme, b.hostname, b.port)
+
+
 class Request:
     """One HTTP request: a method, a URL, headers, and a body of bytes.
 
@@ -368,10 +393,13 @@ class Transport(Protocol):
     """Sends one request and gives back the response: the only piece that touches the network.
 
     Promises (testing.check_transport checks them): send() follows
-    redirects, decompresses the body, and raises NetworkError for a failure
-    worth retrying (no connection, a timeout, a dropped reply) and another
-    TransportError for anything else; it never raises for an HTTP status,
-    which the Client judges. close() releases its connections.
+    redirects (up to MAX_REDIRECTS), dropping the headers that may carry a
+    credential when the redirect leads to another host (see
+    credential_headers); decompresses the body; and raises NetworkError
+    for a failure worth retrying (no connection, a timeout, a dropped
+    reply) and another TransportError for anything else; it never raises
+    for an HTTP status, which the Client judges. close() releases its
+    connections.
     """
 
     def send(self, request: Request, timeout: Timeout) -> Response:

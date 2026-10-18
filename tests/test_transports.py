@@ -7,9 +7,11 @@ these tests send real HTTP, but never beyond this machine.
 import gzip
 
 import pytest
+import urllib3
 
 from goto_fetch import Client, Httpx2Transport, Urllib3Transport, http
 from goto_fetch.testing import check_transport, next_link_api, serve
+from goto_fetch.urllib3_transport import _final_url
 
 
 def test_the_urllib3_transport_keeps_every_transport_promise():
@@ -134,6 +136,38 @@ class StopsAtRedirects(Urllib3Transport):
         )
 
 
+class Leaky(Urllib3Transport):
+    """Broken: follows a redirect to another host with every header, credentials included."""
+
+    # Regression: both transports left redirects to their library, which
+    # drops Authorization but not a custom header such as X-API-Key.
+    def send(self, request, timeout):
+        answer = self.pool.request(
+            request.method,
+            str(request.url),
+            body=request.content or None,
+            headers=dict(request.headers),
+            redirect=True,
+            retries=urllib3.Retry(
+                total=None,
+                connect=0,
+                read=0,
+                status=0,
+                other=0,
+                redirect=10,
+                raise_on_redirect=False,
+                remove_headers_on_redirect=(),
+            ),
+        )
+        return http.Response(
+            answer.status,
+            headers=list(answer.headers.items()),
+            content=answer.data,
+            request=request,
+            url=_final_url(str(request.url), answer),
+        )
+
+
 @pytest.mark.parametrize(
     ("broken", "message"),
     [
@@ -145,6 +179,7 @@ class StopsAtRedirects(Urllib3Transport):
         (NeverWaits, "a read slower than the read limit raised nothing"),
         (OneLimit, "a short connect timeout cut a slow read short"),
         (StopsAtRedirects, "a redirect wasn't followed"),
+        (Leaky, "followed a redirect to another host"),
     ],
     ids=[
         "raises-on-errors",
@@ -155,6 +190,7 @@ class StopsAtRedirects(Urllib3Transport):
         "never-waits",
         "one-limit",
         "stops-at-redirects",
+        "leaky",
     ],
 )
 def test_check_transport_catches_a_broken_transport(broken, message):
