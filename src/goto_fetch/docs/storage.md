@@ -64,6 +64,7 @@ with tracked_run(shop, "orders", Incremental, "updated_at", "updated_since") as 
 ## Traps
 
 - **`key` is a top-level field** of the records (`"id"`), not a path.
+- **`goto_fetch_state` is taken:** the built-in warehouses keep tracked runs' state in a table of that name, in the same file, and refuse it for records.
 - **Fields differing only in case** (`id` and `ID`) are refused: databases treat them as one column.
 - **DuckDB lets one process write to a file at a time.** Each call opens and closes the file, so readers fit between runs.
 - **Memory:** `write` holds `batch_size` records at a time (10,000 by default) while it copies the run to disk; lower it for very wide records.

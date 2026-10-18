@@ -28,7 +28,15 @@ from typing import TYPE_CHECKING, Any
 
 from .incremental import ReportsDeletions
 from .state import SqliteState
-from .warehouse import Kind, matching, quote, read_part, to_kind, write_run
+from .warehouse import (
+    Kind,
+    check_table,
+    matching,
+    quote,
+    read_part,
+    to_kind,
+    write_run,
+)
 
 if TYPE_CHECKING:
     # Imported when used: some Python builds leave sqlite3 out, and the
@@ -108,6 +116,7 @@ class SqliteWarehouse:
 
     def read(self, table: str, limit: int | None = None) -> list[dict[str, Any]]:
         """`table`'s rows as dicts, at most `limit`; booleans and JSON come back whole."""
+        check_table(table)
         with closing(self._tables.connect()) as connection:
             columns = self._tables.columns(connection, table)
             if not columns:
