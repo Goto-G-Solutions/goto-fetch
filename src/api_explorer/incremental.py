@@ -39,7 +39,7 @@ from .paging import (
     check_send_in,
     with_param,
 )
-from .paths import MISSING, get_path, parse_path
+from .paths import MISSING, get_path, is_index, parse_path
 
 logger = logging.getLogger(__name__)
 
@@ -98,8 +98,8 @@ class Incremental:
     """Track one field's highest value across runs, and fetch only from it on.
 
     Use one Incremental per run. Pass it to Client.records(incremental=...),
-    or call its track(records) in a loop of your own, then save `state` after storing
-    the records, and give it back as `state=` next time.
+    or call its track(records) in a loop of your own, then save `state`
+    after storing the records, and give it back as `state=` next time.
 
     - `field`: path to the value that grows as records are added or
       changed, such as "updated_at" or "meta.created". Numbers and ISO
@@ -179,7 +179,7 @@ class Incremental:
         moves on only when a run has seen every record (see track); until
         then, and after a failed run, it is the state this run began with.
         """
-        return dict(self._state)
+        return {"last": self._state["last"], "seen": list(self._state["seen"])}
 
     def apply(self, request: PageRequest) -> PageRequest:
         """Return the first request, asking only for records from the last value on.
@@ -272,14 +272,22 @@ class Incremental:
 def _without(value: Any, path: list[str]) -> Any:
     """`value` without what `path` points to, copying only what changes.
 
-    Segments are dict keys, or "*" for every item of a list. A path that
-    leads nowhere leaves `value` as it was.
+    Segments are dict keys, list indices, or "*" for every item of a list,
+    as get_path reads them. A path that leads nowhere leaves `value` as it
+    was.
     """
     if not path:
         return value
     head, rest = path[0], path[1:]
-    if head == "*" and isinstance(value, list):
-        return [_without(item, rest) for item in value]
+    if isinstance(value, list):
+        if head == "*":
+            return [_without(item, rest) for item in value]
+        if not is_index(head) or not -len(value) <= int(head) < len(value):
+            return value
+        at = int(head) % len(value)
+        if not rest:
+            return value[:at] + value[at + 1 :]
+        return [*value[:at], _without(value[at], rest), *value[at + 1 :]]
     if not isinstance(value, dict) or head not in value:
         return value
     if not rest:
@@ -297,13 +305,13 @@ class Changes:
     records that disappeared (`deleted`), which a timestamp never shows.
 
     Use one Changes per run, like Incremental: pass it to
-    Client.records(incremental=...) or to tracked_run.
+    Client.records(incremental=...), or let tracked_run build it.
 
     - `key`: path to what identifies a record, such as "id". Required.
     - `ignore`: paths to leave out of the fingerprint, such as
       "fetched_at" or "stats.views": values that change on every fetch
       would make every record look changed. "*" walks a list, as in
-      "items[*].stock".
+      "items[*].stock", and an index picks one item, as in "items[0]".
     - `fingerprint`: a function of your own in place of the hash, for an
       API that gives each record a version or ETag already:
       fingerprint=lambda record: str(record["version"]). Give `ignore` or

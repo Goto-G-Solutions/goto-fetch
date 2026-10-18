@@ -55,6 +55,14 @@ def _alternatives(path: str) -> tuple[tuple[str, ...], ...]:
 _INDEX = re.compile(r"-?[0-9]+")
 
 
+def is_index(segment: str) -> bool:
+    """Whether a path segment can index a list: plain digits, maybe negative.
+
+    int() alone would also take "1_0", "+1" and other scripts' digits.
+    """
+    return _INDEX.fullmatch(segment) is not None
+
+
 def extend_path(prefix: str, key: object, sep: str = ".") -> str:
     """The path to `key` inside the value at `prefix`, as get_path reads it.
 
@@ -129,9 +137,7 @@ def get_path(data: Any, path: str, default: Any = None) -> Any:
                     return MISSING
                 node = node[segment]
             elif isinstance(node, (list, tuple)):
-                # Only plain digits, maybe negative, are an index: int()
-                # alone would also take "1_0", "+1" and other scripts' digits.
-                if not _INDEX.fullmatch(segment):
+                if not is_index(segment):
                     return MISSING
                 try:
                     node = node[int(segment)]

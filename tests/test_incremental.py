@@ -131,6 +131,14 @@ def test_a_loop_that_stops_early_keeps_the_old_state():
     assert since.state == {"last": at(1), "seen": []}
 
 
+def test_the_state_is_a_copy():
+    # Regression: state shared its "seen" list, so a caller that changed
+    # the saved value changed the tracker with it.
+    since = Incremental("updated_at", state={"last": at(1), "seen": ["1"]})
+    since.state["seen"].append("2")
+    assert since.state["seen"] == ["1"]
+
+
 def test_the_state_survives_a_round_trip_through_json():
     since = orders()
     run(changes_api([rec(1, 1), rec(2, 1)]), since)

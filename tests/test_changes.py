@@ -82,8 +82,20 @@ def test_keys_of_different_types_are_different_records():
             product(1, items=[{"sku": "a", "stock": 1}]),
             product(1, items=[{"sku": "a", "stock": 0}]),
         ),
+        # Regression: an index in an ignore path was walked as a dict key,
+        # so it ignored nothing.
+        (
+            ["items[0].stock"],
+            product(1, items=[{"sku": "a", "stock": 1}, {"sku": "b", "stock": 1}]),
+            product(1, items=[{"sku": "a", "stock": 0}, {"sku": "b", "stock": 1}]),
+        ),
+        (
+            ["items[-1]"],
+            product(1, items=[{"sku": "a"}, {"sku": "b"}]),
+            product(1, items=[{"sku": "a"}, {"sku": "c"}]),
+        ),
     ],
-    ids=["top-level", "nested", "in-a-list"],
+    ids=["top-level", "nested", "in-a-list", "one-item", "last-item"],
 )
 def test_ignored_fields_dont_count_as_changes_but_others_do(ignore, before, after):
     first = Changes("id", ignore=ignore)
@@ -119,7 +131,7 @@ def test_a_fingerprint_must_give_text():
 
 
 def test_an_ignore_path_that_leads_nowhere_changes_nothing():
-    first = Changes("id", ignore=["missing.deeper", "price.cents"])
+    first = Changes("id", ignore=["missing.deeper", "price.cents", "id[0]"])
     list(first.track([product(1)]))
     assert list(again(first, ignore=["missing.deeper"]).track([product(1)])) == []
 
