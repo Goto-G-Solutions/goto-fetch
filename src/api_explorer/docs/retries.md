@@ -8,7 +8,7 @@ A retry policy decides whether a failed request is tried again, and after how lo
 
 - **retried:** network errors, timeouts, connections dropped mid-response, 408, 429 and 5xx (except 501 and 505), a token endpoint's temporary failures, and a temporary problem a response check finds;
 - **only for idempotent methods** (GET, HEAD, OPTIONS, PUT, DELETE), since repeating a POST could repeat a change; pass `retry=True` to a call that only reads;
-- **waits that grow** (1s, 2s, 4s... up to `max_backoff`, with jitter), or the server's `Retry-After`, if longer. A `Retry-After` longer than `max_backoff` fails at once rather than block.
+- **waits that grow** (1s, 2s, 4s... with jitter, never more than `max_backoff`), or the server's `Retry-After`, if longer. A `Retry-After` longer than `max_backoff` fails at once rather than block.
 
 ## Examples
 

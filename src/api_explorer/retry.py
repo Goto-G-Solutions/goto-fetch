@@ -21,10 +21,11 @@ won't change, so they aren't retried."""
 def backoff_delay(attempt: int, base: float = 1.0, cap: float = 30.0) -> float:
     """Return the seconds to wait before retry number `attempt` (0 is the first).
 
-    The delay doubles with each retry up to `cap`, then gets ±20% jitter, so
-    callers that failed together don't all retry at the same moment.
+    The delay doubles with each retry, with ±20% jitter so callers that
+    failed together don't all retry at the same moment, and never exceeds
+    `cap`.
     """
-    return min(base * 2**attempt, cap) * random.uniform(0.8, 1.2)
+    return min(base * 2**attempt * random.uniform(0.8, 1.2), cap)
 
 
 def retry_after_seconds(value: str | None, now: datetime | None = None) -> float | None:

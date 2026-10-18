@@ -119,12 +119,14 @@ def test_retry_after_reads_seconds_or_an_http_date(header, seconds):
 
 @pytest.mark.parametrize("attempt", range(5))
 def test_backoff_delay_doubles_within_its_jitter(attempt):
-    expected = min(2**attempt, 30.0)
+    expected = 2**attempt
     assert expected * 0.8 <= backoff_delay(attempt) <= expected * 1.2
 
 
-def test_backoff_delay_never_exceeds_its_cap_plus_jitter():
-    assert all(backoff_delay(10, base=1.0, cap=5.0) <= 6.0 for _ in range(20))
+def test_backoff_delay_never_exceeds_its_cap():
+    # Regression: the jitter was added after the cap, so a wait could reach
+    # 1.2 times max_backoff, which Retry calls the longest wait.
+    assert all(backoff_delay(10, base=1.0, cap=5.0) <= 5.0 for _ in range(50))
 
 
 class Recording:
