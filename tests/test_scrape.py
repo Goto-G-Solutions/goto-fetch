@@ -1,7 +1,8 @@
 """Scraping: the CSS and XPath field extractors, and scrape() across pages."""
 
-import httpx2
 import pytest
+
+from api_explorer import http
 
 pytest.importorskip("parsel", reason='needs the "scrape" extra')
 
@@ -53,7 +54,7 @@ def html_at(pages: dict[str, str]):
 
     def handler(request):
         calls.append(request.url.path)
-        return httpx2.Response(200, text=pages.get(request.url.path, ""))
+        return http.Response(200, text=pages.get(request.url.path, ""))
 
     return handler, calls
 

@@ -8,13 +8,12 @@ each successful response and says whether it really failed.
 import json
 from collections.abc import Callable
 
-import httpx2
-
 from .decode import Decoder, json_decoder
 from .errors import Problem
+from .http import Response
 from .paths import get_path
 
-ResponseCheck = Callable[[httpx2.Response], "Problem | str | None"]
+ResponseCheck = Callable[[Response], "Problem | str | None"]
 """Looks at a successful response: None if it is fine, else what is wrong.
 
 A message (str) is a permanent problem, the short form of
@@ -64,7 +63,7 @@ def error_at(
     """
     parse = decode or json_decoder()
 
-    def check(response: httpx2.Response) -> Problem | None:
+    def check(response: Response) -> Problem | None:
         try:
             body = parse(response.content)
         except ValueError:

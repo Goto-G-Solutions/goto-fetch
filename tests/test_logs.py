@@ -93,14 +93,24 @@ def test_logging_to_collects_only_inside_its_block():
     assert [event for event, _ in collect.events()] == ["page", "done"]
 
 
-def test_http_adds_httpx2_s_line_per_request():
+def test_http_adds_a_request_event_per_request_sent():
     collect = Collect()
     with logging_to(collect, "INFO", http=True):
         replies(200).client().request("GET", "/x/")
-    assert any(
-        r.name == "httpx2" and "GET http://api.test/api/x/" in r.getMessage()
-        for r in collect.records
-    )
+    [request] = [r for r in collect.records if getattr(r, "event", None) == "request"]
+    assert request.name == "api_explorer.http"
+    assert {k: request.data[k] for k in ("method", "url", "status")} == {
+        "method": "GET",
+        "url": "http://api.test/api/x/",
+        "status": 200,
+    }
+
+
+def test_without_http_the_request_lines_are_held_back():
+    collect = Collect()
+    with logging_to(collect, "DEBUG"):
+        replies(200).client().request("GET", "/x/")
+    assert not [r for r in collect.records if getattr(r, "event", None) == "request"]
 
 
 def run_and_collect(action, level="DEBUG"):

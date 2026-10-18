@@ -20,8 +20,8 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "httpx2>=2.13.1",
     "narwhals>=2.27.1",
+    "urllib3>=2.5",
 ]
 
 [project.urls]
@@ -36,6 +36,8 @@ fast = ["msgspec>=0.22"]
 scrape = ["parsel>=1.10.0"]
 # The explorer notebook
 explorer = ["marimo>=0.25.1"]
+# Sending requests with httpx2: HTTP/2, an httpx2.Client of your own (Httpx2Transport)
+httpx2 = ["httpx2>=2.13.1"]
 # Storing records and run state in DuckDB (DuckDBWarehouse)
 duckdb = ["duckdb>=1.5"]
 
@@ -45,6 +47,7 @@ duckdb = ["duckdb>=1.5"]
 # adapter supports, so each adapter is tested.
 dev = [
     "duckdb>=1.5",
+    "httpx2>=2.13.1",
     "hypothesis>=6.150",
     "msgspec>=0.22",
     "orjson>=3.11",

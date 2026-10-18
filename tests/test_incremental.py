@@ -11,10 +11,9 @@ filters are checked here too, as the tests depend on them.
 import json
 import logging
 
-import httpx2
 import pytest
 
-from api_explorer import ApiError, Incremental, Keyset, PageRequest, logging_to
+from api_explorer import ApiError, Incremental, Keyset, PageRequest, http, logging_to
 from api_explorer.testing import FakeApi, changes_api, keyset_api, replies
 
 
@@ -110,9 +109,9 @@ def test_a_run_that_fails_part_way_keeps_the_old_state():
     def answer(request):
         page = request.url.params.get("page", "1")
         return (
-            httpx2.Response(200, json=pages[page])
+            http.Response(200, json=pages[page])
             if page in pages
-            else httpx2.Response(500)
+            else http.Response(500)
         )
 
     since = orders()
@@ -282,7 +281,7 @@ def test_an_api_that_ignores_the_filter_still_gives_only_changes():
 
 
 def test_the_filter_can_go_in_a_post_body():
-    api = replies(httpx2.Response(200, json={"results": [], "next": None}))
+    api = replies(http.Response(200, json={"results": [], "next": None}))
     since = Incremental("updated_at", "since", send_in="body", start=at(1))
     run(api, since, method="POST", json={"query": "late"}, retry=True)
     assert api.bodies == [{"query": "late", "since": at(1)}]
@@ -437,7 +436,7 @@ def test_keyset_loses_nothing_when_the_data_changes_during_a_run():
 def test_keyset_needs_pages_sorted_by_its_field():
     with pytest.raises(ApiError, match="isn't sorted by 'updated_at'"):
         keyset_run(
-            replies(httpx2.Response(200, json={"results": [rec(1, 2), rec(2, 1)]}))
+            replies(http.Response(200, json={"results": [rec(1, 2), rec(2, 1)]}))
         )
 
 
@@ -451,14 +450,14 @@ def test_keyset_needs_every_record_to_have_its_field():
     body = {"results": [rec(1, 1), {"id": 2}]}
     with pytest.raises(ApiError, match="no 'updated_at', so Keyset"):
         keyset_run(
-            replies(httpx2.Response(200, json=body)),
+            replies(http.Response(200, json=body)),
             Incremental("updated_at", missing="keep"),
         )
 
 
 def test_keyset_can_send_its_parameters_in_a_post_body():
     pages = [{"results": [rec(1, 1), rec(2, 2)]}, {"results": [rec(2, 2)]}]
-    api = replies(*(httpx2.Response(200, json=page) for page in pages))
+    api = replies(*(http.Response(200, json=page) for page in pages))
     records = api.client().records(
         "/search/",
         method="POST",

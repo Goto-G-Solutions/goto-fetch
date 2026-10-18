@@ -1,6 +1,6 @@
 # Auth
 
-Three kinds of authentication are built in, and any `httpx2.Auth` works too.
+Three kinds of authentication are built in, and an `Auth` of your own works too.
 
 ## Choosing
 
@@ -10,7 +10,7 @@ Three kinds of authentication are built in, and any `httpx2.Auth` works too.
 | a short-lived access token, renewed with a refresh token | `Client(auth=TokenRefresh(refresh_url, refresh=...))` |
 | a login (username and password) for tokens | `TokenRefresh(login=PasswordLogin(token_url, username, password))` |
 | OAuth2 client credentials (one service to another) | `TokenRefresh(login=ClientCredentials(token_url, client_id, client_secret))` |
-| something else (signing, AWS, ...) | any `httpx2.Auth`, as `Client(auth=...)` |
+| something else (signing, AWS, ...) | an `Auth` of your own (`auth_flow`, as in httpx), as `Client(auth=...)`; or an `httpx2.Auth` on `Httpx2Transport(http=httpx2.Client(auth=...))` |
 
 ## What it handles for you
 
@@ -29,7 +29,6 @@ It works with sync clients only: an async client gets a clear `TypeError`.
 ```python
 from api_explorer import Client, PasswordLogin, TokenRefresh, token_headers
 from api_explorer.testing import TokenServer
-import httpx2
 
 # a header of the API's own, with the bare token
 assert token_headers("k-123", None, "X-API-Key") == {"X-API-Key": "k-123"}
@@ -39,8 +38,8 @@ assert token_headers("abc", "Bearer") == {"Authorization": "Bearer abc"}
 server = TokenServer()  # a simplejwt-style API: /api/token/ and /api/token/refresh/
 auth = TokenRefresh("/token/refresh/", login=PasswordLogin("/token/", "me", "pw"))
 client = Client(
-    "http://api.test/api", auth=auth, transport=httpx2.MockTransport(server)
-)
+    "http://api.test/api", auth=auth, transport=server
+)  # a fake API is a transport
 assert list(client.records("/items/")) == [{"id": 1}]
 assert server.paths == ["/api/token/", "/api/items/"]
 ```

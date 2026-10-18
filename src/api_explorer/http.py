@@ -1,0 +1,322 @@
+"""The package's own HTTP vocabulary: requests, responses, headers, and the Transport interface.
+
+The rest of the package speaks only these types, so the library that does
+the sending is a choice, not a dependency: a Transport takes a Request and
+gives back a Response. Two ship with the package (Urllib3Transport, the
+default, and Httpx2Transport, the "httpx2" extra), and anything with the
+same two methods works (testing.check_transport checks one).
+
+The shapes follow httpx's where they meet, Response(200, json=...) and
+Request("GET", url, json=...), so code written against httpx reads the
+same here. Only the standard library is used.
+"""
+
+import json as jsonlib
+import re
+from collections.abc import Generator, Iterable, Iterator, Mapping, MutableMapping
+from typing import Any, Protocol, runtime_checkable
+from urllib.parse import (
+    parse_qsl,
+    unquote_plus,
+    urlencode,
+    urljoin,
+    urlsplit,
+    urlunsplit,
+)
+
+_UNSET: Any = object()
+
+
+class URL(str):
+    """A URL that is also plain text, with its parts at hand: path, query, params."""
+
+    @property
+    def scheme(self) -> str:
+        """The scheme, such as "https"."""
+        return urlsplit(self).scheme
+
+    @property
+    def host(self) -> str:
+        """The host name, without port."""
+        return urlsplit(self).hostname or ""
+
+    @property
+    def path(self) -> str:
+        """The path, such as "/api/items/"."""
+        return urlsplit(self).path
+
+    @property
+    def query(self) -> str:
+        """The query, without its "?", as written."""
+        return urlsplit(self).query
+
+    @property
+    def params(self) -> dict[str, str]:
+        """The query's parameters; of several with one name, the last."""
+        return dict(parse_qsl(self.query, keep_blank_values=True))
+
+    def copy_set_param(self, name: str, value: object) -> "URL":
+        """This URL with `name` set to `value`, replacing any it had, others kept."""
+        return set_param(self, name, value)
+
+    def copy_merge_params(self, params: Mapping[str, object]) -> "URL":
+        """This URL with `params` set, replacing those it had by the same names."""
+        url = self
+        for name, value in params.items():
+            url = set_param(url, name, value)
+        return url
+
+
+def set_param(url: str, name: str, value: object) -> URL:
+    """`url` with query parameter `name` set to `value`, in place if it was there.
+
+    The other parameters keep their order and their encoding, as written.
+    """
+    parts = urlsplit(url)
+    pairs = [p for p in parts.query.split("&") if p] if parts.query else []
+    encoded = urlencode({name: _text(value)})
+    kept, placed = [], False
+    for pair in pairs:
+        if _name_of(pair) == name:
+            if not placed:
+                kept.append(encoded)
+                placed = True
+            continue
+        kept.append(pair)
+    if not placed:
+        kept.append(encoded)
+    return URL(urlunsplit(parts._replace(query="&".join(kept))))
+
+
+def join_url(base: str, endpoint: str) -> URL:
+    """`endpoint` under `base`: "items/" under "https://h/api" is "https://h/api/items/".
+
+    An absolute endpoint is used as given. A leading "/" on the endpoint
+    doesn't climb out of the base path.
+    """
+    if urlsplit(endpoint).scheme:
+        return URL(endpoint)
+    return URL(urljoin(base.rstrip("/") + "/", endpoint.lstrip("/")))
+
+
+def _name_of(pair: str) -> str:
+    return unquote_plus(pair.partition("=")[0])
+
+
+def _text(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+class Headers(MutableMapping[str, str]):
+    """HTTP headers: names matched without regard to case, as HTTP says.
+
+    Built from a mapping or a list of (name, value) pairs, so a name sent
+    twice (Set-Cookie, Link) keeps every value: get_list(name) gives them
+    all, and headers[name] joins them with ", ".
+    """
+
+    def __init__(
+        self, items: Mapping[str, str] | Iterable[tuple[str, str]] | None = None
+    ) -> None:
+        self._items: list[tuple[str, str]] = []
+        pairs = items.items() if isinstance(items, Mapping) else (items or [])
+        for name, value in pairs:
+            self._items.append((str(name), str(value)))
+
+    def get_list(self, name: str) -> list[str]:
+        """Every value sent under `name`, in order."""
+        wanted = name.lower()
+        return [value for key, value in self._items if key.lower() == wanted]
+
+    def __getitem__(self, name: str) -> str:
+        values = self.get_list(name)
+        if not values:
+            raise KeyError(name)
+        return ", ".join(values)
+
+    def __setitem__(self, name: str, value: str) -> None:
+        wanted = name.lower()
+        self._items = [(k, v) for k, v in self._items if k.lower() != wanted]
+        self._items.append((name, str(value)))
+
+    def __delitem__(self, name: str) -> None:
+        wanted = name.lower()
+        if not self.get_list(name):
+            raise KeyError(name)
+        self._items = [(k, v) for k, v in self._items if k.lower() != wanted]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(dict.fromkeys(key for key, _ in self._items))
+
+    def __len__(self) -> int:
+        return len(dict.fromkeys(key.lower() for key, _ in self._items))
+
+    def raw(self) -> list[tuple[str, str]]:
+        """Every (name, value) pair, in order, repeats included."""
+        return list(self._items)
+
+    def __repr__(self) -> str:
+        return f"Headers({self._items!r})"
+
+
+class Request:
+    """One HTTP request: a method, a URL, headers, and a body of bytes.
+
+    `params` merge into the URL's query, `json` becomes a JSON body,
+    `data` a form (a mapping) or raw bytes, and `content` raw bytes; give
+    at most one body.
+    """
+
+    def __init__(
+        self,
+        method: str,
+        url: str,
+        *,
+        params: Mapping[str, object] | None = None,
+        headers: Mapping[str, str] | Iterable[tuple[str, str]] | None = None,
+        content: bytes | None = None,
+        json: Any = _UNSET,
+        data: Mapping[str, object] | bytes | None = None,
+    ) -> None:
+        bodies = [content is not None, json is not _UNSET, data is not None]
+        if sum(bodies) > 1:
+            raise ValueError("Give one of content, json or data, not several")
+        self.method = method.upper()
+        self.url = URL(url).copy_merge_params(params) if params else URL(url)
+        self.headers = Headers(headers)
+        self.content = b"" if content is None else content
+        if json is not _UNSET:
+            self.content = jsonlib.dumps(json).encode()
+            self.headers.setdefault("Content-Type", "application/json")
+        elif isinstance(data, Mapping):
+            self.content = urlencode({k: _text(v) for k, v in data.items()}).encode()
+            self.headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
+        elif data is not None:
+            self.content = bytes(data)
+
+    def __repr__(self) -> str:
+        return f"<Request {self.method} {self.url}>"
+
+
+class Response:
+    """One HTTP response: a status, headers, the body as bytes, and the request it answers.
+
+    A transport builds it from what the server sent, with the body already
+    decompressed. `json=` and `text=` build one for tests, as
+    Response(200, json={"ok": True}).
+    """
+
+    def __init__(
+        self,
+        status_code: int,
+        *,
+        headers: Mapping[str, str] | Iterable[tuple[str, str]] | None = None,
+        content: bytes | None = None,
+        text: str | None = None,
+        json: Any = _UNSET,
+        request: Request | None = None,
+        url: str | None = None,
+    ) -> None:
+        self.status_code = status_code
+        self.headers = Headers(headers)
+        self.content = b"" if content is None else content
+        if json is not _UNSET:
+            self.content = jsonlib.dumps(json).encode()
+            self.headers.setdefault("Content-Type", "application/json")
+        elif text is not None:
+            self.content = text.encode()
+            self.headers.setdefault("Content-Type", "text/plain; charset=utf-8")
+        self.request = request or Request("GET", url or "http://unknown/")
+        self.url = URL(url) if url else self.request.url
+
+    @property
+    def is_success(self) -> bool:
+        """Whether the status is 2xx."""
+        return 200 <= self.status_code < 300
+
+    @property
+    def text(self) -> str:
+        """The body as text, in the charset the Content-Type names (UTF-8 if none)."""
+        found = re.search(r"charset=([\w.-]+)", self.headers.get("Content-Type", ""))
+        try:
+            return self.content.decode(found[1] if found else "utf-8", errors="replace")
+        except LookupError:
+            return self.content.decode("utf-8", errors="replace")
+
+    def json(self) -> Any:
+        """The body parsed as JSON; raises ValueError if it isn't."""
+        return jsonlib.loads(self.content)
+
+    @property
+    def links(self) -> dict[str, dict[str, str]]:
+        """The Link header's links, by rel: {"next": {"url": ..., "rel": "next"}}."""
+        found: dict[str, dict[str, str]] = {}
+        for header in self.headers.get_list("Link"):
+            for part in re.split(r",\s*(?=<)", header):
+                target = re.match(r"\s*<([^>]*)>", part)
+                if not target:
+                    continue
+                attributes = dict(re.findall(r';\s*(\w+)="?([^";]*)"?', part))
+                link = {"url": target[1], **attributes}
+                found[attributes.get("rel", target[1])] = link
+        return found
+
+    def __repr__(self) -> str:
+        return f"<Response [{self.status_code}]>"
+
+
+class TransportError(Exception):
+    """A request that got no response: a final failure, unless it is a NetworkError."""
+
+
+class NetworkError(TransportError):
+    """A failure worth trying again: refused or lost connection, timeout, dropped reply."""
+
+
+class ConnectError(NetworkError):
+    """The connection couldn't be made, or was refused."""
+
+
+class TimeoutError(NetworkError):
+    """No answer within the timeout."""
+
+
+class ConnectionDropped(NetworkError):
+    """The connection closed part way through the reply."""
+
+
+@runtime_checkable
+class Transport(Protocol):
+    """Sends one request and gives back the response: the only piece that touches the network.
+
+    Promises (testing.check_transport checks them): send() follows
+    redirects, decompresses the body, and raises NetworkError for a failure
+    worth retrying (no connection, a timeout, a dropped reply) and another
+    TransportError for anything else; it never raises for an HTTP status,
+    which the Client judges. close() releases its connections.
+    """
+
+    def send(self, request: Request, timeout: float | None) -> Response:
+        """Send `request`, waiting at most `timeout` seconds at each stage."""
+        ...
+
+    def close(self) -> None:
+        """Release connections; the transport isn't used after."""
+        ...
+
+
+@runtime_checkable
+class Auth(Protocol):
+    """Signs requests, and may send requests of its own, such as renewing a token.
+
+    auth_flow(request) is a generator, as in httpx: it yields the request
+    to send (signed), receives each response, and may yield more: a token
+    request first, or the request again after a 401. The Client sends each
+    through its transport. TokenRefresh is the built-in one.
+    """
+
+    def auth_flow(self, request: Request) -> Generator[Request, Response, None]:
+        """Yield the requests to send for `request`, receiving each response."""
+        ...

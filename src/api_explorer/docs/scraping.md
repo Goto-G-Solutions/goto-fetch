@@ -6,9 +6,10 @@ For pages without an API, `api_explorer.scrape` (the `scrape` extra) follows "ne
 ## Examples
 
 ```python
-import httpx2
+from api_explorer import http
 from api_explorer import Client
 from api_explorer.scrape import CSSField, ScraperConfig, XPathField, scrape
+from api_explorer.testing import FakeApi
 
 pages = {
     "/shop/": '<article class="product"><h2>Mug</h2><a href="/mug">x</a></article>'
@@ -18,9 +19,7 @@ pages = {
 client = Client(
     "http://shop.test",
     trailing_slash=False,
-    transport=httpx2.MockTransport(
-        lambda r: httpx2.Response(200, text=pages[r.url.path])
-    ),
+    transport=FakeApi(lambda r: http.Response(200, text=pages[r.url.path])),
 )
 
 config = ScraperConfig(

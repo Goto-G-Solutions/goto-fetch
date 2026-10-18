@@ -6,9 +6,8 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Protocol
 
-import httpx2
-
 from .errors import ApiError, Problem
+from .http import Response
 
 IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
 """Methods that can be repeated safely: doing them twice does what doing them once does."""
@@ -66,7 +65,7 @@ class Failure:
     attempt: int
     method: str
     url: str
-    response: httpx2.Response | None = None
+    response: Response | None = None
     error: Exception | None = None
     retry: bool | None = None
     problem: Problem | None = None

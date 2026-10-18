@@ -16,7 +16,7 @@ A `FetchPlan` describes one fetch as data: the API, its auth, paging, tracking a
 ## Examples
 
 ```python
-import httpx2
+from api_explorer import http
 from api_explorer import FetchPlan
 from api_explorer.testing import changes_api
 
@@ -32,7 +32,7 @@ plan = FetchPlan(
     key="id",
 )
 api = changes_api([{"id": 1, "updated_at": "2026-01-01T00:00:00Z"}])
-with plan.client(transport=httpx2.MockTransport(api)) as client:
+with plan.client(transport=api) as client:
     assert plan.store(client) == 1  # tracked: the next run fetches only changes
 
 script = plan.script()  # a uv script that does the same

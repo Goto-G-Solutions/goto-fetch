@@ -8,8 +8,9 @@ regression test for it belongs with the example tests.
 
 import json
 
-import httpx2
 import pytest
+
+from api_explorer import http
 
 pytest.importorskip("hypothesis", reason="property tests need the dev dependencies")
 
@@ -28,7 +29,7 @@ from api_explorer import (
     select,
     to_frame,
 )
-from api_explorer.testing import offset_api
+from api_explorer.testing import FakeApi, offset_api
 
 # JSON as APIs send it: no NaN or infinity, which JSON can't carry.
 SCALARS = (
@@ -160,7 +161,7 @@ def test_offset_paging_returns_every_record_once_whatever_the_server_does(
     handler = offset_api(total, cap=cap, count=count)
     client = Client(
         "http://api.test/api",
-        transport=httpx2.MockTransport(handler),
+        transport=FakeApi(handler),
         retry=Retry(backoff=0),
     )
     records = list(
@@ -189,13 +190,11 @@ def test_cursor_paging_by_post_body_returns_every_page_in_order(sizes):
     def handler(request):
         index = int(json.loads(request.content).get("cursor") or 0)
         following = str(index + 1) if index + 1 < len(pages) else None
-        return httpx2.Response(
-            200, json={"hits": pages[index], "next_cursor": following}
-        )
+        return http.Response(200, json={"hits": pages[index], "next_cursor": following})
 
     client = Client(
         "http://api.test/api",
-        transport=httpx2.MockTransport(handler),
+        transport=FakeApi(handler),
         retry=Retry(backoff=0),
     )
     records = client.records(
@@ -291,11 +290,11 @@ def flaky_source(rows: list[dict], data) -> "Client":
     def answer(request):
         outcome = data.draw(FAILURES)
         if outcome == "503":
-            return httpx2.Response(503)
+            return http.Response(503)
         if outcome == "drop":
-            raise httpx2.RemoteProtocolError("connection dropped mid-response")
+            raise http.ConnectionDropped("connection dropped mid-response")
         if outcome == "refused":
-            raise httpx2.ConnectError("connection refused")
+            raise http.ConnectError("connection refused")
         return api(request)
 
     return FakeApi(answer).client(retry=Retry(attempts=3, backoff=0))
@@ -416,9 +415,9 @@ def test_keyset_runs_mirror_the_source_while_it_changes_mid_run(sizes, limit, da
             sync()
         outcome = data.draw(FAILURES)
         if outcome == "503":
-            return httpx2.Response(503)
+            return http.Response(503)
         if outcome in ("drop", "refused"):
-            raise httpx2.ConnectError("connection lost")
+            raise http.ConnectError("connection lost")
         return api(request)
 
     for size in sizes:

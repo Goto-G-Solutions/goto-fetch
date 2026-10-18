@@ -8,15 +8,14 @@ temporary one goes to the retry policy, and records stops instead of
 loading part of the data.
 """
 
-import httpx2
 import pytest
 
-from api_explorer import ApiError, Problem, Retry, error_at
+from api_explorer import ApiError, Problem, Retry, error_at, http
 from api_explorer.testing import FakeApi, replies
 
 
-def ok(body) -> httpx2.Response:
-    return httpx2.Response(200, json=body)
+def ok(body) -> http.Response:
+    return http.Response(200, json=body)
 
 
 @pytest.mark.parametrize(
@@ -42,8 +41,8 @@ def test_error_at_finds_an_error_by_default_path(body):
         ok({"error": "", "errors": []}),
         ok({"errors": {}}),
         ok([1, 2]),
-        httpx2.Response(200, text="not json"),
-        httpx2.Response(204),
+        http.Response(200, text="not json"),
+        http.Response(204),
     ],
     ids=[
         "no-key",
@@ -166,6 +165,6 @@ def test_error_at_parses_with_the_decoder_it_is_given():
         seen.append(content)
         return {"error": "from my decoder"}
 
-    problem = error_at(decode=decode)(httpx2.Response(200, content=b"{}"))
+    problem = error_at(decode=decode)(http.Response(200, content=b"{}"))
     assert seen == [b"{}"]
     assert "from my decoder" in problem.message

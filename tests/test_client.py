@@ -3,13 +3,12 @@
 import gzip
 import json
 
-import httpx2
 import pytest
 
-from api_explorer import ApiError, Client
+from api_explorer import ApiError, Client, http
 from api_explorer.testing import replies
 
-OK = httpx2.Response(200, json={"ok": True})
+OK = http.Response(200, json={"ok": True})
 
 
 @pytest.mark.parametrize(
@@ -36,7 +35,7 @@ def test_request_returns_the_response_on_success(mock_client):
 
 
 def test_a_client_error_fails_at_once_with_its_status_and_body(mock_client):
-    handler = replies(httpx2.Response(404, text="Not found."))
+    handler = replies(http.Response(404, text="Not found."))
     with pytest.raises(ApiError, match="HTTP 404: Not found.") as raised:
         mock_client(handler).request("GET", "/items/1/")
     assert raised.value.status == 404
@@ -44,74 +43,56 @@ def test_a_client_error_fails_at_once_with_its_status_and_body(mock_client):
 
 
 def test_get_json_refuses_a_body_that_is_not_json(mock_client):
-    handler = replies(httpx2.Response(200, text="<html>"))
+    handler = replies(http.Response(200, text="<html>"))
     with pytest.raises(ApiError, match="did not return JSON"):
         mock_client(handler).get_json("/items/")
 
 
 def test_get_json_parses_with_the_client_s_decoder(mock_client):
-    handler = replies(httpx2.Response(200, content=b"raw body"))
+    handler = replies(http.Response(200, content=b"raw body"))
     client = mock_client(handler, decode=lambda body: {"decoded": body})
     assert client.get_json("/items/") == {"decoded": b"raw body"}
 
 
-def test_timeout_can_set_connect_and_read_limits_apart(mock_client):
-    seen = {}
+class Recording:
+    """A transport that answers OK and remembers each request and timeout."""
 
-    def handler(request):
-        seen.update(request.extensions["timeout"])
-        return OK
+    def __init__(self):
+        self.sent, self.closed = [], False
 
-    client = mock_client(handler, timeout=httpx2.Timeout(60.0, connect=5.0))
-    client.request("GET", "/items/")
-    assert (seen["connect"], seen["read"]) == (5.0, 60.0)
+    def send(self, request, timeout):
+        self.sent.append((request, timeout))
+        return http.Response(200, json={"ok": True}, request=request)
 
-
-def test_a_client_you_bring_supplies_the_base_url_and_headers():
-    seen = []
-
-    def handler(request):
-        seen.append((str(request.url), request.headers.get("X-Team")))
-        return OK
-
-    http = httpx2.Client(
-        base_url="http://own.test/api",
-        headers={"X-Team": "data"},
-        transport=httpx2.MockTransport(handler),
-    )
-    Client(http=http).request("GET", "/items/")
-    assert seen == [("http://own.test/api/items/", "data")]
+    def close(self):
+        self.closed = True
 
 
-@pytest.mark.parametrize(
-    "setting",
-    [
-        {"base_url": "http://h"},
-        {"headers": {"a": "b"}},
-        {"timeout": 5.0},
-        {"transport": httpx2.MockTransport(lambda r: OK)},
-    ],
-    ids=["base_url", "headers", "timeout", "transport"],
-)
-def test_a_setting_given_twice_is_refused(setting):
-    # One place for each setting: here, or on the httpx2.Client, not both.
-    with pytest.raises(
-        ValueError, match=f"Set {next(iter(setting))} on the httpx2.Client"
-    ):
-        Client(http=httpx2.Client(), **setting)
+def test_the_timeout_and_every_request_go_through_the_transport():
+    transport = Recording()
+    Client("http://h/api", timeout=7.5, transport=transport).get_json("/items/")
+    [(request, timeout)] = transport.sent
+    assert (str(request.url), timeout) == ("http://h/api/items/", 7.5)
 
 
-def test_closing_leaves_a_client_you_bring_open_and_closes_its_own():
-    yours = httpx2.Client()
-    Client(http=yours).close()
-    assert not yours.is_closed
+def test_client_headers_and_a_call_s_headers_both_reach_the_request():
+    transport = Recording()
+    client = Client("http://h", headers={"X-Team": "data"}, transport=transport)
+    client.request("GET", "/x/", headers={"X-Trace": "1"})
+    headers = transport.sent[0][0].headers
+    assert (headers["x-team"], headers["X-Trace"]) == ("data", "1")
+
+
+def test_closing_leaves_a_transport_you_pass_open_and_closes_its_own():
+    yours = Recording()
+    Client("http://h", transport=yours).close()
+    assert not yours.closed
     own = Client("http://h")
-    own.close()
-    assert own._http.is_closed
+    own.close()  # its Urllib3Transport releases its pool
 
 
 def test_params_merge_into_a_query_the_endpoint_already_has(mock_client):
-    # Guard (httpx #3433): httpx2 replaced the endpoint's query.
+    # Guard (httpx #3433): httpx 0.28 replaced the endpoint's query.
     handler = replies(OK)
     mock_client(handler).request("GET", "/items/?a=1", params={"b": "2"})
     assert dict(handler.calls[0].url.params) == {"a": "1", "b": "2"}
@@ -120,13 +101,13 @@ def test_params_merge_into_a_query_the_endpoint_already_has(mock_client):
 def test_a_gzip_body_without_content_encoding_is_unpacked(mock_client):
     # Guard (Airbyte #914): some servers gzip without saying so.
     body = gzip.compress(json.dumps({"ok": True}).encode())
-    assert mock_client(replies(httpx2.Response(200, content=body))).get_json("/x/") == {
+    assert mock_client(replies(http.Response(200, content=body))).get_json("/x/") == {
         "ok": True
     }
 
 
 def test_a_body_that_is_not_json_says_what_it_was(mock_client):
-    page = httpx2.Response(
+    page = http.Response(
         200, text="<html>login</html>", headers={"Content-Type": "text/html"}
     )
     with pytest.raises(
@@ -136,17 +117,8 @@ def test_a_body_that_is_not_json_says_what_it_was(mock_client):
     assert raised.value.status == 200
 
 
-@pytest.mark.parametrize(
-    "setting", [{"timeout": 0}, {"headers": {}}], ids=["zero-timeout", "empty-headers"]
-)
-def test_an_empty_setting_beside_http_is_refused_too(setting):
-    # Regression: falsy settings beside http= were dropped without a word.
-    with pytest.raises(ValueError, match="on the httpx2.Client you pass as http"):
-        Client(http=httpx2.Client(), **setting)
-
-
 def test_a_corrupt_gzip_body_is_an_api_error():
-    response = httpx2.Response(200, content=b"\x1f\x8bnot gzip at all")
+    response = http.Response(200, content=b"\x1f\x8bnot gzip at all")
     client = replies(response).client()
     with pytest.raises(ApiError, match="gzip body that won't unpack"):
         client.get_json("/x/")

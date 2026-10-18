@@ -31,16 +31,16 @@ assert events[-1][1] == {
 }
 ```
 
-`enable_logging("DEBUG", http=True)` adds every decision (why paging stopped, why a token was renewed) and httpx2's line per request: the first thing to turn on when a run is slow or stops early.
+`enable_logging("DEBUG", http=True)` adds every decision (why paging stopped, why a token was renewed) and a `request` event per request sent, with its status and time: the first thing to turn on when a run is slow or stops early.
 
 ## What it handles for you
 
-- **Secrets:** URLs in every line, httpx2's included, have their secrets hidden.
+- **Secrets:** URLs in every line, the request events included, have their secrets hidden.
 - **Which client:** `Client(name="shop")` stamps `record.client` on every line logged during its requests, including lines from pieces of your own.
 
 ## The events
 
-The full table, with levels and data keys, is in the `api_explorer.logs` docstring (`python -c "import api_explorer.logs as l; help(l)"`). The ones to know: `page` and `done` (INFO, progress), `retry` (WARNING), `stop` (DEBUG, why paging ended), `renew` (DEBUG), `no-count`, `count-short`, `text` and `widen` (WARNING, data that didn't fit), `stored` (INFO).
+The full table, with levels and data keys, is in the `api_explorer.logs` docstring (`python -c "import api_explorer.logs as l; help(l)"`). The ones to know: `page` and `done` (INFO, progress), `retry` (WARNING), `stop` (DEBUG, why paging ended), `renew` (DEBUG), `request` (INFO, with `http=True`), `no-count`, `count-short`, `text` and `widen` (WARNING, data that didn't fit), `stored` (INFO).
 
 A piece of your own logs the same way, with `log_event(logger, level, event, message, *args, data={...})` under a logger in the `api_explorer` tree or one you pass to `enable_logging(loggers=[...])`.
 

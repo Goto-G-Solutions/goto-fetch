@@ -11,7 +11,6 @@ import json
 import sys
 import types
 
-import httpx2
 import pytest
 
 import api_explorer
@@ -22,12 +21,14 @@ from api_explorer import (
     Keyset,
     Retry,
     SqliteWarehouse,
+    http,
     package_requirement,
     select,
     to_frame,
 )
 from api_explorer import plan as plan_module
 from api_explorer.testing import (
+    FakeApi,
     MemoryState,
     MemoryWarehouse,
     TokenServer,
@@ -49,11 +50,11 @@ def keyed_offset_api(key: str):
 
     def handler(request):
         if request.headers.get("X-API-Key") != key:
-            return httpx2.Response(401)
+            return http.Response(401)
         query = dict(request.url.params)
         start, size = int(query["offset"]), int(query["limit"])
         items = [{"id": i, "user": {"name": f"u{i}"}} for i in range(120)]
-        return httpx2.Response(
+        return http.Response(
             200, json={"items": items[start : start + size], "count": 120}
         )
 
@@ -72,7 +73,7 @@ def run_script(monkeypatch, capsys):
         fake = types.ModuleType("api_explorer")
         fake.__dict__.update(vars(api_explorer))
         fake.Client = functools.partial(
-            Client, transport=httpx2.MockTransport(handler), retry=Retry(backoff=0.0)
+            Client, transport=FakeApi(handler), retry=Retry(backoff=0.0)
         )
         monkeypatch.setitem(sys.modules, "api_explorer", fake)
         for name, value in env.items():
@@ -159,13 +160,13 @@ def search_api(request):
         None: {"hits": [1, 2], "next_cursor": "c2"},
         "c2": {"hits": [3], "next_cursor": None},
     }
-    return httpx2.Response(200, json=pages[cursor])
+    return http.Response(200, json=pages[cursor])
 
 
 def test_a_post_search_script_fetches_what_its_plan_fetches(run_script):
     # A second end-to-end script test, on purpose: method, body, retry and
     # cursor paging are written by their own branches of script().
-    with SEARCH.client(transport=httpx2.MockTransport(search_api)) as client:
+    with SEARCH.client(transport=FakeApi(search_api)) as client:
         expected = list(SEARCH.records(client))
     namespace = run_script(SEARCH.script(), search_api)
     assert namespace["records"] == expected == [1, 2, 3]
@@ -187,7 +188,7 @@ def test_a_script_imports_os_only_when_it_reads_secrets():
 def test_a_script_fetches_what_its_plan_fetches(run_script):
     handler = keyed_offset_api("k-123")
     columns = ["id", "user.name"]
-    with KEYED.client(transport=httpx2.MockTransport(handler)) as client:
+    with KEYED.client(transport=FakeApi(handler)) as client:
         expected = select(KEYED.records(client), columns)
     namespace = run_script(KEYED.script(columns=columns), handler, API_TOKEN="k-123")
     assert namespace["rows"] == expected
@@ -274,7 +275,7 @@ def test_a_client_credentials_script_gets_its_token_from_the_environment(run_scr
         client_id="client",
         client_secret="secret",
     )
-    with plan.client(transport=httpx2.MockTransport(server)) as client:
+    with plan.client(transport=FakeApi(server)) as client:
         expected = list(plan.records(client))
     namespace = run_script(plan.script(), server, API_CLIENT_SECRET="secret")
     assert namespace["records"] == expected == [{"id": 1}]
@@ -284,11 +285,11 @@ def test_an_error_path_stops_the_plan_and_its_script_alike(run_script):
     # Its own test: error_path adds a check to the client and a line to
     # the script, and both must refuse a 200 that reports an error.
     def handler(request):
-        return httpx2.Response(200, json={"error": "quota exceeded"})
+        return http.Response(200, json={"error": "quota exceeded"})
 
     plan = FetchPlan("http://api.test/api", "/items/", error_path="error")
     with (
-        plan.client(transport=httpx2.MockTransport(handler)) as client,
+        plan.client(transport=FakeApi(handler)) as client,
         pytest.raises(ApiError, match="quota exceeded"),
     ):
         list(plan.records(client))

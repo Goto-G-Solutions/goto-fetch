@@ -16,7 +16,7 @@ Most fetches are three steps, and each has a guide:
 
 | Page | Read it for |
 |------|-------------|
-| [client](client.md) | `Client`: requests, records, errors, response checks, your own httpx2 client |
+| [client](client.md) | `Client`: requests, records, errors, response checks, and how requests are sent (transports) |
 | [paging](paging.md) | choosing a paging style, and loops of your own |
 | [auth](auth.md) | token headers, access tokens that renew, logins |
 | [retries](retries.md) | what is retried, and policies of your own |

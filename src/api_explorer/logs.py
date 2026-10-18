@@ -29,6 +29,7 @@ without reading the text:
 | text        | WARNING | column, reason                                    |
 | widen       | WARNING | table, column, type                               |
 | stored      | INFO    | table, records                                    |
+| request     | INFO    | method, url, status, seconds (logger api_explorer.http, shown with http=True) |
 
 `record.client` is the name of the Client whose request was running when
 the record was logged (Client(name=...)), or None. The handlers that
@@ -52,8 +53,10 @@ from .errors import redact
 ROOT = "api_explorer"
 """The package's logger; every module logs under it."""
 
-HTTP = "httpx2"
-"""httpx2's logger, which logs one INFO line per request."""
+HTTP = ("api_explorer.http", "httpx2")
+"""The loggers of each request sent: the package's "request" events, and
+httpx2's own lines when Httpx2Transport sends. enable_logging(http=True)
+shows them; otherwise they are held back."""
 
 # A library prints nothing on its own: the application decides (see the
 # Python logging HOWTO, "Configuring logging for a library").
@@ -112,8 +115,9 @@ class ClientFilter(logging.Filter):
 class RedactFilter(logging.Filter):
     """Hides secrets in URLs in each record's message (see redact_url).
 
-    enable_logging puts this on its handler, so lines from httpx2 and from
-    your own pieces are covered too, not just the package's.
+    enable_logging puts this on its handler, so lines from httpx2 (when it
+    sends) and from your own pieces are covered too, not just the package's
+    events.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -171,7 +175,8 @@ def enable_logging(
     """Show this package's log lines from `level` up, on stderr or on `handler`.
 
     `loggers` adds other loggers to the same handler, such as those of
-    pieces you build, and `http` adds httpx2's line per request. The
+    pieces you build, and `http` adds a "request" event per request sent
+    (and httpx2's own line, when it sends). The
     handler stamps each record with record.client (see ClientFilter) and
     hides secrets in URLs (see RedactFilter). It is returned, so
     disable_logging(handler) can take it off again.
@@ -194,13 +199,19 @@ def enable_logging(
     handler.setLevel(number)
     for one in filters:
         handler.addFilter(one)
-    for name in [ROOT, *loggers, *([HTTP] if http else [])]:
+    for name in [ROOT, *loggers, *(HTTP if http else [])]:
         logger = logging.getLogger(name)
         attached.levels[name] = logger.level
         # Lower the logger's level if needed, never raise it: another
         # handler may already want more than this one does.
         logger.setLevel(min(logger.getEffectiveLevel(), number))
-        logger.addHandler(handler)
+        if name != HTTP[0]:  # the package's own reach the handler through ROOT
+            logger.addHandler(handler)
+    if not http:
+        # The request lines come from a logger under ROOT; hold them back.
+        quiet = logging.getLogger(HTTP[0])
+        attached.levels.setdefault(HTTP[0], quiet.level)
+        quiet.setLevel(max(quiet.getEffectiveLevel(), logging.WARNING))
     setattr(handler, _ATTACHED, attached)
     return handler
 

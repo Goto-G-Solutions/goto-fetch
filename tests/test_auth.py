@@ -12,7 +12,6 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-import httpx2
 import pytest
 
 from api_explorer import (
@@ -22,10 +21,11 @@ from api_explorer import (
     PasswordLogin,
     ResolvesUrls,
     TokenRefresh,
+    http,
     jwt_expiry,
     token_headers,
 )
-from api_explorer.testing import TokenServer, replies
+from api_explorer.testing import FakeApi, TokenServer, replies
 
 LOGIN = PasswordLogin("/token/", "me", "pw")
 
@@ -194,8 +194,8 @@ def test_auth_urls_follow_the_trailing_slash_setting(mock_client):
     def handler(request):
         seen.append(request.url.path)
         if request.url.path == "/api/token/pair":
-            return httpx2.Response(200, json={"access": "a1", "refresh": "r1"})
-        return httpx2.Response(200, json={"results": [], "next": None})
+            return http.Response(200, json={"access": "a1", "refresh": "r1"})
+        return http.Response(200, json={"results": [], "next": None})
 
     auth = TokenRefresh(
         "/token/refresh", login=PasswordLogin("/token/pair", "me", "pw")
@@ -210,18 +210,6 @@ def test_secrets_stay_out_of_repr():
     for text in (repr(login), repr(auth)):
         assert "hunter2" not in text
         assert "r-secret" not in text
-
-
-def test_auth_on_a_client_you_bring_still_resolves_urls_like_endpoints():
-    server = TokenServer()
-    auth = TokenRefresh("token/refresh", refresh="r0")
-    http = httpx2.Client(
-        base_url="http://api.test/api",
-        auth=auth,
-        transport=httpx2.MockTransport(server),
-    )
-    assert list(Client(http=http).records("/items/")) == [{"id": 1}]
-    assert server.paths == ["/api/token/refresh/", "/api/items/"]
 
 
 def test_concurrent_requests_renew_a_rotating_token_only_once():
@@ -288,7 +276,7 @@ def test_expires_in_renews_a_token_before_it_runs_out():
 
 
 def test_a_custom_auth_with_its_own_urls_opts_in_to_endpoint_rules():
-    class Signs(httpx2.Auth):
+    class Signs:
         def __init__(self):
             self.resolve = None
 
@@ -309,7 +297,7 @@ def test_a_temporary_failure_at_the_token_endpoint_is_retried():
     # Guard (meltano #1038): a 503 from the token endpoint failed the run.
     server = TokenServer()
     answer = server._answer
-    failures = [httpx2.Response(503)]
+    failures = [http.Response(503)]
 
     def flaky(request):
         if request.url.path == "/api/token/" and failures:
@@ -338,7 +326,7 @@ def token_requests(expires_in, leeway=30.0, calls=3):
     def with_expiry(request):
         response = answer(request)
         if request.url.path == "/api/token/":
-            return httpx2.Response(
+            return http.Response(
                 200, json={**response.json(), "expires_in": expires_in}
             )
         return response
@@ -371,42 +359,25 @@ def test_a_refresh_reply_without_a_token_falls_back_to_logging_in():
     # though the docstring promises a login when refreshing fails.
     def answer(request):
         if request.url.path.endswith("/refresh/"):
-            return httpx2.Response(200, json={"detail": "ok"})
+            return http.Response(200, json={"detail": "ok"})
         if request.url.path.endswith("/token/"):
-            return httpx2.Response(200, json={"access": "fresh"})
+            return http.Response(200, json={"access": "fresh"})
         assert request.headers["Authorization"] == "Bearer fresh"
-        return httpx2.Response(200, json={"ok": True})
+        return http.Response(200, json={"ok": True})
 
     auth = TokenRefresh(
         "/token/refresh/", refresh="r", login=PasswordLogin("/token/", "me", "pw")
     )
-    client = Client(
-        "http://api.test/api", auth=auth, transport=httpx2.MockTransport(answer)
-    )
+    client = Client("http://api.test/api", auth=auth, transport=FakeApi(answer))
     assert client.get_json("/items/") == {"ok": True}
 
 
 def test_a_failed_refresh_names_the_refresh_endpoint():
     def answer(request):
-        return httpx2.Response(400)
+        return http.Response(400)
 
     auth = TokenRefresh("/token/refresh/", refresh="r")
-    client = Client(
-        "http://api.test/api", auth=auth, transport=httpx2.MockTransport(answer)
-    )
+    client = Client("http://api.test/api", auth=auth, transport=FakeApi(answer))
     with pytest.raises(ApiError) as raised:
         client.get_json("/items/")
     assert raised.value.url == "http://api.test/api/token/refresh/"
-
-
-def test_an_async_client_is_refused_with_a_clear_error():
-    import asyncio
-
-    async def fetch():
-        auth = TokenRefresh("/token/refresh/", refresh="r")
-        transport = httpx2.MockTransport(lambda request: httpx2.Response(200))
-        async with httpx2.AsyncClient(auth=auth, transport=transport) as http:
-            await http.get("http://api.test/x")
-
-    with pytest.raises(TypeError, match="sync clients only"):
-        asyncio.run(fetch())

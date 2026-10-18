@@ -75,7 +75,7 @@ def test_log_lines_and_their_data_never_show_the_key():
     ):
         client.request("GET", "/x/?api_key=S3")
     assert "api_key=***" in stream.getvalue()
-    assert "S3" not in stream.getvalue()  # httpx2's request lines included
+    assert "S3" not in stream.getvalue()  # the request events included
     assert all("S3" not in str(r.data) for r in records if hasattr(r, "data"))
 
 

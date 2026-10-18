@@ -46,6 +46,8 @@ from .decode import Decoder, json_decoder
 from .duckdb_warehouse import DuckDBWarehouse
 from .errors import ApiError, Problem, redact_url
 from .frames import default_backend, latest_per_key, to_frame
+from .http import Auth, Request, Response, Transport
+from .httpx2_transport import Httpx2Transport
 from .incremental import (
     Changes,
     Fingerprint,
@@ -86,10 +88,12 @@ from .records import explode, flatten, parse_datetime, select
 from .retry import Failure, Retry, RetryPolicy, backoff_delay, retry_after_seconds
 from .sqlite_warehouse import SqliteWarehouse
 from .state import SqliteState, StateStore, tracked_run
+from .urllib3_transport import Urllib3Transport
 from .warehouse import SqlTables, Warehouse, write_run
 
 __all__ = [
     "ApiError",
+    "Auth",
     "Changes",
     "Client",
     "ClientCredentials",
@@ -102,6 +106,7 @@ __all__ = [
     "Fetched",
     "Fingerprint",
     "HeaderLink",
+    "Httpx2Transport",
     "Incremental",
     "Keyset",
     "Login",
@@ -115,7 +120,9 @@ __all__ = [
     "Problem",
     "RedactFilter",
     "ReportsDeletions",
+    "Request",
     "ResolvesUrls",
+    "Response",
     "ResponseCheck",
     "Retry",
     "RetryPolicy",
@@ -125,6 +132,8 @@ __all__ = [
     "StateStore",
     "TokenRefresh",
     "Tracker",
+    "Transport",
+    "Urllib3Transport",
     "Warehouse",
     "as_dict",
     "backoff_delay",

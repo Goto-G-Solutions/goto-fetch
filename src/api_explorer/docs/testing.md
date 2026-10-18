@@ -1,6 +1,6 @@
 # Testing
 
-`api_explorer.testing` has fake APIs that page, filter, fail and authenticate like real ones, in memory. Test code that fetches with them, with any test framework and without the network. (respx and pytest-httpx are built for httpx, not httpx2, so they don't see these requests.)
+`api_explorer.testing` has fake APIs that page, filter, fail and authenticate like real ones, in memory. Each fake is a `Transport`, so it goes straight into `Client(transport=...)`: code that fetches is tested with any test framework and without the network. `serve(api)` puts a fake behind a real server on this machine, to test a real transport against it.
 
 ## The fakes
 
@@ -42,12 +42,12 @@ test_my_pipeline_survives_a_capped_server_and_a_hiccup()
 A client set up elsewhere, with its own auth or settings, takes the fake as its transport:
 
 ```python
-import httpx2
+from api_explorer import http
 from api_explorer import Client
 from api_explorer.testing import replies
 
-api = replies(httpx2.Response(200, json={"results": [1], "next": None}))
-client = Client("http://api.test/api", transport=httpx2.MockTransport(api))
+api = replies(http.Response(200, json={"results": [1], "next": None}))
+client = Client("http://api.test/api", transport=api)
 assert list(client.records("/items/")) == [1]
 assert api.paths == ["/api/items/"]
 ```

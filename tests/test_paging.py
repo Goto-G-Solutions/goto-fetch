@@ -11,7 +11,6 @@ still checks one behaviour.
 import json
 import re
 
-import httpx2
 import pytest
 
 from api_explorer import (
@@ -22,6 +21,7 @@ from api_explorer import (
     Offset,
     Page,
     PageRequest,
+    http,
     paginate,
     read_page,
     request_key,
@@ -97,7 +97,7 @@ def test_records_follow_a_link_header_with_header_link(mock_client):
     def handler(request):
         page = request.url.params.get("page", "1")
         headers = {"Link": '<?page=2>; rel="next"'} if page == "1" else {}
-        return httpx2.Response(200, json=[int(page)], headers=headers)
+        return http.Response(200, json=[int(page)], headers=headers)
 
     records = mock_client(handler).records(
         "/repos/", results_key=None, paging=HeaderLink()
@@ -112,7 +112,7 @@ def search_api(pages: dict) -> tuple:
     def handler(request):
         body = json.loads(request.content)
         bodies.append((request.method, body))
-        return httpx2.Response(200, json=pages[body.get("cursor")])
+        return http.Response(200, json=pages[body.get("cursor")])
 
     return handler, bodies
 
@@ -142,7 +142,7 @@ def test_a_cursor_can_go_back_in_the_query(mock_client):
             None: {"data": [1], "meta": {"next": "x"}},
             "x": {"data": [2], "meta": {}},
         }
-        return httpx2.Response(200, json=page[cursor])
+        return http.Response(200, json=page[cursor])
 
     paging = Cursor(key="meta.next", param="after")
     assert list(
@@ -158,7 +158,7 @@ def test_a_next_url_keeps_the_post_method_and_body(mock_client):
     def handler(request):
         seen.append((request.method, str(request.url), json.loads(request.content)))
         last = "page=2" in str(request.url)
-        return httpx2.Response(
+        return http.Response(
             200, json={"results": [1], "next": None if last else "?page=2"}
         )
 
@@ -175,8 +175,8 @@ def test_records_pass_retry_through_so_a_post_search_can_be_retried(mock_client)
     def handler(request):
         calls.append(request)
         if len(calls) == 1:
-            return httpx2.Response(503)
-        return httpx2.Response(200, json={"results": [1], "next": None})
+            return http.Response(503)
+        return http.Response(200, json={"results": [1], "next": None})
 
     records = mock_client(handler).records(
         "/search/", method="POST", json={}, retry=True
@@ -233,7 +233,7 @@ def test_records_add_params_to_the_first_url_only(mock_client):
     def handler(request):
         seen.append(str(request.url))
         last = "page=2" in str(request.url)
-        return httpx2.Response(
+        return http.Response(
             200, json={"results": [1], "next": None if last else "?page=2&size=5"}
         )
 
@@ -430,7 +430,7 @@ def test_offset_names_its_own_query_parameters(mock_client):
         query = dict(request.url.params)
         seen.append(query)
         start = int(query["skip"])
-        return httpx2.Response(200, json={"items": list(range(5))[start : start + 2]})
+        return http.Response(200, json={"items": list(range(5))[start : start + 2]})
 
     paging = Offset(limit=2, limit_param="take", offset_param="skip")
     assert list(
@@ -456,7 +456,7 @@ def endless_api(style_key: str, rows_until: int):
         n = int(request.url.params.get("n", 0))
         rows = [n] if n < rows_until else []
         following = f"?n={n + 1}" if style_key == "next" else str(n + 1)
-        return httpx2.Response(200, json={"results": rows, style_key: following})
+        return http.Response(200, json={"results": rows, style_key: following})
 
     return answer
 
@@ -528,14 +528,14 @@ def test_a_malformed_next_link_is_refused_even_on_an_empty_page(mock_client):
 
 def test_a_204_is_an_empty_page(mock_client):
     # Guard (dlt #1849): an empty 204 failed as "did not return JSON".
-    assert list(mock_client(replies(httpx2.Response(204))).records("/items/")) == []
+    assert list(mock_client(replies(http.Response(204))).records("/items/")) == []
 
 
 def test_an_empty_200_is_an_error_not_an_empty_page(mock_client):
     # Guard (Airbyte PR #1108): an empty 200 is more likely a gateway fault
     # than "no data", and must not end a run quietly.
     with pytest.raises(ApiError, match="returned HTTP 200 with an empty body"):
-        list(mock_client(replies(httpx2.Response(200, content=b""))).records("/items/"))
+        list(mock_client(replies(http.Response(200, content=b""))).records("/items/"))
 
 
 def test_a_loop_is_named_by_url_and_never_shows_the_request_body():
@@ -543,7 +543,7 @@ def test_a_loop_is_named_by_url_and_never_shows_the_request_body():
     # which redaction (URLs only) couldn't clean.
     from api_explorer import Cursor, PaginationLoop
 
-    api = replies(httpx2.Response(200, json={"hits": [1], "next_cursor": "same"}))
+    api = replies(http.Response(200, json={"hits": [1], "next_cursor": "same"}))
     records = api.client().records(
         "/search/",
         method="POST",

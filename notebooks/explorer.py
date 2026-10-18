@@ -572,7 +572,7 @@ def _(
 
     # The package logs nothing until asked. Here its "page" events drive the
     # spinner, and its lines go to this cell's console: warnings always, and
-    # with Verbose every decision (DEBUG) plus httpx2's line per request.
+    # with Verbose every decision (DEBUG) plus a line per request sent.
     class _Spinner(logging.Handler):
         def __init__(self, spinner: Any) -> None:
             super().__init__(logging.INFO)
@@ -942,7 +942,7 @@ def _():
       honouring `Retry-After`.
     - **An overall deadline** for a run, beyond each request's timeout.
     - **Interactive OAuth logins** (authorization code, PKCE); any
-      `httpx2.Auth` of your own works with `Client(auth=...)` meanwhile.
+      `Auth` of your own works with `Client(auth=...)` meanwhile.
     """)
     return
 

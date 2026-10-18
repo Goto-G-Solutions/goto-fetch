@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from api_explorer import (
+    Auth,
     Changes,
     ClientCredentials,
     Cursor,
@@ -30,6 +31,7 @@ from api_explorer import (
     PasswordLogin,
     ReportsDeletions,
     ResolvesUrls,
+    Response,
     ResponseCheck,
     Retry,
     RetryPolicy,
@@ -39,12 +41,15 @@ from api_explorer import (
     StateStore,
     TokenRefresh,
     Tracker,
+    Transport,
+    Urllib3Transport,
     Warehouse,
     error_at,
     json_decoder,
     tracked_run,
 )
 from api_explorer.testing import (
+    FakeApi,
     MemoryState,
     MemoryWarehouse,
     check_tracker,
@@ -102,6 +107,11 @@ def test_built_in_pieces_fit_their_interfaces(tmp_path):
         ClientCredentials("/token/", "id", "secret"),
     ]
     resolves: ResolvesUrls = TokenRefresh("/token/refresh/", refresh="r")
+    auths: list[Auth] = [TokenRefresh("/token/refresh/", refresh="r")]
+    transports: list[Transport] = [
+        Urllib3Transport(),
+        FakeApi(lambda request: Response(200)),
+    ]
     stores: list[StateStore] = [SqliteState(tmp_path / "s.db"), MemoryState()]
     trackers: list[Tracker] = [Incremental("updated_at"), Changes("id")]
     warehouses: list[Warehouse] = [
@@ -125,7 +135,11 @@ def test_built_in_pieces_fit_their_interfaces(tmp_path):
     assert all(isinstance(w, StateStore) for w in warehouses)
     assert isinstance(reports, ReportsDeletions)
     assert isinstance(resolves, ResolvesUrls)
+    assert all(isinstance(t, Transport) for t in transports)
+    assert all(isinstance(a, Auth) for a in auths)
     del paging, policy, logins, check, decode, fingerprint, tables  # for pyright
+    for transport in transports:
+        transport.close()
 
 
 def test_the_scraping_fields_fit_their_interface():

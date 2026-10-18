@@ -40,8 +40,8 @@ name = "api-explorer"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "httpx2" },
     { name = "narwhals" },
+    { name = "urllib3" },
 ]
 
 [package.optional-dependencies]
@@ -54,6 +54,9 @@ explorer = [
 fast = [
     { name = "msgspec" },
 ]
+httpx2 = [
+    { name = "httpx2" },
+]
 scrape = [
     { name = "parsel" },
 ]
@@ -61,6 +64,7 @@ scrape = [
 [package.dev-dependencies]
 dev = [
     { name = "duckdb" },
+    { name = "httpx2" },
     { name = "hypothesis" },
     { name = "msgspec" },
     { name = "orjson" },
@@ -75,17 +79,19 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "duckdb", marker = "extra == 'duckdb'", specifier = ">=1.5" },
-    { name = "httpx2", specifier = ">=2.13.1" },
+    { name = "httpx2", marker = "extra == 'httpx2'", specifier = ">=2.13.1" },
     { name = "marimo", marker = "extra == 'explorer'", specifier = ">=0.25.1" },
     { name = "msgspec", marker = "extra == 'fast'", specifier = ">=0.22" },
     { name = "narwhals", specifier = ">=2.27.1" },
     { name = "parsel", marker = "extra == 'scrape'", specifier = ">=1.10.0" },
+    { name = "urllib3", specifier = ">=2.5" },
 ]
-provides-extras = ["fast", "scrape", "explorer", "duckdb"]
+provides-extras = ["fast", "scrape", "explorer", "httpx2", "duckdb"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "duckdb", specifier = ">=1.5" },
+    { name = "httpx2", specifier = ">=2.13.1" },
     { name = "hypothesis", specifier = ">=6.150" },
     { name = "msgspec", specifier = ">=0.22" },
     { name = "orjson", specifier = ">=3.11" },
@@ -1621,6 +1627,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d9/68/f1b440335057bfce71b6e50a9d09445aa2ecbd08359a337976627b8409e7/tzdata-2026.5.tar.gz", hash = "sha256:8cc73c0a0bfca7dbfa59235d60b2eff82231dee33f53d206db1acd9173cfc0a7", size = 200404, upload-time = "2026-10-03T09:23:14.143Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/94/21/1e5995a1c920cce14e4bffae20c665ec10e7ed03ab25e006cd741092b718/tzdata-2026.5-py2.py3-none-any.whl", hash = "sha256:b683bd1b6659ddcd810ff02ad09ba821d4bf1065072805063eb35c49617905ac", size = 347996, upload-time = "2026-10-03T09:23:12.535Z" },
+]
+
+[[package]]
+name = "urllib3"
+version = "2.8.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e3/05/b17359e1cefb4f909b5e40b1b90a496d987258916dbbf88e842c729f510e/urllib3-2.8.0.tar.gz", hash = "sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63", size = 458972, upload-time = "2026-09-15T19:29:36.253Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl", hash = "sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3", size = 135717, upload-time = "2026-09-15T19:29:34.577Z" },
 ]
 
 [[package]]

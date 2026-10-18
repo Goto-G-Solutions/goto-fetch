@@ -11,7 +11,6 @@ test_warehouses, beside the stores and warehouses they check.
 
 import re
 
-import httpx2
 import pytest
 
 from api_explorer import (
@@ -24,6 +23,7 @@ from api_explorer import (
     Offset,
     PageRequest,
     Retry,
+    http,
     read_page,
 )
 from api_explorer.testing import (
@@ -52,19 +52,18 @@ def test_a_fake_api_remembers_each_request_in_forms_tests_check():
 
 
 def test_a_fake_api_s_client_retries_without_waiting_unless_told_otherwise():
-    assert FakeApi(lambda request: httpx2.Response(200)).client().retry == Retry(
+    assert FakeApi(lambda request: http.Response(200)).client().retry == Retry(
         backoff=0
     )
     custom = Retry(attempts=1)
     assert (
-        FakeApi(lambda request: httpx2.Response(200)).client(retry=custom).retry
-        is custom
+        FakeApi(lambda request: http.Response(200)).client(retry=custom).retry is custom
     )
 
 
 def test_replies_take_responses_status_codes_and_exceptions_in_order():
     api = replies(
-        httpx2.ConnectError("refused"), 503, httpx2.Response(200, json={"ok": True})
+        http.ConnectError("refused"), 503, http.Response(200, json={"ok": True})
     )
     assert api.client().get_json("/x/") == {"ok": True}
     assert len(api.calls) == 3
@@ -76,7 +75,7 @@ def test_replies_need_at_least_one_response():
 
 
 def test_flaky_fails_first_as_told_then_lets_the_api_answer():
-    api = flaky(next_link_api(3), 503, httpx2.Response(429))
+    api = flaky(next_link_api(3), 503, http.Response(429))
     assert list(api.client().records("/items/")) == [0, 1, 2]
     assert len(api.calls) == 3
 
@@ -219,7 +218,7 @@ class NeverStops:
 
     def begin(self, first, read):
         def next_link(fetched, request):
-            page = int(httpx2.URL(request.url).params.get("page", 1))
+            page = int(http.URL(request.url).params.get("page", 1))
             return f"?page={page + 1}"
 
         return first, next_link

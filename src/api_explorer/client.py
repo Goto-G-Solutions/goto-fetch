@@ -7,11 +7,19 @@ from collections.abc import Callable, Iterator, Mapping
 from typing import Any, NamedTuple, Protocol, Self, runtime_checkable
 from urllib.parse import urlsplit
 
-import httpx2
-
 from .checks import ResponseCheck, as_problem
 from .decode import Decoder, json_decoder
 from .errors import ApiError, Problem
+from .http import (
+    URL,
+    Auth,
+    NetworkError,
+    Request,
+    Response,
+    Transport,
+    TransportError,
+    join_url,
+)
 from .incremental import Tracker
 from .logs import client_context, log_event
 from .models import converter
@@ -26,8 +34,11 @@ from .paging import (
     read_page,
 )
 from .retry import Failure, Retry, RetryPolicy
+from .urllib3_transport import Urllib3Transport
 
 logger = logging.getLogger(__name__)
+http_logger = logging.getLogger("api_explorer.http")
+"""Where each request sent logs its "request" event (enable_logging(http=True))."""
 
 
 @runtime_checkable
@@ -51,10 +62,8 @@ class Client:
     `trailing_slash`, a relative endpoint gets a "/" before any query, as
     Django REST Framework expects.
 
-    `timeout` is seconds for every stage of a request (20 by default), or
-    an httpx2.Timeout for separate limits, such as
-    httpx2.Timeout(60, connect=5): give up quickly when the server is
-    down, but wait for a slow page.
+    `timeout` is seconds to wait at each stage of a request: connecting,
+    and each read (20 by default).
 
     `retry` decides when a failed request is tried again: any RetryPolicy.
     The default, Retry(), gives up to 3 tries for network errors, timeouts,
@@ -63,15 +72,16 @@ class Client:
     installed.
 
     `auth` signs every request, for tokens that change, such as
-    TokenRefresh. Its own URLs (login, refresh) follow the endpoint rules.
-    A fixed token can go in `headers` instead (token_headers).
+    TokenRefresh: any Auth (see api_explorer.http). Its own URLs (login,
+    refresh) follow the endpoint rules. A fixed token can go in `headers`
+    instead (token_headers).
 
-    `http` is an httpx2.Client of your own, for anything httpx2 can do that
-    this class doesn't ask about: proxies, HTTP/2, certificates, event
-    hooks. Its base URL, headers, timeout, auth, transport and redirect
-    setting apply as they are, so passing any of those here as well is
-    refused: each setting has one place. A client you bring stays open
-    when this one closes; it is yours to close.
+    `transport` sends the requests: Urllib3Transport by default, or any
+    Transport, such as Httpx2Transport for HTTP/2 or an httpx2.Client of
+    your own. Every request goes
+    through it, token requests and retries included. A transport you pass
+    stays open when this client closes, so several clients can share one;
+    it is yours to close.
 
     `check` looks at every successful response and says whether it really
     failed, for APIs that answer 200 with an error in the body (see
@@ -91,57 +101,30 @@ class Client:
         base_url: str = "",
         *,
         headers: Mapping[str, str] | None = None,
-        timeout: float | httpx2.Timeout | None = None,
+        timeout: float | None = 20.0,
         retry: RetryPolicy | None = None,
         decode: Decoder | None = None,
         trailing_slash: bool = True,
-        auth: httpx2.Auth | None = None,
-        transport: httpx2.BaseTransport | None = None,
-        http: httpx2.Client | None = None,
+        auth: Auth | None = None,
+        transport: Transport | None = None,
         name: str | None = None,
         check: ResponseCheck | None = None,
     ) -> None:
+        self.base_url = base_url
+        self.headers = dict(headers or {})
+        self.timeout = timeout
         self.retry: RetryPolicy = retry or Retry()
         self.decode = decode or json_decoder()
         self.trailing_slash = trailing_slash
+        self.auth = auth
         self.name = name
         self.check = check
-        if http is None:
-            self._http = httpx2.Client(
-                base_url=base_url,
-                headers=dict(headers or {}),
-                timeout=20.0 if timeout is None else timeout,
-                follow_redirects=True,
-                auth=auth,
-                transport=transport,
-            )
-            self._owns_http = True
-        else:
-            settings = {
-                "base_url": base_url,
-                "headers": headers,
-                "timeout": timeout,
-                "auth": auth,
-                "transport": transport,
-            }
-            # Any value given counts, empty ones too: timeout=0 beside http
-            # would otherwise be dropped without a word.
-            doubled = [
-                name
-                for name, value in settings.items()
-                if value is not None and value != ""
-            ]
-            if doubled:
-                raise ValueError(
-                    f"Set {', '.join(doubled)} on the httpx2.Client you pass as http, "
-                    "not here as well"
-                )
-            self._http = http
-            self._owns_http = False
+        self._owns_transport = transport is None
+        self.transport: Transport = transport or Urllib3Transport()
         # An auth with URLs of its own (TokenRefresh) resolves them the way
         # endpoints are resolved, so one rule covers every URL.
-        if isinstance(self._http.auth, ResolvesUrls):
-            self._http.auth.bind(self.url)
+        if isinstance(auth, ResolvesUrls):
+            auth.bind(self.url)
 
     def __enter__(self) -> Self:
         return self
@@ -150,9 +133,9 @@ class Client:
         self.close()
 
     def close(self) -> None:
-        """Close the connections, unless the httpx2 client was passed in as `http`."""
-        if self._owns_http:
-            self._http.close()
+        """Close the connections, unless the transport was passed in."""
+        if self._owns_transport:
+            self.transport.close()
 
     def url(self, endpoint: str) -> str:
         """Return the absolute URL that a request to `endpoint` goes to."""
@@ -162,7 +145,7 @@ class Client:
             path, mark, query = endpoint.partition("?")
             if not path.endswith("/"):
                 endpoint = f"{path}/{mark}{query}"
-        return str(self._http.base_url.join(endpoint.lstrip("/")))
+        return join_url(self.base_url, endpoint)
 
     def request(
         self,
@@ -171,42 +154,40 @@ class Client:
         *,
         retry: bool | None = None,
         **kwargs: Any,
-    ) -> httpx2.Response:
+    ) -> Response:
         """Send a request and return the response, or raise ApiError.
 
         A failure goes to the retry policy, which says whether to try again
         and how long to wait first; each retry logs a warning. `retry`
         overrides it for this call: False never retries, True retries
-        whatever the method. Other keyword arguments go to httpx2: params=,
-        json=, data=, headers= and so on.
+        whatever the method. Other keyword arguments build the Request:
+        params=, headers=, json=, data= (a form, or bytes) or content=.
         """
         with client_context(self.name):
             return self._send(method, endpoint, retry, kwargs)
 
     def _send(
         self, method: str, endpoint: str, retry: bool | None, kwargs: dict[str, Any]
-    ) -> httpx2.Response:
+    ) -> Response:
         method = method.upper()
         url = _with_params(self.url(endpoint), kwargs.pop("params", None))
+        headers = {**self.headers, **dict(kwargs.pop("headers", None) or {})}
+        request = Request(method, url, headers=headers, **kwargs)
         attempt = 0
         while True:
             attempt += 1
-            response: httpx2.Response | None = None
+            response: Response | None = None
             error: Exception | None = None
             problem: Problem | None = None
             try:
-                response = self._http.request(method, url, **kwargs)
-            # A dropped connection mid-response (RemoteProtocolError) is as
-            # passing as a timeout, so it goes to the retry policy too.
-            except (
-                httpx2.TimeoutException,
-                httpx2.NetworkError,
-                httpx2.RemoteProtocolError,
-            ) as exc:
+                response = self._exchange(request)
+            # No connection, a timeout, or a reply cut short: each may pass,
+            # so it goes to the retry policy.
+            except NetworkError as exc:
                 error = exc
                 failure = ApiError(f"{method} {url} failed: {exc}", url=url)
                 failure.__cause__ = exc
-            except httpx2.HTTPError as exc:
+            except TransportError as exc:
                 raise ApiError(f"{method} {url} failed: {exc}", url=url) from exc
             except ApiError as exc:
                 # Raised by an auth while renewing its token. The retry
@@ -268,6 +249,47 @@ class Client:
             )
             time.sleep(wait)
 
+    def _exchange(self, request: Request) -> Response:
+        """Send `request` through the auth, if any, and the transport.
+
+        An auth's flow may send requests of its own first (to renew a token)
+        and send the request again after a 401; every one goes through the
+        transport, so a rate limit counts them all.
+        """
+        if self.auth is None:
+            return self._one(request)
+        flow = self.auth.auth_flow(request)
+        outgoing = next(flow)
+        while True:
+            response = self._one(outgoing)
+            try:
+                outgoing = flow.send(response)
+            except StopIteration:
+                return response
+
+    def _one(self, request: Request) -> Response:
+        """Send one request through the transport, logging a "request" event."""
+        started = time.monotonic()
+        response = self.transport.send(request, self.timeout)
+        seconds = time.monotonic() - started
+        log_event(
+            http_logger,
+            logging.INFO,
+            "request",
+            "%s %s: HTTP %d in %.2fs",
+            request.method,
+            request.url,
+            response.status_code,
+            seconds,
+            data={
+                "method": request.method,
+                "url": str(request.url),
+                "status": response.status_code,
+                "seconds": seconds,
+            },
+        )
+        return response
+
     def _in_context(self, records: Iterator[Any]) -> Iterator[Any]:
         """Yield from `records`, stamping their log lines with this client's name.
 
@@ -282,7 +304,7 @@ class Client:
                     return
             yield record
 
-    def _problem(self, response: httpx2.Response) -> Problem | None:
+    def _problem(self, response: Response) -> Problem | None:
         if self.check is None:
             return None
         return as_problem(self.check(response))
@@ -291,7 +313,7 @@ class Client:
         """GET `endpoint` and return its parsed JSON body, or raise ApiError."""
         return self.json_body(self.request("GET", endpoint, **kwargs))
 
-    def json_body(self, response: httpx2.Response) -> Any:
+    def json_body(self, response: Response) -> Any:
         """Parse a response's JSON body with this client's decoder, or raise ApiError.
 
         A 204 or 205, which has no body by definition, gives None. Any other
@@ -496,12 +518,12 @@ class _Timed(NamedTuple):
 def _with_params(url: str, params: Mapping[str, Any] | None) -> str:
     """`url` with `params` merged into its query.
 
-    Merged, not replaced: httpx2 alone would drop the query the endpoint
-    already has (the httpx 0.28 behaviour, httpx #3433).
+    Merged, not replaced, so the query the endpoint already has is kept
+    (httpx 0.28 dropped it: httpx #3433).
     """
     if not params:
         return url
-    return str(httpx2.URL(url).copy_merge_params(params))
+    return URL(url).copy_merge_params(params)
 
 
 def _log_page(

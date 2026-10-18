@@ -237,9 +237,9 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 
 **Layers.** Each module imports only from modules in the layers before it. Dependencies point inward, as in section 2.
 
-1. `errors`, `paths`, `decode`, `models`, `calls`: the exception and redaction, reading values by path, parsing JSON, typed records, and calls described once.
+1. `errors`, `paths`, `decode`, `models`, `calls`, `http`: the exception and redaction, reading values by path, parsing JSON, typed records, calls described once, and the HTTP vocabulary (requests, responses, the `Transport` and `Auth` interfaces).
 2. `logs`, `records`, `retry`, `checks`: logging events, reshaping records, the retry policy, and response checks.
-3. `ordering`, `frames`, `auth`: comparing a field's values, dataframes, and authentication.
+3. `ordering`, `frames`, `auth`, `urllib3_transport`, `httpx2_transport`: comparing a field's values, dataframes, authentication, and the two transports.
 4. `paging`: the paging loop, `follow`, and the paging styles (`Keyset` included).
 5. `incremental`: the trackers (`Incremental`, `Changes`).
 6. `client`, `state`, `warehouse`: the HTTP client, state stores and `tracked_run`, and the `Warehouse` interface with `write_run`.
@@ -250,14 +250,15 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 
 **Dependencies.**
 
-- The core needs only `httpx2` and `narwhals`.
-- Anything else is an optional extra: `fast` (msgspec), `scrape` (parsel), `duckdb`, `explorer` (marimo).
+- The core needs only `urllib3` and `narwhals`.
+- Anything else is an optional extra: `fast` (msgspec), `scrape` (parsel), `duckdb`, `httpx2`, `explorer` (marimo).
+- No module but a transport imports an HTTP library: the rest speaks `api_explorer.http`'s types, so the library that sends stays a choice.
 - An optional package, or a standard module some Python builds leave out (`sqlite3`), is imported only where it is used, never at import time, so the core runs without it, and its absence gives an error that names the fix.
 - An upgrade happens by itself only if it gives exactly the same results, such as msgspec for JSON. Anything that can change results is chosen by name, such as orjson, which turns integers beyond 64 bits into floats.
 
 **Interfaces.**
 
-- **Extension points.** Each piece a user might replace sits behind a small interface, and the built-in version is one implementation of it: `Decoder` (JSON parsing), `ResponseCheck` (built in: `error_at`), `model` (typed records), `backend` (the dataframe library), `RetryPolicy` (built in: `Retry`), `Paging` (built in: `NextLink`, `Offset`, `HeaderLink`, `Cursor`, `Keyset`), `Login` (built in: `PasswordLogin`, `ClientCredentials`), `ResolvesUrls`, `httpx2.Auth`, `http` (an httpx2 client of the user's own), `Tracker` (built in: `Incremental`, `Changes`), `ReportsDeletions` (built in: `Changes`), `Fingerprint` (built in: a hash of the record), `StateStore` (built in: `SqliteState`, `DuckDBWarehouse`, `SqliteWarehouse`), `Warehouse` (built in: `DuckDBWarehouse`, `SqliteWarehouse`), `SqlTables` (for a warehouse on another SQL database, with `write_run`), and `FieldExtractor` (built in: `CSSField`, `XPathField`).
+- **Extension points.** Each piece a user might replace sits behind a small interface, and the built-in version is one implementation of it: `Decoder` (JSON parsing), `ResponseCheck` (built in: `error_at`), `model` (typed records), `backend` (the dataframe library), `RetryPolicy` (built in: `Retry`), `Paging` (built in: `NextLink`, `Offset`, `HeaderLink`, `Cursor`, `Keyset`), `Login` (built in: `PasswordLogin`, `ClientCredentials`), `ResolvesUrls`, `Auth` (built in: `TokenRefresh`), `Transport` (built in: `Urllib3Transport`, `Httpx2Transport`), `Tracker` (built in: `Incremental`, `Changes`), `ReportsDeletions` (built in: `Changes`), `Fingerprint` (built in: a hash of the record), `StateStore` (built in: `SqliteState`, `DuckDBWarehouse`, `SqliteWarehouse`), `Warehouse` (built in: `DuckDBWarehouse`, `SqliteWarehouse`), `SqlTables` (for a warehouse on another SQL database, with `write_run`), and `FieldExtractor` (built in: `CSSField`, `XPathField`).
 - **Protocols and function types.** A seam that takes an object is a `Protocol`, even with one method (`RetryPolicy`, `Paging`), so users match its shape without inheriting, and pyright checks the fit. A seam that takes a bare function is a function type (`Decoder`, `ResponseCheck`, `Fingerprint`). Never type a seam as one concrete class: it refuses every implementation but ours.
 - **Checked.** Each interface and its built-ins go in `tests/test_protocols.py`, which pyright checks, with a piece built as a user would where it helps. Each interface with promises the types can't state gets a `check_*` in `api_explorer.testing` that takes a factory where the piece holds state, and is tested on both sides: good pieces pass, each kind of broken one fails.
 - **Built from public parts.** `Client.records` is composed of public pieces (`paginate`, a `Paging` with `follow`, `read_page`, `converter`), and the warehouses of `write_run` and `SqlTables`, so a user's own loop or warehouse reuses them. Keep it that way.

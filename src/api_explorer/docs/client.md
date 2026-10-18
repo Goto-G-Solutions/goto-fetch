@@ -61,11 +61,10 @@ except ApiError as error:
 Some APIs answer 200 and put the error in the body. Without a check, such a page can read as the last, empty page, and a run ends early with no warning. A response check turns it into an `ApiError`; with `temporary=True`, the retry policy tries again first:
 
 ```python
-from api_explorer import error_at
+from api_explorer import error_at, http
 from api_explorer.testing import replies
-import httpx2
 
-api = replies(httpx2.Response(200, json={"error": "quota exceeded"}))
+api = replies(http.Response(200, json={"error": "quota exceeded"}))
 checked = api.client(check=error_at("error|errors"))
 try:
     checked.get_json("/items/")
@@ -75,18 +74,26 @@ except ApiError as error:
 
 `error_at` lets through `null`, `false`, `0` and empty values, which many APIs send on success.
 
-### Your own httpx2 client
+### How requests are sent
 
-For proxies, HTTP/2, certificates or event hooks, pass an `httpx2.Client` as `http=`. Set base URL, headers, timeout and auth on it, not on both: the pair is refused rather than one silently winning.
+A transport sends each request: everything the client sends goes through it, token requests and retries included.
+
+| You want... | Transport |
+|-------------|-----------|
+| the default: fast, mature, installed almost everywhere | `Urllib3Transport()` |
+| proxies, certificates or connection limits | `Urllib3Transport(pool=urllib3.ProxyManager(...))` |
+| HTTP/2, or an `httpx2.Client` and its auth | `Httpx2Transport(http=httpx2.Client(http2=True))` (the `httpx2` extra) |
+| another library | a transport of your own: `send(request, timeout)` and `close()` ([build-your-own](build-your-own.md)) |
 
 ```python skip
 import httpx2
+from api_explorer import Httpx2Transport
 
-http = httpx2.Client(
-    base_url="https://api.example.com", http2=True, proxy="http://proxy:8080"
-)
-client = Client(http=http)
+transport = Httpx2Transport(http=httpx2.Client(http2=True, proxy="http://proxy:8080"))
+client = Client("https://api.example.com", transport=transport)
 ```
+
+A transport you pass stays open when the client closes, so several clients can share one; close it yourself. On sequential JSON pages, `Urllib3Transport` sends about 1.4 times as many small pages a second as `Httpx2Transport`, and 2.5 times as many large ones; against an API's own response time, either is a small part of a run.
 
 ## Traps
 

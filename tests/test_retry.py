@@ -2,18 +2,24 @@
 
 from datetime import UTC, datetime
 
-import httpx2
 import pytest
 
-from api_explorer import ApiError, Failure, Retry, backoff_delay, retry_after_seconds
+from api_explorer import (
+    ApiError,
+    Failure,
+    Retry,
+    backoff_delay,
+    http,
+    retry_after_seconds,
+)
 from api_explorer.testing import replies
 
-OK = httpx2.Response(200, json={"ok": True})
+OK = http.Response(200, json={"ok": True})
 
 
 def test_a_server_error_is_retried_until_the_tries_run_out(mock_client):
     # test_logs checks the "retry" and "give-up" events these tries log.
-    handler = replies(httpx2.Response(503))
+    handler = replies(http.Response(503))
     with pytest.raises(ApiError) as raised:
         mock_client(handler, retry=Retry(attempts=3, backoff=0)).request(
             "GET", "/items/"
@@ -25,11 +31,11 @@ def test_a_server_error_is_retried_until_the_tries_run_out(mock_client):
 @pytest.mark.parametrize(
     "first",
     [
-        httpx2.Response(429),
-        httpx2.Response(408),
-        httpx2.ConnectError("refused"),
+        http.Response(429),
+        http.Response(408),
+        http.ConnectError("refused"),
         # Guard (dlt b7500775): a connection dropped mid-response wasn't retried.
-        httpx2.RemoteProtocolError(
+        http.ConnectionDropped(
             "peer closed connection without sending complete message body"
         ),
     ],
@@ -43,14 +49,14 @@ def test_temporary_failures_are_retried(mock_client, first):
 
 @pytest.mark.parametrize("status", [404, 501, 505])
 def test_failures_that_wont_change_are_not_retried(mock_client, status):
-    handler = replies(httpx2.Response(status))
+    handler = replies(http.Response(status))
     with pytest.raises(ApiError):
         mock_client(handler).request("GET", "/items/")
     assert len(handler.calls) == 1
 
 
 def test_the_statuses_worth_retrying_can_be_chosen(mock_client):
-    handler = replies(httpx2.Response(404), OK)
+    handler = replies(http.Response(404), OK)
     retry = Retry(backoff=0, statuses=frozenset({404}))
     assert (
         mock_client(handler, retry=retry).request("GET", "/items/").status_code == 200
@@ -59,7 +65,7 @@ def test_the_statuses_worth_retrying_can_be_chosen(mock_client):
 
 
 def test_post_is_retried_only_when_asked(mock_client):
-    handler = replies(httpx2.Response(503))
+    handler = replies(http.Response(503))
     with pytest.raises(ApiError):
         mock_client(handler).request("POST", "/items/", json={})
     assert len(handler.calls) == 1
@@ -69,7 +75,7 @@ def test_post_is_retried_only_when_asked(mock_client):
 
 
 def test_the_methods_retried_by_default_can_be_chosen(mock_client):
-    handler = replies(httpx2.Response(503), OK)
+    handler = replies(http.Response(503), OK)
     retry = Retry(backoff=0, methods=frozenset({"POST"}))
     assert (
         mock_client(handler, retry=retry).request("POST", "/items/").status_code == 200
@@ -78,7 +84,7 @@ def test_the_methods_retried_by_default_can_be_chosen(mock_client):
 
 
 def test_a_retry_after_beyond_max_backoff_fails_at_once(mock_client):
-    handler = replies(httpx2.Response(429, headers={"Retry-After": "999"}))
+    handler = replies(http.Response(429, headers={"Retry-After": "999"}))
     with pytest.raises(ApiError, match="asks to wait 999s"):
         mock_client(handler, retry=Retry(max_backoff=1.0)).request("GET", "/items/")
     assert len(handler.calls) == 1
@@ -134,7 +140,7 @@ class Recording:
 
 
 def test_a_policy_sees_each_failure_and_decides(mock_client):
-    handler = replies(httpx2.Response(503), httpx2.ConnectError("refused"), OK)
+    handler = replies(http.Response(503), http.ConnectError("refused"), OK)
     policy = Recording(0.0, 0.0)
     assert (
         mock_client(handler, retry=policy).request("GET", "/items/").status_code == 200
@@ -147,11 +153,11 @@ def test_a_policy_sees_each_failure_and_decides(mock_client):
     )
     assert first.response.status_code == 503 and first.error is None
     assert second.attempt == 2 and second.response is None
-    assert isinstance(second.error, httpx2.ConnectError)
+    assert isinstance(second.error, http.ConnectError)
 
 
 def test_a_policy_that_stops_leaves_the_request_s_own_error(mock_client):
-    handler = replies(httpx2.Response(503))
+    handler = replies(http.Response(503))
     with pytest.raises(ApiError, match="HTTP 503") as raised:
         mock_client(handler, retry=Recording()).request("GET", "/items/")
     assert raised.value.status == 503
@@ -163,7 +169,7 @@ def test_a_policy_can_stop_with_its_own_message(mock_client):
         def wait(self, failure):
             raise ApiError(f"gave up on {failure.url}", url=failure.url)
 
-    handler = replies(httpx2.Response(503))
+    handler = replies(http.Response(503))
     with pytest.raises(ApiError, match="gave up on http://api.test/api/items/"):
         mock_client(handler, retry=Refuse()).request("GET", "/items/")
 
@@ -175,7 +181,7 @@ def test_a_policy_can_retry_on_what_the_body_says(mock_client):
             body = failure.response.json() if failure.response is not None else {}
             return 0.0 if body.get("detail") == "warming up" else None
 
-    warming = httpx2.Response(404, json={"detail": "warming up"})
+    warming = http.Response(404, json={"detail": "warming up"})
     handler = replies(warming, OK)
     assert (
         mock_client(handler, retry=WhileWarmingUp()).request("GET", "/x/").status_code
@@ -190,7 +196,7 @@ def test_a_policy_can_retry_on_what_the_body_says(mock_client):
 def test_the_call_s_retry_argument_reaches_the_policy_unless_it_is_false(
     mock_client, retry, seen
 ):
-    handler = replies(httpx2.Response(503))
+    handler = replies(http.Response(503))
     policy = Recording()
     with pytest.raises(ApiError):
         mock_client(handler, retry=policy).request("POST", "/items/", retry=retry)
@@ -201,7 +207,7 @@ def test_a_retry_after_of_zero_still_backs_off():
     # Guard (dlt #4036): Retry-After: 0 caused an instant retry loop there.
     wait = Retry(backoff=1.0).wait(
         Failure(
-            1, "GET", "http://h/x", httpx2.Response(429, headers={"Retry-After": "0"})
+            1, "GET", "http://h/x", http.Response(429, headers={"Retry-After": "0"})
         )
     )
     assert wait is not None and wait >= 0.8

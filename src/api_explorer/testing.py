@@ -1,6 +1,6 @@
 """Fake APIs for tests, and checks for pieces you build on this package's interfaces.
 
-Each builder returns a FakeApi: a handler for httpx2.MockTransport that also
+Each builder returns a FakeApi: a Transport that answers in memory and also
 remembers every request it gets. fake.client() gives a Client wired to it,
 with retries that don't wait. Nothing touches the network, and no test
 framework is needed.
@@ -21,11 +21,14 @@ MemoryWarehouse never touch the disk.
 import base64
 import json
 import math
+import threading
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Literal
+from urllib.parse import parse_qsl
 
-import httpx2
-
+from . import http
 from .client import Client
 from .errors import ApiError, Problem
 from .incremental import ReportsDeletions, Tracker
@@ -41,8 +44,8 @@ from .warehouse import (
     same_value,
 )
 
-Answer = Callable[[httpx2.Request], httpx2.Response]
-"""Turns one request into a response, as httpx2.MockTransport expects."""
+Answer = Callable[[http.Request], http.Response]
+"""Turns one request into a response: what a FakeApi answers with."""
 
 
 __all__ = [
@@ -55,6 +58,7 @@ __all__ = [
     "check_retry_policy",
     "check_state_store",
     "check_tracker",
+    "check_transport",
     "check_warehouse",
     "cursor_api",
     "fetched",
@@ -65,24 +69,37 @@ __all__ = [
     "next_link_api",
     "offset_api",
     "replies",
+    "serve",
 ]
 
 
 class FakeApi:
     """A fake API: answers requests in memory, and remembers each one.
 
-    Pass it to httpx2.MockTransport, or call client() for a Client wired to
-    it. `calls` holds every request in order; `paths`, `queries` and `bodies`
-    read the same requests in the forms tests usually check.
+    It is a Transport, so it goes straight into Client(transport=...), and
+    client() gives one wired to it. serve(api) puts it behind a real HTTP
+    server, to test a real transport. `calls` holds every request in order;
+    `paths`, `queries` and `bodies` read the same requests in the forms
+    tests usually check.
     """
 
     def __init__(self, answer: Answer) -> None:
         self._answer = answer
-        self.calls: list[httpx2.Request] = []
+        self.calls: list[http.Request] = []
 
-    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+    def __call__(self, request: http.Request) -> http.Response:
         self.calls.append(request)
-        return self._answer(request)
+        response = self._answer(request)
+        # The answer is built without its request; bind it, as a transport would.
+        response.request, response.url = request, request.url
+        return response
+
+    def send(self, request: http.Request, timeout: float | None) -> http.Response:
+        """Answer `request`, as a Transport does; an exception the answer raises passes through."""
+        return self(request)
+
+    def close(self) -> None:
+        """Nothing to release: a fake holds no connections."""
 
     @property
     def paths(self) -> list[str]:
@@ -105,28 +122,28 @@ class FakeApi:
     def client(self, base_url: str = "http://api.test/api", **options: Any) -> Client:
         """A Client whose requests come here. Retries don't wait, unless `retry` says otherwise."""
         options.setdefault("retry", Retry(backoff=0))
-        return Client(base_url, transport=httpx2.MockTransport(self), **options)
+        return Client(base_url, transport=self, **options)
 
 
 def _records(records: Sequence[Any] | int) -> list[Any]:
     return list(range(records)) if isinstance(records, int) else list(records)
 
 
-def _query(request: httpx2.Request, name: str, default: int) -> int:
+def _query(request: http.Request, name: str, default: int) -> int:
     return int(request.url.params.get(name, default))
 
 
-def replies(*responses: httpx2.Response | int | Exception) -> FakeApi:
+def replies(*responses: http.Response | int | Exception) -> FakeApi:
     """Answer requests with `responses`, in order; the last one repeats.
 
-    Each is an httpx2.Response, a status code, or an exception to raise,
-    such as httpx2.ConnectError("refused").
+    Each is an http.Response, a status code, or an exception to raise,
+    such as http.ConnectError("refused").
     """
     if not responses:
         raise ValueError("replies needs at least one response")
     count = 0
 
-    def answer(request: httpx2.Request) -> httpx2.Response:
+    def answer(request: http.Request) -> http.Response:
         nonlocal count
         count += 1
         return _respond(responses[min(count, len(responses)) - 1])
@@ -134,23 +151,21 @@ def replies(*responses: httpx2.Response | int | Exception) -> FakeApi:
     return FakeApi(answer)
 
 
-def _respond(reply: httpx2.Response | int | Exception) -> httpx2.Response:
+def _respond(reply: http.Response | int | Exception) -> http.Response:
     if isinstance(reply, Exception):
         raise reply
     if isinstance(reply, int):
-        return httpx2.Response(reply)
+        return http.Response(reply)
     return reply
 
 
 def json_pages(pages: Mapping[str, Any]) -> FakeApi:
     """Serve a JSON body for each full URL in `pages`, and 404 for anything else."""
 
-    def answer(request: httpx2.Request) -> httpx2.Response:
+    def answer(request: http.Request) -> http.Response:
         url = str(request.url)
         return (
-            httpx2.Response(200, json=pages[url])
-            if url in pages
-            else httpx2.Response(404)
+            http.Response(200, json=pages[url]) if url in pages else http.Response(404)
         )
 
     return FakeApi(answer)
@@ -171,8 +186,8 @@ def next_link_api(
 
 
 def _next_link_page(
-    request: httpx2.Request, items: Sequence[Any], page_size: int, results_key: str
-) -> httpx2.Response:
+    request: http.Request, items: Sequence[Any], page_size: int, results_key: str
+) -> http.Response:
     """Answer `request` with its ?page= of `items`, in next_link_api's form."""
     page = _query(request, "page", 1)
     start = (page - 1) * page_size
@@ -183,7 +198,7 @@ def _next_link_page(
         "next": following,
         results_key: items[start : start + page_size],
     }
-    return httpx2.Response(200, json=body)
+    return http.Response(200, json=body)
 
 
 def changes_api(
@@ -203,7 +218,7 @@ def changes_api(
     test can add or change records between runs, as a real API's data does.
     """
 
-    def answer(request: httpx2.Request) -> httpx2.Response:
+    def answer(request: http.Request) -> http.Response:
         since = request.url.params.get(param)
         if since is None or compare is None:
             chosen = list(records)
@@ -236,7 +251,7 @@ def keyset_api(
     every request, so a test can change the data during a run.
     """
 
-    def answer(request: httpx2.Request) -> httpx2.Response:
+    def answer(request: http.Request) -> http.Response:
         since = request.url.params.get(param)
         size = _query(request, limit_param, 100)
         if cap is not None:
@@ -244,7 +259,7 @@ def keyset_api(
         chosen = sorted(records, key=lambda r: r[field])
         if since is not None and not ignore_filter:
             chosen = [r for r in chosen if r[field] >= since]
-        return httpx2.Response(200, json={"results": chosen[:size]})
+        return http.Response(200, json={"results": chosen[:size]})
 
     return FakeApi(answer)
 
@@ -268,14 +283,14 @@ def offset_api(
     """
     items = _records(records)
 
-    def answer(request: httpx2.Request) -> httpx2.Response:
+    def answer(request: http.Request) -> http.Response:
         limit = _query(request, limit_param, len(items) or 1)
         offset = 0 if ignore_offset else _query(request, offset_param, 0)
         size = min(limit, cap) if cap else limit
         body: dict[str, Any] = {results_key: items[offset : offset + size]}
         if count is not False:
             body["count"] = len(items) if count is True else count
-        return httpx2.Response(200, json=body)
+        return http.Response(200, json=body)
 
     return FakeApi(answer)
 
@@ -297,7 +312,7 @@ def cursor_api(
     """
     items = _records(records)
 
-    def answer(request: httpx2.Request) -> httpx2.Response:
+    def answer(request: http.Request) -> http.Response:
         if send_in == "body":
             body = json.loads(request.content) if request.content else {}
             start = int(body.get(param) or 0)
@@ -308,7 +323,7 @@ def cursor_api(
             results_key: items[start : start + page_size],
             cursor_key: str(start + page_size) if more else None,
         }
-        return httpx2.Response(200, json=page)
+        return http.Response(200, json=page)
 
     return FakeApi(answer)
 
@@ -320,7 +335,7 @@ def link_header_api(records: Sequence[Any] | int, *, page_size: int = 100) -> Fa
     """
     items = _records(records)
 
-    def answer(request: httpx2.Request) -> httpx2.Response:
+    def answer(request: http.Request) -> http.Response:
         page = _query(request, "page", 1)
         start = (page - 1) * page_size
         headers = {}
@@ -328,26 +343,24 @@ def link_header_api(records: Sequence[Any] | int, *, page_size: int = 100) -> Fa
             headers["Link"] = (
                 f'<{request.url.copy_set_param("page", page + 1)}>; rel="next"'
             )
-        return httpx2.Response(
+        return http.Response(
             200, json=items[start : start + page_size], headers=headers
         )
 
     return FakeApi(answer)
 
 
-def flaky(
-    api: FakeApi | Answer, *failures: httpx2.Response | int | Exception
-) -> FakeApi:
+def flaky(api: FakeApi | Answer, *failures: http.Response | int | Exception) -> FakeApi:
     """Fail the first requests as told, then let `api` answer the rest.
 
-    Each failure is a status code (such as 503), an httpx2.Response (such as
+    Each failure is a status code (such as 503), an http.Response (such as
     a 429 with a Retry-After header), or an exception to raise (such as
-    httpx2.ReadTimeout("slow")). The result is a FakeApi too, so it composes:
+    http.TimeoutError("slow")). The result is a FakeApi too, so it composes:
     flaky(flaky(api, 503), 429).
     """
     remaining = list(failures)
 
-    def answer(request: httpx2.Request) -> httpx2.Response:
+    def answer(request: http.Request) -> http.Response:
         if remaining:
             return _respond(remaining.pop(0))
         return api(request)
@@ -402,8 +415,8 @@ class TokenServer(FakeApi):
         def lasting(reply: dict[str, Any]) -> dict[str, Any]:
             return reply if expires_in is None else {**reply, "expires_in": expires_in}
 
-        def client_credentials(request: httpx2.Request) -> httpx2.Response:
-            form = dict(httpx2.QueryParams(request.content.decode()))
+        def client_credentials(request: http.Request) -> http.Response:
+            form = dict(parse_qsl(request.content.decode()))
             pair = f"{client_id}:{client_secret}".encode()
             basic = "Basic " + base64.b64encode(pair).decode()
             in_header = request.headers.get("Authorization") == basic
@@ -414,13 +427,13 @@ class TokenServer(FakeApi):
             if form.get("grant_type") != "client_credentials" or not (
                 in_header or in_body
             ):
-                return httpx2.Response(401, json={"error": "invalid_client"})
+                return http.Response(401, json={"error": "invalid_client"})
             access = issue("a")
             self.access_tokens.add(access)
             reply = {"access_token": access, "token_type": "Bearer"}
-            return httpx2.Response(200, json=lasting(reply))
+            return http.Response(200, json=lasting(reply))
 
-        def answer(request: httpx2.Request) -> httpx2.Response:
+        def answer(request: http.Request) -> http.Response:
             content_type = request.headers.get("Content-Type", "")
             if request.url.path == login_path and content_type.startswith(
                 "application/x-www-form-urlencoded"
@@ -433,17 +446,17 @@ class TokenServer(FakeApi):
                     "username": username,
                     "password": password,
                 }:
-                    return httpx2.Response(401, json={"detail": "No active account"})
+                    return http.Response(401, json={"detail": "No active account"})
                 access, refresh = issue("a"), issue("r")
                 self.access_tokens.add(access)
                 self.refresh_tokens.add(refresh)
-                return httpx2.Response(
+                return http.Response(
                     200, json=lasting({access_field: access, "refresh": refresh})
                 )
             if path == refresh_path:
                 old = (body or {}).get("refresh")
                 if old not in self.refresh_tokens:
-                    return httpx2.Response(401, json={"detail": "Token is invalid"})
+                    return http.Response(401, json={"detail": "Token is invalid"})
                 access = issue("a")
                 self.access_tokens.add(access)
                 reply = {access_field: access}
@@ -451,12 +464,12 @@ class TokenServer(FakeApi):
                     self.refresh_tokens.discard(old)
                     reply["refresh"] = issue("r")
                     self.refresh_tokens.add(reply["refresh"])
-                return httpx2.Response(200, json=lasting(reply))
+                return http.Response(200, json=lasting(reply))
             token = request.headers.get("Authorization", "").removeprefix("Bearer ")
             if deny_all or token not in self.access_tokens:
-                return httpx2.Response(401, json={"detail": "Not authenticated"})
+                return http.Response(401, json={"detail": "Not authenticated"})
             results = [body] if body is not None else list(records)
-            return httpx2.Response(200, json={"results": results, "next": None})
+            return http.Response(200, json={"results": results, "next": None})
 
         super().__init__(answer)
 
@@ -480,8 +493,8 @@ def fetched(
     `body` is the parsed JSON; `headers` (such as a Link header) and
     `status` go on the response, which came from GET `url`.
     """
-    request = httpx2.Request("GET", url)
-    response = httpx2.Response(status, json=body, headers=headers, request=request)
+    request = http.Request("GET", url)
+    response = http.Response(status, json=body, headers=headers, request=request)
     return Fetched(body, response)
 
 
@@ -500,15 +513,15 @@ def check_retry_policy(policy: RetryPolicy, *, max_attempts: int = 100) -> None:
     url = "http://api.test/api/items/"
     busy = Problem("busy", temporary=True)
     kinds: dict[
-        str, tuple[str, httpx2.Response | None, Exception | None, Problem | None]
+        str, tuple[str, http.Response | None, Exception | None, Problem | None]
     ] = {
-        "a 503": ("GET", httpx2.Response(503), None, None),
-        "a 429": ("GET", httpx2.Response(429), None, None),
-        "a network error": ("GET", None, httpx2.ConnectError("refused"), None),
-        "a POST answered with 503": ("POST", httpx2.Response(503), None, None),
+        "a 503": ("GET", http.Response(503), None, None),
+        "a 429": ("GET", http.Response(429), None, None),
+        "a network error": ("GET", None, http.ConnectError("refused"), None),
+        "a POST answered with 503": ("POST", http.Response(503), None, None),
         "a 200 reporting a temporary problem": (
             "GET",
-            httpx2.Response(200),
+            http.Response(200),
             None,
             busy,
         ),
@@ -956,3 +969,156 @@ def check_warehouse(make: Callable[[], Warehouse]) -> None:
         raise fail(
             "table and field names must be stored as given", shop.read('my "table"; --')
         )
+
+
+@contextmanager
+def serve(api: FakeApi | Answer) -> Iterator[str]:
+    """Run `api` behind a real HTTP server on this machine; give its base URL.
+
+    For testing a real Transport against a fake API: requests reach the
+    fake over HTTP on 127.0.0.1, and its answers go back over the wire. The
+    server stops when the block ends.
+
+        with serve(next_link_api(5)) as url:
+            client = Client(f"{url}/api", transport=Urllib3Transport())
+    """
+    answer = api if isinstance(api, FakeApi) else FakeApi(api)
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def _answer(self) -> None:
+            length = int(self.headers.get("Content-Length") or 0)
+            request = http.Request(
+                self.command,
+                f"http://{self.headers.get('Host')}{self.path}",
+                headers=list(self.headers.items()),
+                content=self.rfile.read(length) if length else None,
+            )
+            response = answer(request)
+            self.send_response(response.status_code)
+            for name, value in response.headers.raw():
+                if name.lower() not in ("content-length", "transfer-encoding"):
+                    self.send_header(name, value)
+            self.send_header("Content-Length", str(len(response.content)))
+            self.end_headers()
+            self.wfile.write(response.content)
+
+        do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = _answer
+
+        def log_message(self, format: str, *args: Any) -> None:
+            """Quiet: tests read the fake's record of calls instead."""
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def check_transport(make: Callable[[], http.Transport]) -> None:
+    """Check a transport keeps the promises every Transport must keep.
+
+    `make()` gives a new transport. The check runs a fake API behind a real
+    server on 127.0.0.1 (see serve), so it needs no network beyond this
+    machine. Raises AssertionError naming the first promise broken:
+
+    - what is sent arrives: method, path and query, headers, body;
+    - what comes back is the server's: status, headers (by any case), body;
+    - an error status is returned, never raised;
+    - redirects are followed, and the response names the final URL;
+    - a gzip body (Content-Encoding: gzip) comes back unpacked;
+    - a refused connection and a timeout raise NetworkError.
+    """
+    import gzip
+    import socket
+    import time as clock
+
+    def answer(request: http.Request) -> http.Response:
+        if request.url.path == "/old":
+            return http.Response(302, headers={"Location": "/new"})
+        if request.url.path == "/zipped":
+            return http.Response(
+                200,
+                content=gzip.compress(b'{"zipped": true}'),
+                headers={
+                    "Content-Encoding": "gzip",
+                    "Content-Type": "application/json",
+                },
+            )
+        if request.url.path == "/slow":
+            clock.sleep(1.0)
+        if request.url.path == "/missing":
+            return http.Response(404, text="no such page")
+        return http.Response(200, json={"echo": True}, headers={"X-Answer": "42"})
+
+    api = FakeApi(answer)
+    transport = make()
+    try:
+        with serve(api) as base:
+            sent = http.Request(
+                "POST", f"{base}/items/?a=1", headers={"X-Team": "data"}, json={"q": 1}
+            )
+            response = transport.send(sent, 10)
+            got = api.calls[-1]
+            if (got.method, got.url.path, got.url.params) != (
+                "POST",
+                "/items/",
+                {"a": "1"},
+            ):
+                raise AssertionError(f"the request arrived as {got.method} {got.url}")
+            if got.headers.get("x-team") != "data" or json.loads(got.content) != {
+                "q": 1
+            }:
+                raise AssertionError(
+                    "the request's headers or body didn't arrive as sent"
+                )
+            if response.status_code != 200 or response.json() != {"echo": True}:
+                raise AssertionError(
+                    f"the response came back as {response!r}: {response.content!r}"
+                )
+            if response.headers.get("x-answer") != "42":
+                raise AssertionError(
+                    "the response's headers didn't come back, by any case"
+                )
+
+            try:
+                missing = transport.send(http.Request("GET", f"{base}/missing"), 10)
+            except http.TransportError as exc:
+                raise AssertionError(f"a 404 came back as an error: {exc}") from exc
+            if missing.status_code != 404:
+                raise AssertionError(f"a 404 came back as {missing.status_code}")
+
+            moved = transport.send(http.Request("GET", f"{base}/old"), 10)
+            if moved.status_code != 200 or not moved.url.endswith("/new"):
+                raise AssertionError(
+                    f"a redirect wasn't followed: {moved.status_code} at {moved.url}"
+                )
+
+            zipped = transport.send(http.Request("GET", f"{base}/zipped"), 10)
+            if zipped.content != b'{"zipped": true}':
+                raise AssertionError(
+                    f"a gzip body came back packed: {zipped.content[:20]!r}"
+                )
+
+            try:
+                transport.send(http.Request("GET", f"{base}/slow"), 0.2)
+            except http.NetworkError:
+                pass
+            else:
+                raise AssertionError("a timeout didn't raise NetworkError")
+
+        with socket.socket() as spare:
+            spare.bind(("127.0.0.1", 0))
+            closed_port = spare.getsockname()[1]
+        try:
+            transport.send(http.Request("GET", f"http://127.0.0.1:{closed_port}/"), 2)
+        except http.NetworkError:
+            pass
+        else:
+            raise AssertionError("a refused connection didn't raise NetworkError")
+    finally:
+        transport.close()

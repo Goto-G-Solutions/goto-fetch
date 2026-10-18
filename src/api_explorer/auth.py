@@ -6,14 +6,13 @@ import json
 import logging
 import threading
 import time
-from collections.abc import AsyncGenerator, Callable, Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 from urllib.parse import urljoin
 
-import httpx2
-
 from .errors import ApiError
+from .http import Request, Response
 from .logs import log_event
 from .paths import get_path
 
@@ -97,7 +96,7 @@ class Login(Protocol):
     @property
     def token_url(self) -> str: ...
 
-    def build_request(self, url: str) -> httpx2.Request: ...
+    def build_request(self, url: str) -> Request: ...
 
 
 @dataclass(frozen=True)
@@ -116,7 +115,7 @@ class ClientCredentials:
     scope: str | None = None
     credentials_in: Literal["header", "body"] = "header"
 
-    def build_request(self, url: str) -> httpx2.Request:
+    def build_request(self, url: str) -> Request:
         """The token request, sent to `url`, which is token_url resolved."""
         form = {"grant_type": "client_credentials"}
         if self.scope:
@@ -127,7 +126,7 @@ class ClientCredentials:
         else:
             pair = f"{self.client_id}:{self.client_secret}".encode()
             headers["Authorization"] = "Basic " + base64.b64encode(pair).decode()
-        return httpx2.Request("POST", url, data=form, headers=headers)
+        return Request("POST", url, data=form, headers=headers)
 
 
 @dataclass(frozen=True)
@@ -147,16 +146,16 @@ class PasswordLogin:
     username_field: str = "username"
     password_field: str = "password"
 
-    def build_request(self, url: str) -> httpx2.Request:
+    def build_request(self, url: str) -> Request:
         """The login request, sent to `url`, which is token_url resolved."""
         body = {
             self.username_field: self.username,
             self.password_field: self.password,
         }
-        return httpx2.Request("POST", url, json=body)
+        return Request("POST", url, json=body)
 
 
-class TokenRefresh(httpx2.Auth):
+class TokenRefresh:
     """Send a short-lived access token, renewing it as needed.
 
     Each request carries `{header}: {scheme} {access}`. The access token is
@@ -176,19 +175,15 @@ class TokenRefresh(httpx2.Auth):
     Safe across threads: requests sharing this object renew one at a time,
     and a request that finds the token already renewed by another uses it
     instead of renewing again, which matters when refresh tokens rotate.
-    For sync clients only: an async client gets a TypeError, since the
-    lock would block its event loop.
 
     Through Client, `refresh_url` and the login's `token_url` follow the
     same rules as endpoints, because Client calls bind() with its own url().
-    Used with plain httpx2, they resolve against each request's URL, so give
+    Used outside a Client, they resolve against each request's URL, so give
     absolute URLs there. Reply fields are paths (see get_path); the defaults
     read simplejwt's names and OAuth's ("access|access_token" and so on).
     Tokens live only in this object, never on disk, and are kept out of
     repr.
     """
-
-    requires_response_body = True
 
     def __init__(
         self,
@@ -235,9 +230,7 @@ class TokenRefresh(httpx2.Auth):
     def __repr__(self) -> str:
         return f"TokenRefresh(refresh_url={self.refresh_url!r}, login={self.login!r})"
 
-    def auth_flow(
-        self, request: httpx2.Request
-    ) -> Generator[httpx2.Request, httpx2.Response, None]:
+    def auth_flow(self, request: Request) -> Generator[Request, Response, None]:
         """Sign `request`, renewing the access token before or after as needed."""
         # One read of the token: its access, expiry and lifetime change
         # together, in one assignment, so another thread can't be seen
@@ -255,16 +248,6 @@ class TokenRefresh(httpx2.Auth):
             )
             request.headers.update(self._headers(self._token))
             yield request
-
-    async def async_auth_flow(
-        self, request: httpx2.Request
-    ) -> AsyncGenerator[httpx2.Request, httpx2.Response]:
-        """Refuse async clients: the renewal lock would block their event loop."""
-        raise TypeError(
-            "TokenRefresh works with sync clients only: its renewal lock would "
-            "block an async client's event loop"
-        )
-        yield request  # pragma: no cover - makes this an async generator
 
     def _headers(self, token: "_Token | None") -> dict[str, str]:
         return token_headers(token.access if token else "", self.scheme, self.header)
@@ -286,7 +269,7 @@ class TokenRefresh(httpx2.Auth):
 
     def _renew_unless_done(
         self, against: str, why: str, seen: "_Token | None"
-    ) -> Generator[httpx2.Request, httpx2.Response, None]:
+    ) -> Generator[Request, Response, None]:
         # One renewal at a time. A request that waited here while another
         # renewed finds a new, fresh token, and uses it: renewing again
         # would spend a refresh token that rotation has already replaced.
@@ -300,9 +283,7 @@ class TokenRefresh(httpx2.Auth):
                 return
             yield from self._renew(against, why)
 
-    def _renew(
-        self, against: str, why: str
-    ) -> Generator[httpx2.Request, httpx2.Response, None]:
+    def _renew(self, against: str, why: str) -> Generator[Request, Response, None]:
         failure = "there is no refresh token"
         status: int | None = None
         failed_at = against
@@ -310,7 +291,7 @@ class TokenRefresh(httpx2.Auth):
             body = {self.refresh_field: self._refresh}
             url = failed_at = self._url(self.refresh_url, against)
             _renewing("refresh", why)
-            response = yield httpx2.Request("POST", url, json=body)
+            response = yield Request("POST", url, json=body)
             if response.is_success:
                 try:
                     self._take(response)
@@ -341,7 +322,7 @@ class TokenRefresh(httpx2.Auth):
             )
         self._take(response)
 
-    def _take(self, response: httpx2.Response) -> None:
+    def _take(self, response: Response) -> None:
         """Keep the tokens a reply holds, or raise ApiError naming what is missing."""
         try:
             body = response.json()

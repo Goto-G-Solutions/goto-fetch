@@ -12,7 +12,8 @@ Every piece you might replace sits behind a small interface, and the built-in on
 | how the next page is found | `Paging`: `begin(first, read)` | `check_paging` |
 | when to retry | `RetryPolicy`: `wait(failure)` | `check_retry_policy` |
 | how tokens are fetched | `Login`: `token_url`, `build_request(url)` | |
-| how requests are signed | `httpx2.Auth` | |
+| how requests are sent | `Transport`: `send(request, timeout)`, `close()` | `check_transport` |
+| how requests are signed | `Auth`: `auth_flow(request)` | |
 | what counts as a failed 200 | `ResponseCheck`: a function | |
 | how JSON is parsed | `Decoder`: a function | |
 | what a run delivers | `Tracker`: `state`, `apply`, `track` | `check_tracker` |
@@ -84,6 +85,40 @@ class FixedWait:
 check_retry_policy(FixedWait())
 ```
 
+## A transport
+
+A transport sends one request and gives back the response: `send(request, timeout)` and `close()`. `Request` and `Response` come from `api_explorer.http`, and so do the errors to raise.
+
+**Promises:** what is sent arrives as sent; the response is the server's (status, headers by any case, body unpacked); an error status is returned, never raised; redirects are followed; a refused connection or a timeout raises `NetworkError` (or a subclass: `ConnectError`, `TimeoutError`, `ConnectionDropped`), and anything else that sent nothing raises `TransportError`.
+
+**You get for free:** retries, auth and token renewal, paging, logging, and every piece above it, whatever library sends.
+
+A transport can also wrap another, to add something to every request:
+
+```python
+from api_explorer import Urllib3Transport
+from api_explorer.testing import check_transport
+
+
+class Counting:
+    """Counts the requests another transport sends."""
+
+    def __init__(self, inner):
+        self.inner, self.sent = inner, 0
+
+    def send(self, request, timeout):
+        self.sent += 1
+        return self.inner.send(request, timeout)
+
+    def close(self):
+        self.inner.close()
+
+
+check_transport(lambda: Counting(Urllib3Transport()))  # over real HTTP, on this machine
+```
+
+For another library, translate its exceptions to those three meanings, follow redirects, and unpack the body; `api_explorer/urllib3_transport.py` is a short model.
+
 ## A login
 
 A login has a `token_url` and `build_request(url)`, which builds the request that gets tokens; `TokenRefresh` sends it and reads the reply.
@@ -91,7 +126,7 @@ A login has a `token_url` and `build_request(url)`, which builds the request tha
 **You get for free:** renewal before expiry and after a 401, safety across threads, URL resolution, and retries at the token endpoint.
 
 ```python
-import httpx2
+from api_explorer import http
 from api_explorer import Client, TokenRefresh
 from api_explorer.testing import TokenServer
 
@@ -103,21 +138,21 @@ class TeamLogin:
 
     def build_request(self, url):
         body = {"username": "me", "password": "pw"}
-        return httpx2.Request("POST", url, json=body, headers={"X-Team": "data"})
+        return http.Request("POST", url, json=body, headers={"X-Team": "data"})
 
 
 server = TokenServer()
 client = Client(
     "http://api.test/api",
     auth=TokenRefresh(login=TeamLogin()),
-    transport=httpx2.MockTransport(server),
+    transport=server,
 )
 assert list(client.records("/items/")) == [{"id": 1}]
 ```
 
 ## A signing auth
 
-Anything `httpx2.Auth` works: override `auth_flow(request)` and yield the request. Pass it as `Client(auth=...)`.
+An `Auth` has `auth_flow(request)`, a generator as in httpx: it yields the request to send, signed, and receives the response; it may yield more requests (a token first, or the request again after a 401). Pass it as `Client(auth=...)`; every request it yields goes through the client's transport.
 
 ```python
 import hashlib
@@ -125,7 +160,7 @@ import hmac
 from api_explorer.testing import replies
 
 
-class Signed(httpx2.Auth):
+class Signed:
     def __init__(self, secret: bytes):
         self.secret = secret
 
@@ -155,7 +190,7 @@ def status_is_ok(response):
     return None if body.get("status") == "ok" else f"status is {body.get('status')!r}"
 
 
-api = replies(httpx2.Response(200, json={"status": "failed"}))
+api = replies(http.Response(200, json={"status": "failed"}))
 try:
     api.client(check=status_is_ok).get_json("/items/")
 except ApiError as error:
@@ -175,7 +210,7 @@ def strip_guard(body: bytes):
     return json.loads(body.removeprefix(b")]}'\n"))
 
 
-api = replies(httpx2.Response(200, content=b')]}\'\n{"ok": true}'))
+api = replies(http.Response(200, content=b')]}\'\n{"ok": true}'))
 assert api.client(decode=strip_guard).get_json("/x/") == {"ok": True}
 ```
 

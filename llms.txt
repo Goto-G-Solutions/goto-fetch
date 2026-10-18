@@ -1,6 +1,6 @@
 # api-explorer
 
-> A Python library to pull data from paginated JSON APIs safely, fetch only what changed since the last run, and store it in DuckDB or SQLite for analysis. Built on httpx2 and narwhals; everything else is optional.
+> A Python library to pull data from paginated JSON APIs safely, fetch only what changed since the last run, and store it in DuckDB or SQLite for analysis. Built on urllib3 and narwhals, with the HTTP library a choice (httpx2 ships too); everything else is optional.
 
 The guides below ship inside the package (`python -m api_explorer.docs <page>` prints one), so they match the installed version. Each covers what a piece is for, what the package already handles, runnable examples, and traps. `build-your-own` covers implementing each interface, with the check that tests it.
 

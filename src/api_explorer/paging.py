@@ -8,9 +8,8 @@ from dataclasses import dataclass
 from typing import Any, Literal, NamedTuple, Protocol, TypeVar
 from urllib.parse import urljoin
 
-import httpx2
-
 from .errors import ApiError
+from .http import URL, Response, set_param
 from .logs import log_event
 from .ordering import greater, same, send_form
 from .paths import MISSING, get_path
@@ -42,7 +41,7 @@ def with_query(url: str, name: str, value: object) -> str:
     A URL returned from a style keeps the request's method and body (see
     Paging).
     """
-    return str(httpx2.URL(url).copy_set_param(name, value))
+    return set_param(url, name, value)
 
 
 def request_key(request: Any) -> Hashable:
@@ -195,7 +194,7 @@ class Fetched(NamedTuple):
     """
 
     body: Any
-    response: httpx2.Response
+    response: Response
 
 
 NextLinkFunction = Callable[[Fetched, PageRequest], "PageRequest | str | None"]
@@ -372,7 +371,7 @@ class Offset:
         self, first: PageRequest, read: Callable[[Fetched], Page]
     ) -> tuple[PageRequest, NextLinkFunction]:
         """Start a run: set limit and offset on the first request's query."""
-        start = int(httpx2.URL(first.url).params.get(self.offset_param, 0))
+        start = int(URL(first.url).params.get(self.offset_param, 0))
         begun = with_param(first, self.limit_param, self.limit)
         begun = with_param(begun, self.offset_param, start)
         received = 0

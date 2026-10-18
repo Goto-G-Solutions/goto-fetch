@@ -25,7 +25,7 @@ uv add api-explorer            # or: pip install api-explorer
 uv add "api-explorer[fast]"    # with an extra
 ```
 
-The core needs only `httpx2` and `narwhals`. Optional extras add more:
+The core needs only `urllib3` and `narwhals`. Optional extras add more:
 
 | Extra | Adds |
 |-------|------|
@@ -33,6 +33,7 @@ The core needs only `httpx2` and `narwhals`. Optional extras add more:
 | `scrape` | HTML scraping with `api_explorer.scrape` (parsel) |
 | `explorer` | the explorer notebook (marimo) |
 | `duckdb` | storing records and run state in a DuckDB file with `DuckDBWarehouse` |
+| `httpx2` | sending with httpx2 (`Httpx2Transport`): HTTP/2, an `httpx2.Client` of your own |
 
 ## Quick start
 
@@ -72,7 +73,7 @@ Each piece works with no extra packages, and uses better ones when you have them
 | Typed records | plain dicts | `records(..., model=Item)` with a pydantic model, msgspec Struct or dataclass |
 | Dataframes | named by you | `to_frame(records)` uses the library you've already imported, else the first one installed |
 | Retries | 3 tries, idempotent methods, temporary errors | `Retry(attempts=5, statuses=..., methods=...)`, or your own policy: any object with `wait(failure)` |
-| HTTP | an httpx2 client made for you | `Client(http=httpx2.Client(...))` for proxies, HTTP/2, certificates or event hooks |
+| HTTP | `Urllib3Transport`, fast and installed almost everywhere | `Httpx2Transport` (the `httpx2` extra) for HTTP/2 or an `httpx2.Client` of your own; any `Transport` of your own |
 | Logging | silent | `enable_logging()`; every line is an event with data (`record.event`, `record.data`) |
 | Paging | next links (body or `Link` header), cursors, limit/offset, keyset, GET or POST | your own `Paging`: it sees each page's body and response; `with_param` sets a query or body parameter |
 | Incremental fetching | everything, every run | `Incremental(field, param)` asks only for changes; `Changes(key)` passes on only changed records and lists deleted ones |
@@ -242,7 +243,7 @@ with logging_to(my_handler, "INFO"):  # for a while, to a handler of yours
 
 Each line the package logs is an event: `record.event` is a short name (`page`, `done`, `retry`, `stop`, `renew`, and so on) and `record.data` holds its numbers, so a progress bar or a log shipper can act on events without reading text. The full list is in the `api_explorer.logs` docstring.
 
-Secrets in URLs, such as `?api_key=...` or `?access_token=...`, show as `***` in errors and in the lines `enable_logging` prints, including httpx2's.
+Secrets in URLs, such as `?api_key=...` or `?access_token=...`, show as `***` in errors and in the lines `enable_logging` prints, including each request's.
 
 `Client(name="crm")` labels every line from that client's requests, `[crm]` in the readable format and `record.client` for handlers. That includes lines your own pieces log during a request: log under your own logger, add it with `enable_logging(loggers=("mypkg",))`, and use `log_event` for the same `event` and `data` fields.
 
@@ -280,18 +281,17 @@ Each returns a `FakeApi`, which remembers every request (`.calls`, `.paths`, `.q
 
 ### Testing your own pieces
 
-Pieces you build on the package's interfaces test the same way: point them at a fake, and check what happened. Five checks cover the promises every retry policy, paging style, tracker, state store and warehouse must keep.
+Pieces you build on the package's interfaces test the same way: point them at a fake, and check what happened. Six checks cover the promises every retry policy, paging style, tracker, state store, warehouse and transport must keep.
 
 ```python
-import httpx2
-
-from api_explorer import Client, PageRequest, read_page
+from api_explorer import Client, PageRequest, http, read_page
 from api_explorer.testing import (
     MemoryState,
     check_paging,
     check_retry_policy,
     check_state_store,
     check_tracker,
+    check_transport,
     fetched,
     replies,
 )
@@ -330,12 +330,14 @@ def test_my_auth_signs_each_request():
     assert "X-Signature" in api.calls[0].headers
 
 
-def test_with_my_own_httpx2_client():
-    api = replies(httpx2.Response(200, json={"results": [1], "next": None}))
-    http = httpx2.Client(
-        base_url="http://api.test/api", transport=httpx2.MockTransport(api)
-    )
-    assert list(Client(http=http).records("/items/")) == [1]
+def test_my_transport():
+    check_transport(MyTransport)  # over real HTTP on this machine, against a fake
+
+
+def test_a_client_set_up_elsewhere_against_a_fake():
+    api = replies(http.Response(200, json={"results": [1], "next": None}))
+    client = Client("http://api.test/api", transport=api)  # a fake is a transport
+    assert list(client.records("/items/")) == [1]
 
 
 def read(page):
