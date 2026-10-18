@@ -57,6 +57,12 @@ fast = [
 httpx2 = [
     { name = "httpx2" },
 ]
+pandas = [
+    { name = "pandas" },
+]
+polars = [
+    { name = "polars" },
+]
 scrape = [
     { name = "parsel" },
 ]
@@ -83,10 +89,12 @@ requires-dist = [
     { name = "marimo", marker = "extra == 'explorer'", specifier = ">=0.25.1" },
     { name = "msgspec", marker = "extra == 'fast'", specifier = ">=0.22" },
     { name = "narwhals", specifier = ">=2.27.1" },
+    { name = "pandas", marker = "extra == 'pandas'", specifier = ">=2.2" },
     { name = "parsel", marker = "extra == 'scrape'", specifier = ">=1.10.0" },
+    { name = "polars", marker = "extra == 'polars'", specifier = ">=1.33" },
     { name = "urllib3", specifier = ">=2.5" },
 ]
-provides-extras = ["fast", "scrape", "explorer", "httpx2", "duckdb"]
+provides-extras = ["fast", "scrape", "explorer", "httpx2", "duckdb", "polars", "pandas"]
 
 [package.metadata.requires-dev]
 dev = [

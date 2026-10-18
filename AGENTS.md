@@ -251,7 +251,7 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 **Dependencies.**
 
 - The core needs only `urllib3` and `narwhals`.
-- Anything else is an optional extra: `fast` (msgspec), `scrape` (parsel), `duckdb`, `httpx2`, `explorer` (marimo).
+- Anything else is an optional extra: `fast` (msgspec), `polars`, `pandas`, `duckdb`, `scrape` (parsel), `httpx2`, `explorer` (marimo). Extras combine; there is no `all`, since `httpx2` is an alternative and `explorer` a tool.
 - No module but a transport imports an HTTP library: the rest speaks `api_explorer.http`'s types, so the library that sends stays a choice.
 - An optional package, or a standard module some Python builds leave out (`sqlite3`), is imported only where it is used, never at import time, so the core runs without it, and its absence gives an error that names the fix.
 - An upgrade happens by itself only if it gives exactly the same results, such as msgspec for JSON. Anything that can change results is chosen by name, such as orjson, which turns integers beyond 64 bits into floats.

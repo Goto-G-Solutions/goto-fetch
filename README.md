@@ -9,6 +9,12 @@ Pull data from paginated JSON APIs safely, fetch only what changed, and store it
 - **Output:** turns nested JSON into tidy rows, then into a polars, pandas or pyarrow frame.
 - **Explorer:** a marimo notebook to explore an unfamiliar API, then copy the fetch, or the whole stored and tracked run, as a script.
 
+## Who it is for
+
+`api-explorer` is a library to embed, not a platform to adopt: a fast start for a pipeline of your own that you can read end to end. The built-in pieces cover what most pipelines share (paging to the end, retries, tokens that renew, incremental runs that never skip a record, storage that is all or nothing), each sits behind a small interface, and you bring your own for the parts you care about: a transport, a paging style, a retry policy, a tracker, a warehouse on your own database. Records are plain dicts, so what comes out works with whatever you use next, and every piece can be tested against the fake APIs that ship with it.
+
+It is a fit for one team talking to a few APIs. For dozens of sources, a catalogue of ready-made connectors, nested data unnested into child tables, or parallel loads into many destinations, an ELT platform such as dlt, Airbyte or Meltano fits better: this package is synchronous, fetches one stream at a time, and stores to DuckDB or SQLite out of the box.
+
 ## Guides
 
 Guides for each piece ship with the package, for people and coding agents: `python -m api_explorer.docs` lists them, and `python -m api_explorer.docs paging` prints one. In the repository they are in [src/api_explorer/docs](src/api_explorer/docs/README.md), indexed in [llms.txt](llms.txt). To give a coding agent this package's skill in your own project:
@@ -21,19 +27,20 @@ python -m api_explorer.docs skill > .claude/skills/api-explorer/SKILL.md
 ## Install
 
 ```bash
-uv add api-explorer            # or: pip install api-explorer
-uv add "api-explorer[fast]"    # with an extra
+uv add api-explorer                      # or: pip install api-explorer
+uv add "api-explorer[fast,polars,duckdb]"  # with extras, any mix of them
 ```
 
-The core needs only `urllib3` and `narwhals`. Optional extras add more:
+The core needs only `urllib3` and `narwhals`. Optional extras add more, and combine:
 
 | Extra | Adds |
 |-------|------|
 | `fast` | faster JSON parsing with msgspec, giving the same results |
-| `scrape` | HTML scraping with `api_explorer.scrape` (parsel) |
-| `explorer` | marimo, to run the explorer notebook from a clone of this repository |
+| `polars`, `pandas` | a dataframe library for `to_frame` (pyarrow works too, by name, without an extra) |
 | `duckdb` | storing records and run state in a DuckDB file with `DuckDBWarehouse` |
+| `scrape` | HTML scraping with `api_explorer.scrape` (parsel) |
 | `httpx2` | sending with httpx2 (`Httpx2Transport`): HTTP/2, an `httpx2.Client` of your own |
+| `explorer` | marimo, to run the explorer notebook from a clone of this repository |
 
 ## Quick start
 

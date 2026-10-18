@@ -40,6 +40,10 @@ explorer = ["marimo>=0.25.1"]
 httpx2 = ["httpx2>=2.13.1"]
 # Storing records and run state in DuckDB (DuckDBWarehouse)
 duckdb = ["duckdb>=1.5"]
+# A dataframe library for to_frame. pyarrow works too, by name, but has no
+# extra: polars and pandas cover what people building frames want.
+polars = ["polars>=1.33"]
+pandas = ["pandas>=2.2"]
 
 [dependency-groups]
 # Everything the tests use: two dataframe libraries, so code meant to work on
