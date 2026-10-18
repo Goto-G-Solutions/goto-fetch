@@ -1,0 +1,19 @@
+# Keeps the pinned action SHAs and uv.lock current, one pull request a week
+# per ecosystem, so pinning doesn't mean rotting. Security updates come
+# as they are found.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]

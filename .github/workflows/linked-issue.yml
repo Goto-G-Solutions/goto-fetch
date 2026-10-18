@@ -12,6 +12,8 @@ permissions:
 
 jobs:
   check:
+    # Dependabot's pull requests come from no issue; CI still runs on them.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
     steps:
       - name: Find the linked issue
