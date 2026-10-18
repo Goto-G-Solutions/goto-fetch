@@ -33,7 +33,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from .errors import ApiError
 from .logs import log_event
-from .ordering import comparable, greater, same, send_form
+from .ordering import comparable, later, send_form
 from .paging import (
     PageRequest,
     check_send_in,
@@ -205,7 +205,10 @@ class Incremental:
         # and records loaded last run included. Every record at that value
         # comes back next run (the filter asks from it), so this, not an
         # ever-growing list, is what the next run needs to recognise.
-        highest, observed = self._last, set()
+        # Each value is read into a comparable key once (parsing a timestamp
+        # is the costly part), and keys are compared after that.
+        last_key = None if self._last is None else comparable(self._last, self.field)
+        highest, highest_key, observed = self._last, last_key, set()
         kept = dropped = 0
         for record in records:
             value = get_path(record, self.field, MISSING)
@@ -222,13 +225,14 @@ class Incremental:
                 kept += 1
                 yield record
                 continue
-            if self._last is not None and greater(self._last, value, self.field):
+            key = comparable(value, self.field)
+            if last_key is not None and later(last_key, key, self.field):
                 dropped += 1
                 continue
-            if highest is None or greater(value, highest, self.field):
-                highest, observed = value, set()
-            at_last = self._last is not None and same(value, self._last, self.field)
-            at_highest = same(value, highest, self.field)
+            if highest_key is None or later(key, highest_key, self.field):
+                highest, highest_key, observed = value, key, set()
+            at_last = last_key is not None and key == last_key
+            at_highest = key == highest_key
             if at_last or at_highest:
                 identity = self._identity(record)
                 if at_highest:

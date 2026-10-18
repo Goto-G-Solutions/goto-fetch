@@ -34,14 +34,25 @@ def comparable(value: Any, field: str) -> Any:
     return value
 
 
-def greater(a: Any, b: Any, field: str) -> bool:
+def later(key: Any, other: Any, field: str) -> bool:
+    """Whether comparable `key` comes after `other`; ApiError if they can't be compared.
+
+    For loops over many records: make each value's comparable() once, and
+    compare the keys, rather than reading the same text again and again.
+    """
     try:
-        return comparable(a, field) > comparable(b, field)
+        return key > other
     except TypeError as exc:
         raise ApiError(
-            f"{field!r} holds values that don't compare: {a!r} and {b!r}"
+            f"{field!r} holds values that don't compare: {key!r} and {other!r}"
         ) from exc
 
 
+def greater(a: Any, b: Any, field: str) -> bool:
+    """Whether value `a` comes after value `b` (see comparable)."""
+    return later(comparable(a, field), comparable(b, field), field)
+
+
 def same(a: Any, b: Any, field: str) -> bool:
+    """Whether values `a` and `b` are equal in order: neither comes after the other."""
     return not greater(a, b, field) and not greater(b, a, field)
