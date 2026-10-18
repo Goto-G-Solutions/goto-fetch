@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from .incremental import ReportsDeletions
 from .state import STATE_TABLE, check_state_name
-from .warehouse import Kind, matching, quote, write_run
+from .warehouse import Kind, check_table, matching, quote, write_run
 
 if TYPE_CHECKING:
     import duckdb
@@ -91,6 +91,7 @@ class DuckDBWarehouse:
 
     def read(self, table: str, limit: int | None = None) -> list[dict[str, Any]]:
         """`table`'s rows as dicts, at most `limit`; JSON columns come back parsed."""
+        check_table(table)
         with closing(self._tables.connect()) as connection:
             columns = self._tables.columns(connection, table)
             if not columns:

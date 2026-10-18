@@ -6,6 +6,7 @@ Each release lists what changed for people using the package. The format follows
 
 ### Fixed
 
+- A warehouse table named `goto_fetch_state` (in any case) overwrote the tracked runs' state the built-in warehouses keep there; `write` and `read` now refuse the name.
 - A credential in a custom header, such as `X-API-Key`, followed a redirect to another host. Both transports now drop every header that may carry one (`Authorization`, `Cookie`, and names matching the same rule that hides query values) before following such a redirect, and `check_transport` holds any transport to it.
 
 ## [0.1.0] - 2026-10-18

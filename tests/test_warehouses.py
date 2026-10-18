@@ -177,6 +177,19 @@ def test_a_field_lands_in_an_existing_column_whatever_its_case(database):
     assert sorted(r["Name"] for r in shop.read("t")) == ["a", "b"]
 
 
+@pytest.mark.parametrize("name", ["goto_fetch_state", "GOTO_FETCH_STATE"])
+def test_the_state_table_s_name_is_refused_for_records(database, name):
+    # Regression: records written to a table of that name replaced the
+    # tracked runs' state kept in it.
+    shop = database()
+    shop.put("orders", {"last": "2026-01-01", "seen": []})
+    with pytest.raises(ValueError, match="tracked runs' state lives in"):
+        shop.write(name, [{"name": "orders", "value": "{}"}], key="name")
+    with pytest.raises(ValueError, match="tracked runs' state lives in"):
+        shop.read(name)
+    assert shop.get("orders") == {"last": "2026-01-01", "seen": []}
+
+
 def test_read_takes_a_limit(database):
     shop = database()
     shop.write("t", [{"id": i} for i in range(5)])
