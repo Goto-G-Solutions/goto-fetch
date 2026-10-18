@@ -37,6 +37,7 @@ Writing these down is how we make sure the problem is understood before anyone w
    uvx ruff format --check
    uv run pyright
    uvx marimo check --strict notebooks/explorer.py   # if you changed the notebook
+   uvx zizmor .github/workflows                      # if you changed a workflow
    ```
 
 ## 3. Open a pull request
