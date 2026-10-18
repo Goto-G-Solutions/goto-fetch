@@ -1,20 +1,17 @@
 """Keeping to a rate, so a small or busy server isn't overloaded.
 
 RateLimit is the budget: at most `per_second` requests a second, with up
-to `burst` at once after a quiet spell. Limited is a Transport that waits
-for the budget before each request it sends, so everything a client sends
-counts: pages, retries and token requests alike. One RateLimit shared by
-several transports gives them one budget between them.
+to `burst` at once after a quiet spell. A Client given one waits for it
+before every request it sends, so everything counts: pages, retries and
+token requests alike. One RateLimit shared by several clients gives them
+one budget between them.
 
-    limit = RateLimit(2)  # two requests a second
-    client = Client(url, transport=Limited(Urllib3Transport(), limit))
+    client = Client(url, rate_limit=RateLimit(2))  # two requests a second
 """
 
 import threading
 import time
 from collections.abc import Callable
-
-from .http import Request, Response, Timeout, Transport
 
 
 class RateLimit:
@@ -59,27 +56,3 @@ class RateLimit:
         if delay:
             self._sleep(delay)
         return delay
-
-
-class Limited:
-    """A Transport that keeps another one to a RateLimit.
-
-    Each send waits for `limit`, then goes through `transport`. close()
-    closes `transport`.
-    """
-
-    def __init__(self, transport: Transport, limit: RateLimit) -> None:
-        self.transport = transport
-        self.limit = limit
-
-    def __repr__(self) -> str:
-        return f"Limited({self.transport!r}, {self.limit!r})"
-
-    def send(self, request: Request, timeout: Timeout) -> Response:
-        """Wait for the rate limit, then send `request`."""
-        self.limit.wait()
-        return self.transport.send(request, timeout)
-
-    def close(self) -> None:
-        """Close the transport it wraps."""
-        self.transport.close()

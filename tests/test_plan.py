@@ -73,8 +73,9 @@ def run_script(monkeypatch, capsys):
     def run(text: str, handler, **env: str) -> dict:
         fake = types.ModuleType("api_explorer")
         fake.__dict__.update(vars(api_explorer))
+        transport = handler if isinstance(handler, FakeApi) else FakeApi(handler)
         fake.Client = functools.partial(
-            Client, transport=FakeApi(handler), retry=Retry(backoff=0.0)
+            Client, transport=transport, retry=Retry(backoff=0.0)
         )
         monkeypatch.setitem(sys.modules, "api_explorer", fake)
         for name, value in env.items():
@@ -507,14 +508,31 @@ def test_an_access_token_is_read_from_the_environment_only_if_set():
     assert "refresh=os.environ['API_REFRESH_TOKEN']" in text
 
 
-def test_a_rate_limit_keeps_the_plan_and_its_script_to_the_rate(run_script):
-    from api_explorer import Limited
-
+def test_a_rate_limit_reaches_the_plan_s_client_and_its_script():
     plan = FetchPlan("http://api.test/api", "/items/", rate_limit=5)
     with plan.client(transport=next_link_api(3)) as client:
-        assert isinstance(client.transport, Limited)
-        assert client.transport.limit.per_second == 5
+        assert client.rate_limit.per_second == 5
         assert list(plan.records(client)) == [0, 1, 2]
     text = plan.script()
-    assert "transport=Limited(Urllib3Transport(), RateLimit(5))" in text
+    assert "rate_limit=RateLimit(5)" in text
     compile(text, "fetch.py", "exec")
+
+
+def test_options_given_to_a_plan_s_client_go_over_its_own():
+    # Regression: any option the plan also set raised "multiple values".
+    plan = FetchPlan("http://api.test/api", "/items/", timeout=20)
+    with plan.client(timeout=5, transport=next_link_api(1)) as client:
+        assert client.timeout == http.Timeout(5, 5)
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({"rate_limit": -1}, "rate_limit can't be negative"),
+        ({"timeout": http.Timeout(1, 2)}, "number of seconds"),
+    ],
+    ids=["negative-rate", "timeout-object"],
+)
+def test_a_plan_refuses_settings_its_script_couldn_t_write(options, message):
+    with pytest.raises((ValueError, TypeError), match=message):
+        FetchPlan("http://h/api", "/a/", **options)

@@ -2,13 +2,14 @@
 
 The layers, each built only on the ones before it:
 
-- errors, paths, decode, models, calls: the exception and redaction,
-  reading values by path, parsing JSON, typed records, and calls
-  described once.
+- errors, paths, decode, models, calls, http: the exception and redaction,
+  reading values by path, parsing JSON, typed records, calls described
+  once, and the HTTP vocabulary (requests, responses, Transport, Auth).
 - logs, records, retry, checks: logging events, reshaping records, the
   retry policy, and response checks.
-- ordering, frames, auth: comparing a field's values, dataframes, and
-  authentication.
+- ordering, frames, auth, urllib3_transport, httpx2_transport, limits:
+  comparing a field's values, dataframes, authentication, the two
+  transports, and the rate limit's budget.
 - paging: the paging loop and styles.
 - incremental: the trackers, Incremental and Changes.
 - client, state, warehouse: the HTTP client, state stores and
@@ -55,7 +56,7 @@ from .incremental import (
     ReportsDeletions,
     Tracker,
 )
-from .limits import Limited, RateLimit
+from .limits import RateLimit
 from .logs import (
     ClientFilter,
     RedactFilter,
@@ -110,7 +111,6 @@ __all__ = [
     "Httpx2Transport",
     "Incremental",
     "Keyset",
-    "Limited",
     "Login",
     "NextLink",
     "Offset",

@@ -12,10 +12,12 @@ framework is needed.
     assert len(api.calls) == 4                   # the 503, then 3 pages
 
 For pieces of your own: fetched() builds a page to test a paging style on
-its own, and check_retry_policy(), check_paging(), check_state_store(), check_tracker()
-and check_warehouse() check the promises every retry policy, paging style,
-state store, tracker and warehouse must keep. MemoryState and
-MemoryWarehouse never touch the disk.
+its own, and check_retry_policy(), check_paging(), check_state_store(), check_tracker(),
+check_warehouse() and check_transport() check the promises every retry
+policy, paging style, state store, tracker, warehouse and transport must
+keep. MemoryState and MemoryWarehouse never touch the disk, and serve()
+puts a fake behind a real HTTP server on this machine, to test a real
+transport.
 """
 
 import base64
@@ -49,6 +51,7 @@ Answer = Callable[[http.Request], http.Response]
 
 
 __all__ = [
+    "Answer",
     "FakeApi",
     "MemoryState",
     "MemoryWarehouse",
@@ -113,11 +116,14 @@ class FakeApi:
 
     @property
     def bodies(self) -> list[Any]:
-        """The JSON body of each request, or None for a request without one."""
-        return [
-            json.loads(request.content) if request.content else None
-            for request in self.calls
-        ]
+        """The body of each request: parsed JSON, the text of any other, or None."""
+        found: list[Any] = []
+        for request in self.calls:
+            try:
+                found.append(json.loads(request.content) if request.content else None)
+            except ValueError:
+                found.append(request.content.decode(errors="replace"))
+        return found
 
     def client(self, base_url: str = "http://api.test/api", **options: Any) -> Client:
         """A Client whose requests come here. Retries don't wait, unless `retry` says otherwise."""
@@ -977,7 +983,9 @@ def serve(api: FakeApi | Answer) -> Iterator[str]:
 
     For testing a real Transport against a fake API: requests reach the
     fake over HTTP on 127.0.0.1, and its answers go back over the wire. The
-    server stops when the block ends.
+    server stops when the block ends. It reads request bodies sent with a
+    Content-Length (not chunked ones), and an answer that raises closes
+    that connection, which a client sees as a dropped reply.
 
         with serve(next_link_api(5)) as url:
             client = Client(f"{url}/api", transport=Urllib3Transport())
@@ -986,6 +994,7 @@ def serve(api: FakeApi | Answer) -> Iterator[str]:
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+        timeout = 5  # a client that leaves a connection open can't keep a thread
 
         def _answer(self) -> None:
             length = int(self.headers.get("Content-Length") or 0)
@@ -1002,15 +1011,23 @@ def serve(api: FakeApi | Answer) -> Iterator[str]:
                     self.send_header(name, value)
             self.send_header("Content-Length", str(len(response.content)))
             self.end_headers()
-            self.wfile.write(response.content)
+            if self.command != "HEAD":  # HEAD gets the headers only
+                self.wfile.write(response.content)
 
         do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = _answer
 
         def log_message(self, format: str, *args: Any) -> None:
             """Quiet: tests read the fake's record of calls instead."""
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    class Server(ThreadingHTTPServer):
+        def handle_error(self, request: Any, client_address: Any) -> None:
+            """Quiet: an answer that raises, or a client that leaves, ends that request."""
+
+    server = Server(("127.0.0.1", 0), Handler)
+    # A short poll, so the server stops at once when the block ends.
+    thread = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True
+    )
     thread.start()
     try:
         yield f"http://127.0.0.1:{server.server_address[1]}"
@@ -1028,20 +1045,28 @@ def check_transport(make: Callable[[], http.Transport]) -> None:
 
     - what is sent arrives: method, path and query, headers, body;
     - what comes back is the server's: status, headers (by any case), body;
-    - an error status is returned, never raised;
-    - redirects are followed, and the response names the final URL;
+    - an error status (404, 503) is returned, never raised;
+    - redirects are followed, and the response names the final URL, whole;
     - a gzip body (Content-Encoding: gzip) comes back unpacked;
-    - the connect and read timeouts apply apart, and a read timeout and a
-      refused connection raise NetworkError.
+    - a short read limit stops a slow read with TimeoutError, and a short
+      connect limit doesn't cut a slow read short;
+    - a refused connection raises ConnectError, and a reply cut short
+      ConnectionDropped.
+
+    Not checked: that close() releases connections, and that the connect
+    limit itself is kept, which needs a host that never answers.
     """
     import gzip
     import socket
     import time as clock
 
+    slow = 0.5  # the slow page's delay: well over the short limits below
+
     def answer(request: http.Request) -> http.Response:
-        if request.url.path == "/old":
+        path = request.url.path
+        if path == "/old":
             return http.Response(302, headers={"Location": "/new"})
-        if request.url.path == "/zipped":
+        if path == "/zipped":
             return http.Response(
                 200,
                 content=gzip.compress(b'{"zipped": true}'),
@@ -1050,11 +1075,24 @@ def check_transport(make: Callable[[], http.Transport]) -> None:
                     "Content-Type": "application/json",
                 },
             )
-        if request.url.path == "/slow":
-            clock.sleep(1.0)
-        if request.url.path == "/missing":
+        if path == "/slow":
+            clock.sleep(slow)
+        if path == "/missing":
             return http.Response(404, text="no such page")
+        if path == "/busy":
+            return http.Response(503, headers={"Retry-After": "1"})
         return http.Response(200, json={"echo": True}, headers={"X-Answer": "42"})
+
+    def expect(kind: type[Exception], promise: str, send: Callable[[], object]) -> None:
+        try:
+            send()
+        except kind:
+            return
+        except http.TransportError as exc:
+            raise AssertionError(
+                f"{promise} raised {type(exc).__name__}, not {kind.__name__}"
+            ) from exc
+        raise AssertionError(f"{promise} raised nothing, not {kind.__name__}")
 
     api = FakeApi(answer)
     ample = http.Timeout.of(10)
@@ -1072,9 +1110,9 @@ def check_transport(make: Callable[[], http.Transport]) -> None:
                 {"a": "1"},
             ):
                 raise AssertionError(f"the request arrived as {got.method} {got.url}")
-            if got.headers.get("x-team") != "data" or json.loads(got.content) != {
-                "q": 1
-            }:
+            if got.headers.get_list("x-team") != ["data"] or json.loads(
+                got.content
+            ) != {"q": 1}:
                 raise AssertionError(
                     "the request's headers or body didn't arrive as sent"
                 )
@@ -1087,17 +1125,25 @@ def check_transport(make: Callable[[], http.Transport]) -> None:
                     "the response's headers didn't come back, by any case"
                 )
 
-            try:
-                missing = transport.send(http.Request("GET", f"{base}/missing"), ample)
-            except http.TransportError as exc:
-                raise AssertionError(f"a 404 came back as an error: {exc}") from exc
-            if missing.status_code != 404:
-                raise AssertionError(f"a 404 came back as {missing.status_code}")
+            for path, status in (("/missing", 404), ("/busy", 503)):
+                try:
+                    returned = transport.send(
+                        http.Request("GET", f"{base}{path}"), ample
+                    )
+                except http.TransportError as exc:
+                    raise AssertionError(
+                        f"a {status} came back as an error: {exc}"
+                    ) from exc
+                if returned.status_code != status:
+                    raise AssertionError(
+                        f"a {status} came back as {returned.status_code}"
+                    )
 
             moved = transport.send(http.Request("GET", f"{base}/old"), ample)
-            if moved.status_code != 200 or not moved.url.endswith("/new"):
+            if moved.status_code != 200 or moved.url != f"{base}/new":
                 raise AssertionError(
-                    f"a redirect wasn't followed: {moved.status_code} at {moved.url}"
+                    f"a redirect wasn't followed to the whole final URL: "
+                    f"{moved.status_code} at {moved.url}"
                 )
 
             zipped = transport.send(http.Request("GET", f"{base}/zipped"), ample)
@@ -1106,19 +1152,18 @@ def check_transport(make: Callable[[], http.Transport]) -> None:
                     f"a gzip body came back packed: {zipped.content[:20]!r}"
                 )
 
+            expect(
+                http.TimeoutError,
+                "a read slower than the read limit",
+                lambda: transport.send(
+                    http.Request("GET", f"{base}/slow"),
+                    http.Timeout(connect=5, read=0.1),
+                ),
+            )
             try:
                 transport.send(
                     http.Request("GET", f"{base}/slow"),
-                    http.Timeout(connect=5, read=0.2),
-                )
-            except http.NetworkError:
-                pass
-            else:
-                raise AssertionError("a read timeout didn't raise NetworkError")
-            try:
-                transport.send(
-                    http.Request("GET", f"{base}/slow"),
-                    http.Timeout(connect=0.2, read=5),
+                    http.Timeout(connect=0.1, read=5),
                 )
             except http.NetworkError as exc:
                 raise AssertionError(
@@ -1129,13 +1174,46 @@ def check_transport(make: Callable[[], http.Transport]) -> None:
         with socket.socket() as spare:
             spare.bind(("127.0.0.1", 0))
             closed_port = spare.getsockname()[1]
-        try:
-            transport.send(
+        expect(
+            http.ConnectError,
+            "a refused connection",
+            lambda: transport.send(
                 http.Request("GET", f"http://127.0.0.1:{closed_port}/"), ample
+            ),
+        )
+        with _cut_short() as cut:
+            expect(
+                http.ConnectionDropped,
+                "a reply cut short",
+                lambda: transport.send(http.Request("GET", cut), ample),
             )
-        except http.NetworkError:
-            pass
-        else:
-            raise AssertionError("a refused connection didn't raise NetworkError")
     finally:
         transport.close()
+
+
+@contextmanager
+def _cut_short() -> Iterator[str]:
+    """A server on 127.0.0.1 that promises a body and closes before sending it."""
+    import socket
+
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    listener.settimeout(10)
+
+    def answer_once() -> None:
+        try:
+            connection, _ = listener.accept()
+        except OSError:
+            return
+        with connection:
+            connection.recv(65536)
+            connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort")
+
+    thread = threading.Thread(target=answer_once, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{listener.getsockname()[1]}/"
+    finally:
+        listener.close()
+        thread.join(timeout=10)

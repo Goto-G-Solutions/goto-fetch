@@ -6,7 +6,7 @@ import json
 import pytest
 
 from api_explorer import ApiError, Client, http
-from api_explorer.testing import replies
+from api_explorer.testing import replies, serve
 
 OK = http.Response(200, json={"ok": True})
 
@@ -139,3 +139,26 @@ def test_a_corrupt_gzip_body_is_an_api_error():
     client = replies(response).client()
     with pytest.raises(ApiError, match="gzip body that won't unpack"):
         client.get_json("/x/")
+
+
+def test_headers_that_differ_only_in_case_send_one_header_the_call_s():
+    # Regression: the client's and the call's headers merged as plain dicts,
+    # so "Authorization" and "authorization" both went out.
+    transport = Recording()
+    client = Client("http://h", headers={"Authorization": "A"}, transport=transport)
+    client.request("GET", "/x/", headers={"authorization": "B"})
+    assert transport.sent[0][0].headers.get_list("AUTHORIZATION") == ["B"]
+
+
+def test_the_urllib3_transport_asks_for_compressed_replies():
+    # Regression: urllib3 asks for identity by default, so large pages
+    # came back uncompressed.
+    seen = []
+
+    def answer(request):
+        seen.append(request.headers.get("Accept-Encoding"))
+        return http.Response(200, json={})
+
+    with serve(answer) as base:
+        Client(base).get_json("/x/")
+    assert "gzip" in seen[0]

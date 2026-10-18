@@ -27,6 +27,11 @@ from urllib.parse import (
 
 _UNSET: Any = object()
 
+# One link of a Link header: <target> then attributes, up to the next link;
+# quoted values may hold "," or ";".
+_LINK = re.compile(r'<([^>]*)>((?:\s*;\s*[^;,=\s]+\s*(?:=\s*(?:"[^"]*"|[^;,]*))?)*)')
+_ATTRIBUTE = re.compile(r';\s*([^;,=\s]+)\s*(?:=\s*(?:"([^"]*)"|([^;,]*)))?')
+
 
 class URL(str):
     """A URL that is also plain text, with its parts at hand: path, query, params."""
@@ -75,7 +80,7 @@ def set_param(url: str, name: str, value: object) -> URL:
     """
     parts = urlsplit(url)
     pairs = [p for p in parts.query.split("&") if p] if parts.query else []
-    encoded = urlencode({name: _text(value)})
+    encoded = _encode(name, value)
     kept, placed = [], False
     for pair in pairs:
         if _name_of(pair) == name:
@@ -89,15 +94,30 @@ def set_param(url: str, name: str, value: object) -> URL:
     return URL(urlunsplit(parts._replace(query="&".join(kept))))
 
 
+def is_absolute(url: str) -> bool:
+    """Whether `url` names its own host ("https://h/x", "//h/x"), not a path under a base.
+
+    "projects:list" is a path, though urlsplit would read "projects" as
+    its scheme.
+    """
+    return url.startswith("//") or bool(_SCHEME.match(url))
+
+
+_SCHEME = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://")
+
+
 def join_url(base: str, endpoint: str) -> URL:
     """`endpoint` under `base`: "items/" under "https://h/api" is "https://h/api/items/".
 
-    An absolute endpoint is used as given. A leading "/" on the endpoint
-    doesn't climb out of the base path.
+    An absolute endpoint is used as given (see is_absolute). A leading "/"
+    on the endpoint doesn't climb out of the base path, and a query or
+    fragment on the base is left behind, since the endpoint brings its own.
     """
-    if urlsplit(endpoint).scheme:
+    if is_absolute(endpoint):
         return URL(endpoint)
-    return URL(urljoin(base.rstrip("/") + "/", endpoint.lstrip("/")))
+    root = urlsplit(base)._replace(query="", fragment="").geturl()
+    # "./" keeps urljoin from reading "projects:list" as a scheme and a path.
+    return URL(urljoin(root.rstrip("/") + "/", "./" + endpoint.lstrip("/")))
 
 
 def _name_of(pair: str) -> str:
@@ -105,9 +125,18 @@ def _name_of(pair: str) -> str:
 
 
 def _text(value: object) -> str:
+    """A parameter value as text: booleans as JSON writes them, None as nothing."""
+    if value is None:
+        return ""
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
+
+
+def _encode(name: str, value: object) -> str:
+    """`name=value` for a query or form; a list or tuple gives one pair per item."""
+    values = value if isinstance(value, (list, tuple)) else [value]
+    return urlencode([(name, _text(item)) for item in values])
 
 
 class Headers(MutableMapping[str, str]):
@@ -149,7 +178,11 @@ class Headers(MutableMapping[str, str]):
         self._items = [(k, v) for k, v in self._items if k.lower() != wanted]
 
     def __iter__(self) -> Iterator[str]:
-        return iter(dict.fromkeys(key for key, _ in self._items))
+        # One name per header, as first written, whatever the case of repeats.
+        first: dict[str, str] = {}
+        for key, _ in self._items:
+            first.setdefault(key.lower(), key)
+        return iter(first.values())
 
     def __len__(self) -> int:
         return len(dict.fromkeys(key.lower() for key, _ in self._items))
@@ -192,7 +225,7 @@ class Request:
             self.content = jsonlib.dumps(json).encode()
             self.headers.setdefault("Content-Type", "application/json")
         elif isinstance(data, Mapping):
-            self.content = urlencode({k: _text(v) for k, v in data.items()}).encode()
+            self.content = "&".join(_encode(k, v) for k, v in data.items()).encode()
             self.headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
         elif data is not None:
             self.content = bytes(data)
@@ -240,7 +273,9 @@ class Response:
     @property
     def text(self) -> str:
         """The body as text, in the charset the Content-Type names (UTF-8 if none)."""
-        found = re.search(r"charset=([\w.-]+)", self.headers.get("Content-Type", ""))
+        found = re.search(
+            r'charset="?([\w.:-]+)', self.headers.get("Content-Type", ""), re.IGNORECASE
+        )
         try:
             return self.content.decode(found[1] if found else "utf-8", errors="replace")
         except LookupError:
@@ -252,16 +287,22 @@ class Response:
 
     @property
     def links(self) -> dict[str, dict[str, str]]:
-        """The Link header's links, by rel: {"next": {"url": ..., "rel": "next"}}."""
+        """The Link header's links, by rel: {"next": {"url": ..., "rel": "next"}}.
+
+        Follows RFC 8288 where it matters for paging: attribute names in any
+        case, quoted values (which may hold ";" or ","), and a rel naming
+        several relations ("next last"), which files the link under each.
+        """
         found: dict[str, dict[str, str]] = {}
         for header in self.headers.get_list("Link"):
-            for part in re.split(r",\s*(?=<)", header):
-                target = re.match(r"\s*<([^>]*)>", part)
-                if not target:
-                    continue
-                attributes = dict(re.findall(r';\s*(\w+)="?([^";]*)"?', part))
-                link = {"url": target[1], **attributes}
-                found[attributes.get("rel", target[1])] = link
+            for target, attributes in _LINK.findall(header):
+                pairs = {
+                    name.lower(): quoted if quoted or not bare else bare
+                    for name, quoted, bare in _ATTRIBUTE.findall(attributes)
+                }
+                rels = pairs.get("rel", "").split() or [target]
+                for rel in rels:
+                    found.setdefault(rel, {"url": target, **pairs, "rel": rel})
         return found
 
     def __repr__(self) -> str:

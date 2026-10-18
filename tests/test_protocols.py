@@ -7,6 +7,7 @@ interface, never inheriting from ours, fits too. The tests then use the
 user-built tracker everywhere a built-in one goes.
 """
 
+import importlib.util
 from collections.abc import Iterable, Iterator
 from typing import Any
 
@@ -21,6 +22,7 @@ from api_explorer import (
     DuckDBWarehouse,
     Fingerprint,
     HeaderLink,
+    Httpx2Transport,
     Incremental,
     Keyset,
     Login,
@@ -112,6 +114,8 @@ def test_built_in_pieces_fit_their_interfaces(tmp_path):
         Urllib3Transport(),
         FakeApi(lambda request: Response(200)),
     ]
+    if importlib.util.find_spec("httpx2") is not None:
+        transports.append(Httpx2Transport())
     stores: list[StateStore] = [SqliteState(tmp_path / "s.db"), MemoryState()]
     trackers: list[Tracker] = [Incremental("updated_at"), Changes("id")]
     warehouses: list[Warehouse] = [

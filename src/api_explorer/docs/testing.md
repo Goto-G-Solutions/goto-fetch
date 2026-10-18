@@ -56,4 +56,15 @@ assert api.paths == ["/api/items/"]
 
 ## Checking pieces of your own
 
-Each interface with promises the types can't state has a check, which raises `AssertionError` naming the first promise broken: `check_paging`, `check_retry_policy`, `check_tracker`, `check_state_store`, `check_warehouse`. See [build-your-own](build-your-own.md).
+Each interface with promises the types can't state has a check, which raises `AssertionError` naming the first promise broken: `check_paging`, `check_retry_policy`, `check_tracker`, `check_state_store`, `check_warehouse`, `check_transport`. See [build-your-own](build-your-own.md).
+
+`serve(api)` puts a fake behind a real HTTP server on this machine, for testing a real transport, or code that only takes a URL:
+
+```python
+from api_explorer import Urllib3Transport
+from api_explorer.testing import next_link_api, serve
+
+with serve(next_link_api(15, page_size=10)) as base:
+    over_http = Client(f"{base}/api", transport=Urllib3Transport())
+    assert len(list(over_http.records("/items/"))) == 15
+```

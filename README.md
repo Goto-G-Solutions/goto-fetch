@@ -73,12 +73,12 @@ Each piece works with no extra packages, and uses better ones when you have them
 | Typed records | plain dicts | `records(..., model=Item)` with a pydantic model, msgspec Struct or dataclass |
 | Dataframes | named by you | `to_frame(records)` uses the library you've already imported, else the first one installed |
 | Retries | 3 tries, idempotent methods, temporary errors | `Retry(attempts=5, statuses=..., methods=...)`, or your own policy: any object with `wait(failure)` |
-| HTTP | `Urllib3Transport`, fast and installed almost everywhere | `Httpx2Transport` (the `httpx2` extra) for HTTP/2 or an `httpx2.Client` of your own; `Limited(transport, RateLimit(2))` to keep to a rate; any `Transport` of your own |
+| HTTP | `Urllib3Transport`, fast and installed almost everywhere | `Httpx2Transport` (the `httpx2` extra) for HTTP/2 or an `httpx2.Client` of your own; `Client(rate_limit=RateLimit(2))` to keep to a rate; any `Transport` of your own |
 | Logging | silent | `enable_logging()`; every line is an event with data (`record.event`, `record.data`) |
 | Paging | next links (body or `Link` header), cursors, limit/offset, keyset, GET or POST | your own `Paging`: it sees each page's body and response; `with_param` sets a query or body parameter |
 | Incremental fetching | everything, every run | `Incremental(field, param)` asks only for changes; `Changes(key)` passes on only changed records and lists deleted ones |
 | Errors in a 200 | trusted as data | `Client(check=error_at("error\|errors"))`, or your own check: a function from response to problem |
-| Auth | fixed tokens; access and refresh tokens, renewed safely across threads | log in with `PasswordLogin`, OAuth2 `ClientCredentials`, or your own `Login`; any `httpx2.Auth` |
+| Auth | fixed tokens; access and refresh tokens, renewed safely across threads | log in with `PasswordLogin`, OAuth2 `ClientCredentials`, or your own `Login`; an `Auth` of your own (`auth_flow`), or an `httpx2.Auth` on `Httpx2Transport`'s client |
 
 A search API that pages with POST, with the query and the cursor in the body:
 
@@ -249,7 +249,7 @@ Secrets in URLs, such as `?api_key=...` or `?access_token=...`, show as `***` in
 
 ## Testing your code
 
-`api_explorer.testing` has fake APIs that page, fail and authenticate like real ones, in memory. Use them to test code that fetches from APIs, with any test framework and without the network. (respx and pytest-httpx are built for httpx, not httpx2, so they don't see these requests.)
+`api_explorer.testing` has fake APIs that page, fail and authenticate like real ones, in memory. Use them to test code that fetches from APIs, with any test framework and without the network. Each fake is a `Transport`, so it goes straight into `Client(transport=...)`; mocking libraries built for httpx or requests don't see these requests.
 
 ```python
 from api_explorer import Offset
@@ -358,7 +358,7 @@ The **Store** section saves the records in a DuckDB or SQLite file instead, and 
 
 ## How it is built
 
-The package is a set of layers, each built only on the ones before it: the primitives (`errors`, `paths`, `decode`, `models`, `calls`), then logging, records, retries and checks, then `ordering`, `frames` and `auth`, then `paging`, then the trackers (`incremental`), then `client`, `state` and the `warehouse` interface, then the built-in warehouses, `scrape` and `testing`, and last `plan`. See [AGENTS.md](AGENTS.md), section 12.
+The package is a set of layers, each built only on the ones before it: the primitives (`errors`, `paths`, `decode`, `models`, `calls`, and `http`, the HTTP vocabulary), then logging, records, retries and checks, then `ordering`, `frames`, `auth`, the two transports and `limits`, then `paging`, then the trackers (`incremental`), then `client`, `state` and the `warehouse` interface, then the built-in warehouses, `scrape` and `testing`, and last `plan`. See [AGENTS.md](AGENTS.md), section 12.
 
 ## Development
 

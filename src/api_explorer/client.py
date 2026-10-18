@@ -5,7 +5,6 @@ import logging
 import time
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any, NamedTuple, Protocol, Self, runtime_checkable
-from urllib.parse import urlsplit
 
 from .checks import ResponseCheck, as_problem
 from .decode import Decoder, json_decoder
@@ -13,15 +12,18 @@ from .errors import ApiError, Problem
 from .http import (
     URL,
     Auth,
+    Headers,
     NetworkError,
     Request,
     Response,
     Timeout,
     Transport,
     TransportError,
+    is_absolute,
     join_url,
 )
 from .incremental import Tracker
+from .limits import RateLimit
 from .logs import client_context, log_event
 from .models import converter
 from .paging import (
@@ -81,7 +83,7 @@ class Client:
 
     `transport` sends the requests: Urllib3Transport by default, or any
     Transport, such as Httpx2Transport for HTTP/2 or an httpx2.Client of
-    your own, or Limited(...) to keep to a rate. Every request goes
+    your own. Every request goes
     through it, token requests and retries included. A transport you pass
     stays open when this client closes, so several clients can share one;
     it is yours to close.
@@ -91,6 +93,10 @@ class Client:
     error_at). A problem it finds goes to the retry policy like any other
     failure: Retry retries a temporary one and stops on a permanent one, so
     a run never carries on past a page that reported an error.
+
+    `rate_limit` keeps every request this client sends (pages, retries and
+    token requests alike) to a RateLimit, for servers that can't take a
+    fast run; pass one RateLimit to several clients for one budget.
 
     `name` labels this client's log lines (record.client), including those
     from pieces you build that log during its requests: useful when one
@@ -112,6 +118,7 @@ class Client:
         transport: Transport | None = None,
         name: str | None = None,
         check: ResponseCheck | None = None,
+        rate_limit: RateLimit | None = None,
     ) -> None:
         self.base_url = base_url
         self.headers = dict(headers or {})
@@ -122,6 +129,7 @@ class Client:
         self.auth = auth
         self.name = name
         self.check = check
+        self.rate_limit = rate_limit
         self._owns_transport = transport is None
         self.transport: Transport = transport or Urllib3Transport()
         # An auth with URLs of its own (TokenRefresh) resolves them the way
@@ -142,12 +150,17 @@ class Client:
 
     def url(self, endpoint: str) -> str:
         """Return the absolute URL that a request to `endpoint` goes to."""
-        if urlsplit(endpoint).scheme:
+        if is_absolute(endpoint):
             return endpoint
         if self.trailing_slash:
-            path, mark, query = endpoint.partition("?")
+            # The slash goes on the path, before any query or fragment.
+            cut = min(
+                (i for i in (endpoint.find("?"), endpoint.find("#")) if i >= 0),
+                default=len(endpoint),
+            )
+            path, rest = endpoint[:cut], endpoint[cut:]
             if not path.endswith("/"):
-                endpoint = f"{path}/{mark}{query}"
+                endpoint = f"{path}/{rest}"
         return join_url(self.base_url, endpoint)
 
     def request(
@@ -174,8 +187,10 @@ class Client:
     ) -> Response:
         method = method.upper()
         url = _with_params(self.url(endpoint), kwargs.pop("params", None))
-        headers = {**self.headers, **dict(kwargs.pop("headers", None) or {})}
-        request = Request(method, url, headers=headers, **kwargs)
+        # Merged by name without regard to case, the call's own winning.
+        headers = Headers(self.headers)
+        headers.update(kwargs.pop("headers", None) or {})
+        request = Request(method, url, headers=headers.raw(), **kwargs)
         attempt = 0
         while True:
             attempt += 1
@@ -262,36 +277,62 @@ class Client:
         if self.auth is None:
             return self._one(request)
         flow = self.auth.auth_flow(request)
-        outgoing = next(flow)
-        while True:
-            response = self._one(outgoing)
+        # Closed whatever happens: a flow paused mid-renewal holds its lock
+        # (TokenRefresh does), and a send that raises would leave it held,
+        # so the retry after it would wait on that lock for ever.
+        try:
             try:
-                outgoing = flow.send(response)
+                outgoing = next(flow)
             except StopIteration:
-                return response
+                raise TypeError(
+                    f"{type(self.auth).__name__}.auth_flow yielded no request to send"
+                ) from None
+            while True:
+                response = self._one(outgoing)
+                try:
+                    outgoing = flow.send(response)
+                except StopIteration:
+                    return response
+        finally:
+            flow.close()
 
     def _one(self, request: Request) -> Response:
-        """Send one request through the transport, logging a "request" event."""
+        """Send one request through the transport, logging a "request" event.
+
+        A send that raises logs one too, with no status and the error, so
+        every request sent shows in the log.
+        """
+        if self.rate_limit is not None:
+            self.rate_limit.wait()
         started = time.monotonic()
-        response = self.transport.send(request, self.timeout)
-        seconds = time.monotonic() - started
-        log_event(
-            http_logger,
-            logging.INFO,
-            "request",
-            "%s %s: HTTP %d in %.2fs",
-            request.method,
-            request.url,
-            response.status_code,
-            seconds,
-            data={
-                "method": request.method,
-                "url": str(request.url),
-                "status": response.status_code,
-                "seconds": seconds,
-            },
-        )
-        return response
+        status: int | None = None
+        error: str | None = None
+        try:
+            response = self.transport.send(request, self.timeout)
+            status = response.status_code
+            return response
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            raise
+        finally:
+            seconds = time.monotonic() - started
+            log_event(
+                http_logger,
+                logging.INFO,
+                "request",
+                "%s %s: %s in %.2fs",
+                request.method,
+                request.url,
+                f"HTTP {status}" if status is not None else error,
+                seconds,
+                data={
+                    "method": request.method,
+                    "url": str(request.url),
+                    "status": status,
+                    "seconds": seconds,
+                    "error": error,
+                },
+            )
 
     def _in_context(self, records: Iterator[Any]) -> Iterator[Any]:
         """Yield from `records`, stamping their log lines with this client's name.
@@ -521,8 +562,7 @@ class _Timed(NamedTuple):
 def _with_params(url: str, params: Mapping[str, Any] | None) -> str:
     """`url` with `params` merged into its query.
 
-    Merged, not replaced, so the query the endpoint already has is kept
-    (httpx 0.28 dropped it: httpx #3433).
+    Merged, not replaced, so the query the endpoint already has is kept.
     """
     if not params:
         return url

@@ -20,12 +20,13 @@ from api_explorer import (
     ClientCredentials,
     PasswordLogin,
     ResolvesUrls,
+    Retry,
     TokenRefresh,
     http,
     jwt_expiry,
     token_headers,
 )
-from api_explorer.testing import FakeApi, TokenServer, replies
+from api_explorer.testing import FakeApi, TokenServer, flaky, replies
 
 LOGIN = PasswordLogin("/token/", "me", "pw")
 
@@ -381,3 +382,31 @@ def test_a_failed_refresh_names_the_refresh_endpoint():
     with pytest.raises(ApiError) as raised:
         client.get_json("/items/")
     assert raised.value.url == "http://api.test/api/token/refresh/"
+
+
+def test_a_token_request_that_fails_then_succeeds_doesn_t_hang_the_retry():
+    # Regression: the auth flow paused mid-renewal held its lock when the
+    # send raised, so the retry waited on that lock for ever.
+    server = flaky(TokenServer(), http.ConnectError("refused"))
+    auth = TokenRefresh("/token/refresh/", login=PasswordLogin("/token/", "me", "pw"))
+    client = Client(
+        "http://api.test/api", auth=auth, transport=server, retry=Retry(backoff=0)
+    )
+    finished = []
+    worker = threading.Thread(
+        target=lambda: finished.append(client.get_json("/items/")), daemon=True
+    )
+    worker.start()
+    worker.join(timeout=5)
+    assert finished == [{"results": [{"id": 1}], "next": None}]
+    assert not auth._lock.locked()
+
+
+def test_an_auth_that_yields_no_request_is_refused_clearly():
+    class Silent:
+        def auth_flow(self, request):
+            return
+            yield
+
+    with pytest.raises(TypeError, match="Silent.auth_flow yielded no request"):
+        replies(200).client(auth=Silent()).request("GET", "/x/")

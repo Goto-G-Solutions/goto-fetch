@@ -363,3 +363,10 @@ def test_check_paging_counts_only_the_requests_it_makes():
     api = next_link_api(10, page_size=5)
     list(api.client().records("/items/"))  # two requests before the check
     check_paging(NextLink(), api, list(range(10)), max_requests=2)
+
+
+def test_a_fake_api_reads_a_form_body_as_text():
+    # Regression: bodies crashed on a form, such as a client credentials login.
+    api = replies(200)
+    api.client().request("POST", "/token/", data={"grant_type": "client_credentials"})
+    assert api.bodies == ["grant_type=client_credentials"]

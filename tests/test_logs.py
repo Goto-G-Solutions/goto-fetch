@@ -14,9 +14,11 @@ from api_explorer import (
     HeaderLink,
     Offset,
     PasswordLogin,
+    Retry,
     TokenRefresh,
     disable_logging,
     enable_logging,
+    http,
     log_event,
     logging_to,
     to_frame,
@@ -317,3 +319,15 @@ def test_a_handler_can_t_be_attached_twice():
     with logging_to(handler), pytest.raises(ValueError, match="already attached"):
         enable_logging(handler=handler)
     assert handler.filters == []
+
+
+def test_a_send_that_fails_still_logs_its_request_event():
+    collect = Collect()
+    client = replies(http.ConnectError("refused")).client(retry=Retry(attempts=1))
+    with logging_to(collect, "INFO", http=True), pytest.raises(ApiError):
+        client.request("GET", "/x/")
+    [request] = [r for r in collect.records if getattr(r, "event", None) == "request"]
+    assert (request.data["status"], request.data["error"]) == (
+        None,
+        "ConnectError: refused",
+    )

@@ -22,7 +22,7 @@ Three kinds of authentication are built in, and an `Auth` of your own works too.
 - resolves its URLs the way the client resolves endpoints;
 - keeps tokens in memory only, out of `repr`.
 
-It works with sync clients only: an async client gets a clear `TypeError`.
+Every request it makes, renewals included, goes through the client's transport, and counts towards a rate limit.
 
 ## Examples
 

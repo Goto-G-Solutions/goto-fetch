@@ -1,17 +1,16 @@
-"""RateLimit and Limited: keeping to a rate, across requests, retries, logins and threads.
+"""RateLimit: keeping a client to a rate, across requests, retries, logins and threads.
 
 A fake clock and sleep make the waits exact and instant; one test uses
 real threads, to show the budget holds under contention.
 """
 
-import itertools
 import threading
 import time
 
 import pytest
 
-from api_explorer import Client, Limited, PasswordLogin, RateLimit, Retry, TokenRefresh
-from api_explorer.testing import TokenServer, check_transport, flaky, next_link_api
+from api_explorer import Client, PasswordLogin, RateLimit, Retry, TokenRefresh
+from api_explorer.testing import TokenServer, flaky, next_link_api
 
 
 class FakeTime:
@@ -58,7 +57,8 @@ def test_every_request_a_client_sends_counts_pages_retries_and_logins():
     client = Client(
         "http://api.test/api",
         auth=auth,
-        transport=Limited(server, limit),
+        transport=server,
+        rate_limit=limit,
         retry=Retry(backoff=0),
     )
     assert list(client.records("/items/")) == [{"id": 1}]
@@ -70,15 +70,18 @@ def test_every_request_a_client_sends_counts_pages_retries_and_logins():
 
 def test_one_rate_limit_shared_by_two_clients_is_one_budget():
     limit, fake = limit_with(2)
-    first = Client("http://api.test/api", transport=Limited(next_link_api(1), limit))
-    second = Client("http://api.test/api", transport=Limited(next_link_api(1), limit))
+    first = next_link_api(1).client(rate_limit=limit)
+    second = next_link_api(1).client(rate_limit=limit)
     list(first.records("/a/"))
     list(second.records("/b/"))
     assert fake.slept == [0.5]
 
 
-def test_threads_sharing_a_limit_never_go_faster_than_the_rate():
-    limit = RateLimit(50)  # real time: 20 ms apart
+def test_threads_sharing_a_limit_never_go_ahead_of_their_slots():
+    # The promise is that the n-th request waits for the n-th slot. Gaps
+    # between neighbours can look shorter, as sleeps overshoot, so each
+    # moment is checked against its slot, not its neighbour.
+    limit = RateLimit(50)  # real time: a slot every 20 ms
     moments = []
     lock = threading.Lock()
 
@@ -88,19 +91,13 @@ def test_threads_sharing_a_limit_never_go_faster_than_the_rate():
             moments.append(time.monotonic())
 
     threads = [threading.Thread(target=take) for _ in range(10)]
+    started = time.monotonic()
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join()
-    moments.sort()
-    gaps = [b - a for a, b in itertools.pairwise(moments)]
-    assert min(gaps) > 0.015  # a little under 20 ms, for timer jitter
-
-
-def test_a_limited_transport_keeps_every_transport_promise():
-    from api_explorer import Urllib3Transport
-
-    check_transport(lambda: Limited(Urllib3Transport(), RateLimit(1000)))
+    for n, moment in enumerate(sorted(moments)):
+        assert moment - started >= n * 0.02 - 0.002
 
 
 @pytest.mark.parametrize(

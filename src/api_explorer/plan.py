@@ -14,11 +14,10 @@ from .client import Client
 from .duckdb_warehouse import DuckDBWarehouse
 from .errors import redact_url
 from .incremental import Changes, Incremental, ReportsDeletions, Tracker
-from .limits import Limited, RateLimit
+from .limits import RateLimit
 from .paging import Cursor, HeaderLink, Keyset, NextLink, Offset, Paging
 from .sqlite_warehouse import SqliteWarehouse
 from .state import StateStore, tracked_run
-from .urllib3_transport import Urllib3Transport
 from .warehouse import Warehouse
 
 
@@ -113,6 +112,13 @@ class FetchPlan:
                 "A tracked plan fetches every page: set max_pages to None (0 in "
                 "the explorer), or a run cut short would skip records"
             )
+        if self.rate_limit < 0:
+            raise ValueError(f"rate_limit can't be negative, got {self.rate_limit}")
+        if isinstance(self.timeout, bool) or not isinstance(self.timeout, (int, float)):
+            # A plan is written into scripts, which take a number here.
+            raise TypeError(
+                f"A plan's timeout is a number of seconds, got {self.timeout!r}"
+            )
         if self.paging == "keyset" and not self.change_param:
             raise ValueError(
                 "Keyset paging needs change_param, the filter it pages by, such "
@@ -149,9 +155,7 @@ class FetchPlan:
             options["auth"] = Call(TokenRefresh, kwargs={"login": login})
         options["timeout"] = self.timeout
         if self.rate_limit:
-            options["transport"] = Call(
-                Limited, (Call(Urllib3Transport), Call(RateLimit, (self.rate_limit,)))
-            )
+            options["rate_limit"] = Call(RateLimit, (self.rate_limit,))
         if not self.trailing_slash:
             options["trailing_slash"] = False
         if self.error_path:
@@ -246,18 +250,13 @@ class FetchPlan:
         return Call(kind, (self.warehouse,))
 
     def client(self, **options: Any) -> Client:
-        """Return a Client set up for this plan; `options` go to Client.
+        """Return a Client set up for this plan; `options` go to Client, over the plan's own.
 
-        A `transport` given here is kept to the plan's rate_limit, if any.
+        For a test, client(transport=fake_api); for a run, the plan's own
+        settings are the ones to change.
         """
         call = self.client_call()
-        if "transport" in options:
-            transport = options.pop("transport")
-            if self.rate_limit:
-                transport = Limited(transport, RateLimit(self.rate_limit))
-            kwargs = {k: v for k, v in call.kwargs.items() if k != "transport"}
-            call = Call(call.target, call.args, {**kwargs, "transport": transport})
-        return call.build(**options)
+        return Call(call.target, call.args, {**call.kwargs, **options}).build()
 
     def paging_strategy(self) -> Paging:
         """The Paging this plan asks for."""

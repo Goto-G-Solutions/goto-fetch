@@ -89,7 +89,7 @@ check_retry_policy(FixedWait())
 
 A transport sends one request and gives back the response: `send(request, timeout)` and `close()`. `Request`, `Response` and `Timeout` (`timeout.connect` and `timeout.read`, in seconds, or None for no limit) come from `api_explorer.http`, and so do the errors to raise.
 
-**Promises:** what is sent arrives as sent; the response is the server's (status, headers by any case, body unpacked); an error status is returned, never raised; redirects are followed; the connect and read timeouts apply apart; a refused connection or a timeout raises `NetworkError` (or a subclass: `ConnectError`, `TimeoutError`, `ConnectionDropped`), and anything else that sent nothing raises `TransportError`.
+**Promises:** what is sent arrives as sent; the response is the server's (status, headers by any case, body unpacked); an error status is returned, never raised; redirects are followed; the connect and read timeouts apply apart (a short connect limit never cuts a slow read short); a refused connection or a timeout raises `NetworkError` (or a subclass: `ConnectError`, `TimeoutError`, `ConnectionDropped`), and anything else that sent nothing raises `TransportError`.
 
 **You get for free:** retries, auth and token renewal, paging, logging, and every piece above it, whatever library sends.
 

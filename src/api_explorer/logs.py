@@ -29,7 +29,7 @@ without reading the text:
 | text        | WARNING | column, reason                                    |
 | widen       | WARNING | table, column, type                               |
 | stored      | INFO    | table, records                                    |
-| request     | INFO    | method, url, status, seconds (logger api_explorer.http, shown with http=True) |
+| request     | INFO    | method, url, status, seconds, error (logger api_explorer.http, shown with http=True) |
 
 `record.client` is the name of the Client whose request was running when
 the record was logged (Client(name=...)), or None. The handlers that

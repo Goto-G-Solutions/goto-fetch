@@ -947,8 +947,6 @@ def _():
     - **Async and parallel fetching**, for many independent requests at
       once. Meanwhile, a thread pool over `client.get_json` works: the
       client and its token renewal are safe across threads.
-    - **A rate limiter** (requests per second), beyond retrying 429s and
-      honouring `Retry-After`.
     - **An overall deadline** for a run, beyond each request's timeout.
     - **Interactive OAuth logins** (authorization code, PKCE); any
       `Auth` of your own works with `Client(auth=...)` meanwhile.

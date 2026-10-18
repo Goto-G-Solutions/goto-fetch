@@ -48,6 +48,8 @@ assert api.queries == [{}, {"page": "2"}, {"page": "3"}]
 - `max_pages`: stop early, to look at the first few pages.
 - `incremental`: fetch only what changed (see [incremental](incremental.md)).
 
+`Client(rate_limit=RateLimit(2))` keeps every request to two a second, retries and token requests included, for a server that can't take a fast run; pass one `RateLimit` to several clients for one budget between them.
+
 A missing results path is an error, not an empty page, so a mistyped key can't pass for "no data":
 
 ```python
@@ -86,7 +88,6 @@ A transport sends each request: everything the client sends goes through it, tok
 | the default: fast, mature, installed almost everywhere | `Urllib3Transport()` |
 | proxies, certificates or connection limits | `Urllib3Transport(pool=urllib3.ProxyManager(...))` |
 | HTTP/2, or an `httpx2.Client` and its auth | `Httpx2Transport(http=httpx2.Client(http2=True))` (the `httpx2` extra) |
-| to keep to a rate, so a small server isn't overloaded | `Limited(transport, RateLimit(2))`: two requests a second, retries and logins included |
 | another library | a transport of your own: `send(request, timeout)` and `close()` ([build-your-own](build-your-own.md)) |
 
 ```python skip

@@ -3,6 +3,7 @@
 Needs the "httpx2" extra.
 """
 
+import ssl
 from typing import TYPE_CHECKING
 
 from .http import (
@@ -25,7 +26,9 @@ class Httpx2Transport:
     Pass a client of your own as `http` for what httpx2 offers: HTTP/2,
     proxies, certificates, event hooks, or an httpx2.Auth (set on that
     client). A client you pass stays open when this transport closes; it
-    is yours to close. Redirects are followed.
+    is yours to close. Redirects are followed, whatever that client's own
+    setting, and the timeout is the Client's (Client(timeout=...)), which
+    replaces any set on the httpx2 client: one place for each setting.
     """
 
     def __init__(self, http: "httpx2.Client | None" = None) -> None:
@@ -48,6 +51,7 @@ class Httpx2Transport:
                 str(request.url),
                 content=request.content or None,
                 headers=request.headers.raw(),
+                follow_redirects=True,
                 # httpx2's write and pool limits follow the read and connect ones.
                 timeout=httpx2.Timeout(
                     connect=timeout.connect,
@@ -58,9 +62,12 @@ class Httpx2Transport:
             )
         except httpx2.TimeoutException as exc:
             raise TimeoutError(str(exc)) from exc
-        except httpx2.RemoteProtocolError as exc:
+        except (httpx2.RemoteProtocolError, httpx2.ReadError, httpx2.WriteError) as exc:
             raise ConnectionDropped(str(exc)) from exc
         except httpx2.NetworkError as exc:
+            # A TLS failure arrives as a connect error, but retrying won't fix it.
+            if isinstance(exc.__context__, ssl.SSLError):
+                raise TransportError(str(exc)) from exc
             raise ConnectError(str(exc)) from exc
         except httpx2.HTTPError as exc:
             raise TransportError(str(exc)) from exc
