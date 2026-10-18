@@ -82,6 +82,28 @@ def test_enable_logging_lowers_a_logger_s_level_but_never_raises_it():
         logger.setLevel(logging.NOTSET)
 
 
+def test_a_logger_under_the_package_s_gets_the_handler_once():
+    # Regression: naming "api_explorer.client" in loggers= put the handler
+    # on it and on "api_explorer", so each of its lines showed twice.
+    collect = Collect()
+    with logging_to(collect, "WARNING", loggers=("api_explorer.client",)):
+        replies(503, 200).client().request("GET", "/x/")
+    assert [event for event, _ in collect.events()] == ["retry"]
+
+
+def test_disable_logging_restores_a_level_whatever_the_repeats():
+    # Regression: a name given twice saved its already-lowered level, so
+    # disable_logging put that back instead of the original.
+    logger = logging.getLogger("api_explorer")
+    logger.setLevel(logging.ERROR)
+    try:
+        handler = enable_logging("INFO", handler=Collect(), loggers=("api_explorer",))
+        disable_logging(handler)
+        assert logger.level == logging.ERROR
+    finally:
+        logger.setLevel(logging.NOTSET)
+
+
 def test_enable_logging_refuses_a_level_it_doesn_t_know():
     with pytest.raises(ValueError, match="Unknown logging level 'LOUD'"):
         enable_logging("LOUD")

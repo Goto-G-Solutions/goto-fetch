@@ -176,10 +176,10 @@ def enable_logging(
 
     `loggers` adds other loggers to the same handler, such as those of
     pieces you build, and `http` adds a "request" event per request sent
-    (and httpx2's own line, when it sends). The
-    handler stamps each record with record.client (see ClientFilter) and
-    hides secrets in URLs (see RedactFilter). It is returned, so
-    disable_logging(handler) can take it off again.
+    (and httpx2's own line, when it sends). The handler stamps each record
+    with record.client (see ClientFilter) and hides secrets in URLs (see
+    RedactFilter). It is returned, so disable_logging(handler) can take it
+    off again.
     """
     number = _level(level)
     handler = handler or logging.StreamHandler(sys.stderr)
@@ -201,11 +201,13 @@ def enable_logging(
         handler.addFilter(one)
     for name in [ROOT, *loggers, *(HTTP if http else [])]:
         logger = logging.getLogger(name)
-        attached.levels[name] = logger.level
+        attached.levels.setdefault(name, logger.level)
         # Lower the logger's level if needed, never raise it: another
         # handler may already want more than this one does.
         logger.setLevel(min(logger.getEffectiveLevel(), number))
-        if name != HTTP[0]:  # the package's own reach the handler through ROOT
+        # A logger under the package's reaches the handler through ROOT;
+        # giving it the handler too would log each line twice.
+        if name == ROOT or not name.startswith(f"{ROOT}."):
             logger.addHandler(handler)
     if not http:
         # The request lines come from a logger under ROOT; hold them back.
