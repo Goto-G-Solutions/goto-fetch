@@ -25,8 +25,6 @@ from urllib.parse import (
     urlunsplit,
 )
 
-_UNSET: Any = object()
-
 # One link of a Link header: <target> then attributes, up to the next link;
 # quoted values may hold "," or ";".
 _LINK = re.compile(r'<([^>]*)>((?:\s*;\s*[^;,=\s]+\s*(?:=\s*(?:"[^"]*"|[^;,]*))?)*)')
@@ -156,7 +154,10 @@ class Headers(MutableMapping[str, str]):
         self, items: Mapping[str, str] | Iterable[tuple[str, str]] | None = None
     ) -> None:
         self._items: list[tuple[str, str]] = []
-        pairs = items.items() if isinstance(items, Mapping) else (items or [])
+        if isinstance(items, Headers):
+            pairs = items.raw()  # as pairs: items() would join repeats
+        else:
+            pairs = items.items() if isinstance(items, Mapping) else (items or [])
         for name, value in pairs:
             self._items.append((str(name), str(value)))
 
@@ -205,7 +206,8 @@ class Request:
 
     `params` merge into the URL's query, `json` becomes a JSON body,
     `data` a form (a mapping) or raw bytes, and `content` raw bytes; give
-    at most one body.
+    at most one body. None means no body, as in httpx: a JSON null body
+    is content=b"null".
     """
 
     def __init__(
@@ -216,17 +218,17 @@ class Request:
         params: Mapping[str, object] | None = None,
         headers: Mapping[str, str] | Iterable[tuple[str, str]] | None = None,
         content: bytes | None = None,
-        json: Any = _UNSET,
+        json: Any = None,
         data: Mapping[str, object] | bytes | None = None,
     ) -> None:
-        bodies = [content is not None, json is not _UNSET, data is not None]
+        bodies = [content is not None, json is not None, data is not None]
         if sum(bodies) > 1:
             raise ValueError("Give one of content, json or data, not several")
         self.method = method.upper()
         self.url = URL(url).copy_merge_params(params) if params else URL(url)
         self.headers = Headers(headers)
         self.content = b"" if content is None else content
-        if json is not _UNSET:
+        if json is not None:
             self.content = jsonlib.dumps(json).encode()
             self.headers.setdefault("Content-Type", "application/json")
         elif isinstance(data, Mapping):
@@ -254,14 +256,14 @@ class Response:
         headers: Mapping[str, str] | Iterable[tuple[str, str]] | None = None,
         content: bytes | None = None,
         text: str | None = None,
-        json: Any = _UNSET,
+        json: Any = None,
         request: Request | None = None,
         url: str | None = None,
     ) -> None:
         self.status_code = status_code
         self.headers = Headers(headers)
         self.content = b"" if content is None else content
-        if json is not _UNSET:
+        if json is not None:
             self.content = jsonlib.dumps(json).encode()
             self.headers.setdefault("Content-Type", "application/json")
         elif text is not None:
@@ -331,8 +333,6 @@ class Timeout:
         """`value` as a Timeout: a number applies to both stages, None to neither."""
         if isinstance(value, Timeout):
             return value
-        if value is not None and value < 0:
-            raise ValueError(f"A timeout can't be negative, got {value}")
         return cls(value, value)
 
     def __post_init__(self) -> None:

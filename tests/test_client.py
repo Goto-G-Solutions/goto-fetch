@@ -34,6 +34,15 @@ def test_request_returns_the_response_on_success(mock_client):
     assert str(handler.calls[0].url) == "http://api.test/api/items/"
 
 
+def test_a_get_from_records_carries_no_body(mock_client):
+    # Regression: records() passed json=None for a GET, which went out as
+    # the body b"null" with Content-Type: application/json.
+    handler = replies(http.Response(200, json={"results": [1], "next": None}))
+    list(mock_client(handler).records("/items/"))
+    [request] = handler.calls
+    assert request.content == b"" and "Content-Type" not in request.headers
+
+
 def test_a_client_error_fails_at_once_with_its_status_and_body(mock_client):
     handler = replies(http.Response(404, text="Not found."))
     with pytest.raises(ApiError, match="HTTP 404: Not found.") as raised:

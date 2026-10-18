@@ -95,7 +95,6 @@ def test_headers_ignore_case_in_every_way():
 
 def test_a_request_builds_each_kind_of_body():
     assert Request("POST", "http://h", json={"a": 1}).content == b'{"a": 1}'
-    assert Request("POST", "http://h", json=None).content == b"null"
     form = Request("POST", "http://h", data={"n": None, "ids": [1, 2]})
     assert (form.content, form.headers["content-type"]) == (
         b"n=&ids=1&ids=2",
@@ -106,6 +105,21 @@ def test_a_request_builds_each_kind_of_body():
     )
     assert typed.headers.get_list("Content-Type") == ["application/vnd+json"]
     assert Request("GET", "http://h/x", params={"a": 1}).url == "http://h/x?a=1"
+
+
+def test_a_request_with_json_none_has_no_body():
+    # Regression: json=None built the body b"null" with a JSON Content-Type,
+    # so every GET that records() sent carried one.
+    plain = Request("GET", "http://h", json=None)
+    assert plain.content == b"" and "Content-Type" not in plain.headers
+    assert Response(200, json=None).content == b""
+
+
+def test_headers_built_from_headers_keep_repeats():
+    # Regression: a Headers is a Mapping, so copying one joined repeated
+    # names into one value, "a, b".
+    repeated = Headers([("Link", "a"), ("Link", "b")])
+    assert Headers(repeated).raw() == [("Link", "a"), ("Link", "b")]
 
 
 def test_a_request_takes_one_body():
