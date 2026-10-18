@@ -73,7 +73,7 @@ Each piece works with no extra packages, and uses better ones when you have them
 | Typed records | plain dicts | `records(..., model=Item)` with a pydantic model, msgspec Struct or dataclass |
 | Dataframes | named by you | `to_frame(records)` uses the library you've already imported, else the first one installed |
 | Retries | 3 tries, idempotent methods, temporary errors | `Retry(attempts=5, statuses=..., methods=...)`, or your own policy: any object with `wait(failure)` |
-| HTTP | `Urllib3Transport`, fast and installed almost everywhere | `Httpx2Transport` (the `httpx2` extra) for HTTP/2 or an `httpx2.Client` of your own; any `Transport` of your own |
+| HTTP | `Urllib3Transport`, fast and installed almost everywhere | `Httpx2Transport` (the `httpx2` extra) for HTTP/2 or an `httpx2.Client` of your own; `Limited(transport, RateLimit(2))` to keep to a rate; any `Transport` of your own |
 | Logging | silent | `enable_logging()`; every line is an event with data (`record.event`, `record.data`) |
 | Paging | next links (body or `Link` header), cursors, limit/offset, keyset, GET or POST | your own `Paging`: it sees each page's body and response; `with_param` sets a query or body parameter |
 | Incremental fetching | everything, every run | `Incremental(field, param)` asks only for changes; `Changes(key)` passes on only changed records and lists deleted ones |

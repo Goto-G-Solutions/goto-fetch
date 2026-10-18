@@ -39,6 +39,7 @@ With a real API: `Client("https://api.example.com", headers=token_headers(os.env
 - Store with `key=` when records can change (`updated_at`), so they replace their rows.
 - Prefer a cursor, `Keyset` or `Changes` over page numbers when the data changes during a run.
 - A POST that only reads needs `retry=True`; other POSTs are never retried.
+- For a small or busy server, keep to a rate: `Client(transport=Limited(Urllib3Transport(), RateLimit(2)))`.
 - Keep secrets in environment variables and headers, never in URLs or code.
 
 [build-your-own]: python -m api_explorer.docs build-your-own

@@ -34,6 +34,7 @@ from api_explorer.testing import (
     TokenServer,
     changes_api,
     keyset_api,
+    next_link_api,
 )
 
 SECRETS = {
@@ -504,3 +505,16 @@ def test_an_access_token_is_read_from_the_environment_only_if_set():
     text = plan.script()
     assert "access=os.environ.get('API_ACCESS_TOKEN')" in text
     assert "refresh=os.environ['API_REFRESH_TOKEN']" in text
+
+
+def test_a_rate_limit_keeps_the_plan_and_its_script_to_the_rate(run_script):
+    from api_explorer import Limited
+
+    plan = FetchPlan("http://api.test/api", "/items/", rate_limit=5)
+    with plan.client(transport=next_link_api(3)) as client:
+        assert isinstance(client.transport, Limited)
+        assert client.transport.limit.per_second == 5
+        assert list(plan.records(client)) == [0, 1, 2]
+    text = plan.script()
+    assert "transport=Limited(Urllib3Transport(), RateLimit(5))" in text
+    compile(text, "fetch.py", "exec")

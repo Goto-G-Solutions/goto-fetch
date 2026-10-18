@@ -55,6 +55,7 @@ from .incremental import (
     ReportsDeletions,
     Tracker,
 )
+from .limits import Limited, RateLimit
 from .logs import (
     ClientFilter,
     RedactFilter,
@@ -109,6 +110,7 @@ __all__ = [
     "Httpx2Transport",
     "Incremental",
     "Keyset",
+    "Limited",
     "Login",
     "NextLink",
     "Offset",
@@ -118,6 +120,7 @@ __all__ = [
     "Paging",
     "PasswordLogin",
     "Problem",
+    "RateLimit",
     "RedactFilter",
     "ReportsDeletions",
     "Request",

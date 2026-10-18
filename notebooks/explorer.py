@@ -162,6 +162,9 @@ def _():
 
     max_pages = mo.ui.number(start=0, value=1, step=1, label="Pages (0 = all)")
     timeout = mo.ui.number(start=1, value=20, step=1, label="Timeout (s)")
+    rate_limit = mo.ui.number(
+        start=0, value=0, step=0.5, label="Requests a second (0 = no limit)"
+    )
     verbose = mo.ui.checkbox(label="Verbose log")
     fetch = mo.ui.run_button(label="Fetch", kind="success")
 
@@ -206,6 +209,7 @@ def _():
         next_key,
         paging,
         password,
+        rate_limit,
         read_only,
         refresh_token,
         refresh_url,
@@ -254,6 +258,7 @@ def _(
     next_key,
     paging,
     password,
+    rate_limit,
     read_only,
     refresh_token,
     refresh_url,
@@ -443,10 +448,12 @@ def _(
             _section("Store (optional)", *_store_rows),
             _section(
                 "Run",
-                _row(max_pages, timeout, verbose),
+                _row(max_pages, timeout, rate_limit, verbose),
                 _hint(
-                    "Fetch a few pages first to time a full run. Verbose "
-                    "logs every request and page below as it happens."
+                    "Fetch a few pages first to time a full run. A rate "
+                    "limit spaces every request, retries and logins "
+                    "included, for servers that can't take a fast run. "
+                    "Verbose logs every request and page below as it happens."
                 ),
                 fetch,
             ),
@@ -485,6 +492,7 @@ def _(
     next_key,
     paging,
     password,
+    rate_limit,
     read_only,
     refresh_token,
     refresh_url,
@@ -521,6 +529,7 @@ def _(
         retry=True if _posting and read_only.value else None,
         trailing_slash=trailing_slash.value,
         timeout=float(timeout.value),
+        rate_limit=float(rate_limit.value),
         auth={
             "Header token": "header",
             "Access/refresh": "refresh",

@@ -40,6 +40,19 @@ client.request("POST", "/search/", json={"q": "x"}, retry=True)
 
 A policy of your own is any object with `wait(failure)`, returning seconds or `None` to stop; see [build-your-own](build-your-own.md) and check it with `check_retry_policy`.
 
+A server that can't take a fast run needs a rate limit rather than more retries: `Client(transport=Limited(Urllib3Transport(), RateLimit(2)))` spaces every request, retries and token requests included, and one `RateLimit` shared by several clients is one budget.
+
+```python
+import time
+from api_explorer import Client, Limited, RateLimit
+
+api = next_link_api(30, page_size=10)  # three pages
+client = Client("http://api.test/api", transport=Limited(api, RateLimit(20)))
+started = time.monotonic()
+assert len(list(client.records("/items/"))) == 30
+assert time.monotonic() - started >= 0.1  # three requests, at most 20 a second
+```
+
 ## Traps
 
 - Retries multiply time: 3 tries with growing waits can turn one slow endpoint into minutes. Watch the "retry" warnings ([logging](logging.md)).

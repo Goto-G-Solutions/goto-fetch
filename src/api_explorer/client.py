@@ -78,7 +78,7 @@ class Client:
 
     `transport` sends the requests: Urllib3Transport by default, or any
     Transport, such as Httpx2Transport for HTTP/2 or an httpx2.Client of
-    your own. Every request goes
+    your own, or Limited(...) to keep to a rate. Every request goes
     through it, token requests and retries included. A transport you pass
     stays open when this client closes, so several clients can share one;
     it is yours to close.

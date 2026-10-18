@@ -40,7 +40,7 @@ assert "SqliteWarehouse('shop.db')" in script
 assert "tracked_run(" in script
 ```
 
-Without a warehouse, `plan.records(client)` yields the records, and `plan.script(columns=[...], backend="polars")` writes a script that selects columns and builds a frame. `plan.store(client, warehouse=...)` stores into any `Warehouse` of your own.
+`rate_limit=2` keeps every request the plan sends to two a second, in its script too. Without a warehouse, `plan.records(client)` yields the records, and `plan.script(columns=[...], backend="polars")` writes a script that selects columns and builds a frame. `plan.store(client, warehouse=...)` stores into any `Warehouse` of your own.
 
 The script's header installs this package the way it is installed here (`package_requirement()`), with the `duckdb` extra when needed:
 
