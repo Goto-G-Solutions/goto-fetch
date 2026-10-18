@@ -23,6 +23,10 @@ def select(
     name in the row: select(rs, ["id", "user.name"]) gives rows like
     {"id": 1, "user.name": "Ann"}. When `extractors` has a function for a
     column, that function computes the value from the whole record instead.
+
+    It returns a list, so every row is held in memory at once: for a stream
+    too large for that, select a batch at a time, or give a warehouse the
+    records themselves (it reads them in batches).
     """
     extractors = extractors or {}
     return [

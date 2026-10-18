@@ -147,7 +147,12 @@ def tracked_run(
     Fetch and store the records inside the block; when the block ends
     without an error, the new state is saved. An error anywhere, in the
     fetch or in your storing, leaves the saved state as it was, so the next
-    run fetches the same records again rather than skip them:
+    run fetches the same records again rather than skip them.
+
+    Read the records inside the block, by storing them or with list():
+    records() is lazy, so records read after the block ends were never part
+    of the tracked run, its state doesn't move, and the next run fetches
+    them again:
 
         store = SqliteState("state.db")
         with tracked_run(store, "orders", Incremental, "updated_at",

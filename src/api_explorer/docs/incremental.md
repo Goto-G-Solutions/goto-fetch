@@ -109,3 +109,4 @@ assert [r["id"] for r in records] == [0, 1, 2, 3, 4, 5]
 - **`max_pages` with a tracker is refused:** a run cut short looks complete.
 - A tracker's `key=` recognises records by a field; without it, by their whole content, which also notices a record edited twice in the same instant.
 - Make one tracker per run, or let `tracked_run` make it.
+- Read the records inside the `with tracked_run(...)` block, by storing them or with `list()`. `records()` is lazy: records read after the block ends were never part of the tracked run, so its state doesn't move and the next run fetches them again.

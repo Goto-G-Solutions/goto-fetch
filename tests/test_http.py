@@ -9,6 +9,7 @@ The transports' own promises are in test_transports.
 import pytest
 
 from api_explorer.http import (
+    URL,
     Headers,
     Request,
     Response,
@@ -148,3 +149,10 @@ def test_a_timeout_of_one_number_applies_to_both_stages():
     assert Timeout.of(None) == Timeout(None, None)
     limits = Timeout(connect=5, read=60)
     assert Timeout.of(limits) is limits
+
+
+def test_a_url_gives_every_value_of_a_repeated_parameter():
+    url = URL("http://h/x?status=open&page=2&status=pending")
+    assert url.get_list("status") == ["open", "pending"]
+    assert url.params["status"] == "pending"  # the mapping keeps the last
+    assert url.get_list("missing") == []

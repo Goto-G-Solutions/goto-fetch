@@ -61,6 +61,11 @@ class URL(str):
         """The query's parameters; of several with one name, the last."""
         return dict(parse_qsl(self.query, keep_blank_values=True))
 
+    def get_list(self, name: str) -> list[str]:
+        """Every value the query gives `name`, in order, such as ?status=a&status=b."""
+        pairs = parse_qsl(self.query, keep_blank_values=True)
+        return [value for key, value in pairs if key == name]
+
     def copy_set_param(self, name: str, value: object) -> "URL":
         """This URL with `name` set to `value`, replacing any it had, others kept."""
         return set_param(self, name, value)
