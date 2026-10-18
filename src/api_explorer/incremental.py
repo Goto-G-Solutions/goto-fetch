@@ -35,7 +35,14 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from .errors import ApiError
 from .logs import log_event
-from .paging import Fetched, NextLinkFunction, Page, PageRequest, with_param
+from .paging import (
+    Fetched,
+    NextLinkFunction,
+    Page,
+    PageRequest,
+    check_send_in,
+    with_param,
+)
 from .paths import MISSING, get_path, parse_path
 from .records import parse_datetime
 
@@ -177,8 +184,7 @@ class Incremental:
         send_as: Callable[[Any], Any] = _send_form,
         missing: Literal["raise", "keep", "drop"] = "raise",
     ) -> None:
-        if send_in not in ("query", "body"):
-            raise ValueError(f"send_in must be 'query' or 'body', got {send_in!r}")
+        check_send_in(send_in)
         if missing not in ("raise", "keep", "drop"):
             raise ValueError(
                 f"missing must be 'raise', 'keep' or 'drop', got {missing!r}"
@@ -358,8 +364,7 @@ class Keyset:
     send_as: Callable[[Any], Any] = _send_form
 
     def __post_init__(self) -> None:
-        if self.send_in not in ("query", "body"):
-            raise ValueError(f"send_in must be 'query' or 'body', got {self.send_in!r}")
+        check_send_in(self.send_in)
         if self.limit < 2:
             # Each page after the first starts with the last record of the
             # one before, so a page of one could never move on.

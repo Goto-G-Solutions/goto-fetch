@@ -174,6 +174,7 @@ def with_param(
     "from this value" filter. In the body, `name` joins the request's JSON
     object, which must be an object (or no body at all).
     """
+    check_send_in(send_in)
     if send_in == "query":
         return dataclasses.replace(request, url=with_query(request.url, name, value))
     if request.json is not None and not isinstance(request.json, dict):
@@ -198,6 +199,35 @@ class Fetched(NamedTuple):
 
 NextLinkFunction = Callable[[Fetched, PageRequest], "PageRequest | str | None"]
 """Given a page and its request, what to fetch next: see Paging."""
+
+
+def follow(
+    next_link: NextLinkFunction,
+) -> Callable[[Fetched, PageRequest], "PageRequest | None"]:
+    """paginate's next_request, from a Paging's next_link.
+
+    Applies the rule every Paging relies on: a URL (str) keeps the
+    request's method and body, a relative one resolves against the current
+    URL, and an empty one or None ends the run; a PageRequest is used as
+    is. Client.records follows pages this way, and so can a loop of your
+    own: paginate(fetch, first, follow(next_link)).
+    """
+
+    def next_request(fetched: Fetched, request: PageRequest) -> PageRequest | None:
+        following = next_link(fetched, request)
+        if isinstance(following, str):
+            if not following:
+                return None
+            return dataclasses.replace(request, url=urljoin(request.url, following))
+        return following
+
+    return next_request
+
+
+def check_send_in(send_in: str) -> None:
+    """Refuse a place to send a parameter other than "query" or "body"."""
+    if send_in not in ("query", "body"):
+        raise ValueError(f"send_in must be 'query' or 'body', got {send_in!r}")
 
 
 class Paging(Protocol):
@@ -340,16 +370,15 @@ class Offset:
     def begin(
         self, first: PageRequest, read: Callable[[Fetched], Page]
     ) -> tuple[PageRequest, NextLinkFunction]:
-        """Start a run: set limit and offset on the first request's URL."""
-        url = httpx2.URL(first.url)
-        start = int(url.params.get(self.offset_param, 0))
-        start_url = with_query(first.url, self.limit_param, self.limit)
-        start_url = with_query(start_url, self.offset_param, start)
+        """Start a run: set limit and offset on the first request's query."""
+        start = int(httpx2.URL(first.url).params.get(self.offset_param, 0))
+        begun = with_param(first, self.limit_param, self.limit)
+        begun = with_param(begun, self.offset_param, start)
         received = 0
         biggest = 0
         previous: list | None = None
 
-        def next_link(fetched: Fetched, request: PageRequest) -> str | None:
+        def next_link(fetched: Fetched, request: PageRequest) -> PageRequest | None:
             nonlocal received, biggest, previous
             items, total = read(fetched)
             if items and items == previous:
@@ -383,9 +412,9 @@ class Offset:
                 _stopped("a page was shorter than the biggest before it", "short page")
                 return None
             biggest = max(biggest, len(items))
-            return with_query(request.url, self.offset_param, reached)
+            return with_param(request, self.offset_param, reached)
 
-        return dataclasses.replace(first, url=start_url), next_link
+        return begun, next_link
 
 
 @dataclass(frozen=True)
@@ -427,7 +456,7 @@ class Cursor:
     says where: "query" (?cursor=abc) or "body" (a field in the JSON body,
     for POST searches). An empty page ends the run even if it carries a
     cursor, unless stop_on_empty=False. A cursor must be one value, text or
-    a number; a path that finds several raises ApiError.
+    a whole number; a path that finds several raises ApiError.
     """
 
     key: str = "next_cursor"
@@ -436,8 +465,7 @@ class Cursor:
     stop_on_empty: bool = True
 
     def __post_init__(self) -> None:
-        if self.send_in not in ("query", "body"):
-            raise ValueError(f"send_in must be 'query' or 'body', got {self.send_in!r}")
+        check_send_in(self.send_in)
 
     def begin(
         self, first: PageRequest, read: Callable[[Fetched], Page]

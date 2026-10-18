@@ -1,12 +1,11 @@
 """An HTTP client for one API: URLs, retries, JSON, and paginated records."""
 
-import dataclasses
 import gzip
 import logging
 import time
 from collections.abc import Callable, Iterator, Mapping
-from typing import Any, Protocol, Self, runtime_checkable
-from urllib.parse import urljoin, urlsplit
+from typing import Any, NamedTuple, Protocol, Self, runtime_checkable
+from urllib.parse import urlsplit
 
 import httpx2
 
@@ -22,10 +21,11 @@ from .paging import (
     Page,
     PageRequest,
     Paging,
+    follow,
     paginate,
     read_page,
 )
-from .retry import TEMPORARY_STATUSES, Failure, Retry, RetryPolicy
+from .retry import Failure, Retry, RetryPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -187,12 +187,7 @@ class Client:
         self, method: str, endpoint: str, retry: bool | None, kwargs: dict[str, Any]
     ) -> httpx2.Response:
         method = method.upper()
-        url = self.url(endpoint)
-        params = kwargs.pop("params", None)
-        if params:
-            # Merge into any query the endpoint already has; httpx2 alone
-            # would replace it (the httpx 0.28 behaviour, httpx #3433).
-            url = str(httpx2.URL(url).copy_merge_params(params))
+        url = _with_params(self.url(endpoint), kwargs.pop("params", None))
         attempt = 0
         while True:
             attempt += 1
@@ -214,11 +209,9 @@ class Client:
             except httpx2.HTTPError as exc:
                 raise ApiError(f"{method} {url} failed: {exc}", url=url) from exc
             except ApiError as exc:
-                # Raised by an auth while renewing its token. A temporary
-                # failure at the token endpoint goes to the retry policy,
-                # like any other; anything else is final.
-                if exc.status not in TEMPORARY_STATUSES:
-                    raise
+                # Raised by an auth while renewing its token. The retry
+                # policy decides, by the token endpoint's status, as for
+                # any other failure (see Failure).
                 error = failure = exc
             else:
                 if response.is_success:
@@ -357,13 +350,14 @@ class Client:
         `results_key` is the path to each page's list of records, with
         fallbacks such as "results|data|items". results_key=None means the
         body itself is the list. `count_key` is the optional path to the
-        total record count, such as "count". It shows in the progress log,
+        total record count, such as "count". It goes in each "page" event,
         and lets Offset stop exactly at the end. `paging` says how to reach
         the next page: NextLink() (the default) follows a next-page URL in
         each page, Offset(...) steps a limit/offset query, HeaderLink()
         follows the Link header, and Cursor(...) sends back a cursor.
         `params` are added to the first URL; later pages carry or work out
-        their own.
+        their own. `max_pages` stops after that many pages, for a look at
+        the first few.
 
         `method` and `json` make the first request, such as a POST search
         with its query in the body; later pages keep them unless the paging
@@ -387,9 +381,9 @@ class Client:
         enable_logging), and every line is stamped with this client's name.
 
         records() is built from public parts, so a loop of your own can
-        reuse them: paginate() follows the pages, a Paging finds the next
-        one, read_page() finds the records and the count, and converter()
-        applies the model.
+        reuse them: paginate() follows the pages, a Paging and follow() find
+        the next one, read_page() finds the records and the count, and
+        converter() applies the model.
 
         Raises ApiError when a request fails, when the results path is
         missing or isn't a list, when a record doesn't fit `model`, or when
@@ -405,107 +399,44 @@ class Client:
                 "max_pages can't be used with incremental: a run cut short "
                 "would skip the records it didn't fetch"
             )
-        url = httpx2.URL(self.url(endpoint)).copy_merge_params(params or {})
+        url = _with_params(self.url(endpoint), params)
         convert = None if model is None else converter(model)
         name = getattr(model, "__name__", repr(model))
-        warned_no_count = False
+        read = self._page_reader(results_key, count_key)
 
-        def read(fetched: Fetched) -> Page:
-            nonlocal warned_no_count
-            result = read_page(
-                fetched.body, results_key, count_key, url=str(fetched.response.url)
-            )
-            if count_key is not None and result.total is None and not warned_no_count:
-                warned_no_count = True
-                log_event(
-                    logger,
-                    logging.WARNING,
-                    "no-count",
-                    "No count at %r in the response",
-                    count_key,
-                    data={"count_key": count_key},
-                )
-            return result
-
-        seconds = 0.0
-
-        def fetch(request: PageRequest) -> Fetched:
-            nonlocal seconds
+        def fetch(request: PageRequest) -> _Timed:
             started = time.monotonic()
             response = self.request(
                 request.method, request.url, json=request.json, retry=retry
             )
-            fetched = Fetched(self.json_body(response), response)
-            seconds = time.monotonic() - started
-            return fetched
+            return _Timed(
+                Fetched(self.json_body(response), response),
+                time.monotonic() - started,
+            )
 
-        start = PageRequest(str(url), method.upper(), json)
+        start = PageRequest(url, method.upper(), json)
         if incremental is not None:
             start = incremental.apply(start)
         first, next_link = (paging or NextLink()).begin(start, read)
+        step = follow(next_link)
 
-        def next_request(fetched: Fetched, request: PageRequest) -> PageRequest | None:
-            # A URL from the style keeps the method and body (see Paging).
+        def next_request(timed: _Timed, request: PageRequest) -> PageRequest | None:
             with client_context(self.name):
-                following = next_link(fetched, request)
-            if isinstance(following, str):
-                if not following:
-                    return None
-                return dataclasses.replace(request, url=urljoin(request.url, following))
-            return following
+                return step(timed.fetched, request)
 
         def every_record() -> Iterator[Any]:
-            received = 0
-            pages = 0
+            received = pages = 0
             started = time.monotonic()
-            for number, fetched in enumerate(
+            for pages, timed in enumerate(
                 paginate(fetch, first, next_request, max_pages=max_pages), start=1
             ):
-                pages = number
                 with client_context(self.name):
-                    items, total = read(fetched)
+                    items, total = read(timed.fetched)
                     received += len(items)
-                    of_total = "" if total is None else f" of {total:,}"
-                    log_event(
-                        logger,
-                        logging.INFO,
-                        "page",
-                        "Page %d: %d records in %.2fs, %s so far%s",
-                        number,
-                        len(items),
-                        seconds,
-                        f"{received:,}",
-                        of_total,
-                        data={
-                            "page": number,
-                            "records_on_page": len(items),
-                            "records_so_far": received,
-                            "total": total,
-                            "seconds": seconds,
-                        },
-                    )
+                    _log_page(pages, len(items), received, total, timed.seconds)
                 yield from items
             with client_context(self.name):
-                if max_pages is not None and pages >= max_pages:
-                    log_event(
-                        logger,
-                        logging.DEBUG,
-                        "stop",
-                        "Stopped at max_pages=%d",
-                        max_pages,
-                        data={"reason": "max_pages"},
-                    )
-                elapsed = time.monotonic() - started
-                log_event(
-                    logger,
-                    logging.INFO,
-                    "done",
-                    "Done: %s records in %d pages, %.1fs",
-                    f"{received:,}",
-                    pages,
-                    elapsed,
-                    data={"pages": pages, "records": received, "seconds": elapsed},
-                )
+                _log_done(pages, received, time.monotonic() - started, max_pages)
 
         stream = every_record()
         if incremental is not None:
@@ -518,5 +449,104 @@ class Client:
                 yield convert(item)
             except (ValueError, TypeError) as exc:
                 raise ApiError(
-                    f"Record {index} doesn't fit {name}: {exc}", url=str(url)
+                    f"Record {index} doesn't fit {name}: {exc}", url=url
                 ) from exc
+
+    def _page_reader(
+        self, results_key: str | None, count_key: str | None
+    ) -> Callable[[Fetched], Page]:
+        """read(fetched) for one run: each page read once, a missing count warned once.
+
+        The paging style and the loop both read each page; the last page
+        read is kept, so the second read costs nothing.
+        """
+        last: tuple[Fetched, Page] | None = None
+        warned = False
+
+        def read(fetched: Fetched) -> Page:
+            nonlocal last, warned
+            if last is not None and last[0] is fetched:
+                return last[1]
+            page = read_page(
+                fetched.body, results_key, count_key, url=str(fetched.response.url)
+            )
+            if count_key is not None and page.total is None and not warned:
+                warned = True
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "no-count",
+                    "No count at %r in the response",
+                    count_key,
+                    data={"count_key": count_key},
+                )
+            last = (fetched, page)
+            return page
+
+        return read
+
+
+class _Timed(NamedTuple):
+    """A fetched page, and how long fetching it took."""
+
+    fetched: Fetched
+    seconds: float
+
+
+def _with_params(url: str, params: Mapping[str, Any] | None) -> str:
+    """`url` with `params` merged into its query.
+
+    Merged, not replaced: httpx2 alone would drop the query the endpoint
+    already has (the httpx 0.28 behaviour, httpx #3433).
+    """
+    if not params:
+        return url
+    return str(httpx2.URL(url).copy_merge_params(params))
+
+
+def _log_page(
+    number: int, count: int, received: int, total: int | None, seconds: float
+) -> None:
+    """Log a "page" event: one line per page, for watching a long run."""
+    of_total = "" if total is None else f" of {total:,}"
+    log_event(
+        logger,
+        logging.INFO,
+        "page",
+        "Page %d: %d records in %.2fs, %s so far%s",
+        number,
+        count,
+        seconds,
+        f"{received:,}",
+        of_total,
+        data={
+            "page": number,
+            "records_on_page": count,
+            "records_so_far": received,
+            "total": total,
+            "seconds": seconds,
+        },
+    )
+
+
+def _log_done(pages: int, received: int, seconds: float, max_pages: int | None) -> None:
+    """Log the "done" event a run ends with, after a "stop" event if max_pages cut it."""
+    if max_pages is not None and pages >= max_pages:
+        log_event(
+            logger,
+            logging.DEBUG,
+            "stop",
+            "Stopped at max_pages=%d",
+            max_pages,
+            data={"reason": "max_pages"},
+        )
+    log_event(
+        logger,
+        logging.INFO,
+        "done",
+        "Done: %s records in %d pages, %.1fs",
+        f"{received:,}",
+        pages,
+        seconds,
+        data={"pages": pages, "records": received, "seconds": seconds},
+    )

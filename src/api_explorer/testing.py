@@ -466,8 +466,8 @@ def check_retry_policy(policy: RetryPolicy, *, max_attempts: int = 100) -> None:
     """Check a retry policy keeps the promises every policy must keep.
 
     The policy is shown failures that never go away, of each kind: a 503, a
-    429, a network error, a POST answered with a 503, and a 200 whose body
-    reports a temporary problem. For each, it must
+    429, a network error, a POST answered with a 503, a 200 whose body
+    reports a temporary problem, and a token endpoint answering 503. For each, it must
     give up (return None, or raise ApiError) within `max_attempts` tries,
     and every wait it asks for must be a number of seconds that is neither
     negative nor endless. Nothing sleeps, so this is quick.
@@ -488,6 +488,12 @@ def check_retry_policy(policy: RetryPolicy, *, max_attempts: int = 100) -> None:
             httpx2.Response(200),
             None,
             busy,
+        ),
+        "a token endpoint answering 503": (
+            "GET",
+            None,
+            ApiError("refreshing the token failed", status=503),
+            None,
         ),
     }
     for kind, (method, response, error, problem) in kinds.items():

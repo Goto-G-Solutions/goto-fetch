@@ -206,3 +206,19 @@ def test_a_retry_after_of_zero_still_backs_off():
         )
     )
     assert wait is not None and wait >= 0.8
+
+
+def test_a_token_endpoint_s_failure_is_judged_by_the_policy_s_statuses():
+    # The policy, not Client, decides: a 503 from the token endpoint is
+    # retried by default, and not when the policy leaves 503 out.
+    from api_explorer import Failure
+
+    failure = Failure(1, "GET", "http://h/x", error=ApiError("refresh", status=503))
+    assert Retry(backoff=0).wait(failure) == 0
+    assert Retry(backoff=0, statuses=frozenset({429})).wait(failure) is None
+    assert (
+        Retry(backoff=0).wait(
+            Failure(1, "GET", "http://h/x", error=ApiError("no token"))
+        )
+        is None
+    )

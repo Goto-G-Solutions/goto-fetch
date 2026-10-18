@@ -12,14 +12,15 @@ import narwhals.stable.v2 as nw
 
 from .logs import log_event
 from .models import as_dict
+from .paths import extend_path
 
 logger = logging.getLogger(__name__)
 
 BACKENDS = ("polars", "pandas", "pyarrow")
+"""The dataframe libraries default_backend chooses from, in order."""
 
 INT64 = range(-(2**63), 2**63)
 """The integers every dataframe library can hold as integers."""
-"""The dataframe libraries default_backend chooses from, in order."""
 
 
 def default_backend() -> str:
@@ -36,7 +37,7 @@ def default_backend() -> str:
         if find_spec(name) is not None:
             return name
     raise ImportError(
-        "to_frame needs a dataframe library; install one of: " + ", ".join(BACKENDS)
+        "No dataframe library found; install one of: " + ", ".join(BACKENDS)
     )
 
 
@@ -91,7 +92,7 @@ def to_frame(records: Sequence[Any], backend: str | ModuleType | None = None) ->
             fields = {
                 k: iter(
                     even_out(
-                        f"{where}.{k}",
+                        extend_path(where, k),
                         [v[k] for v in values if v is not None and k in v],
                     )
                 )

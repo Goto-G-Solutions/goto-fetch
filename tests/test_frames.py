@@ -179,3 +179,11 @@ def test_to_frame_refuses_records_that_aren_t_dicts(backend):
     # Regression: plain values failed deep inside with an AttributeError.
     with pytest.raises(TypeError, match="dicts or typed models, got str"):
         to_frame(["a", "b"], backend)
+
+
+def test_a_warning_names_a_nested_key_holding_a_dot_in_quotes(backend, caplog):
+    # The name reads back with get_path: meta["a.b"], not meta, a, then b.
+    records = [{"meta": {"a.b": 1}}, {"meta": {"a.b": "x"}}]
+    with caplog.at_level("WARNING", logger="api_explorer"):
+        to_frame(records, backend)
+    assert "Column 'meta[\"a.b\"]' mixes" in caplog.text

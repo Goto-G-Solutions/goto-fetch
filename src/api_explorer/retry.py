@@ -53,8 +53,10 @@ class Failure:
     """One failed try of a request, as a RetryPolicy sees it.
 
     `attempt` counts the tries so far, this one included (1 after the first
-    failure). Exactly one of `response` (the server answered) and `error` (a
-    network error or timeout) is set. A response is a failure either for its
+    failure). Exactly one of `response` (the server answered) and `error` is
+    set. `error` is a network error or timeout, or an ApiError an auth
+    raised while renewing its token, whose `status` is the token
+    endpoint's (None when it didn't answer with one). A response is a failure either for its
     status, or because the client's response check found a `problem` in a
     successful one. `retry` is the call's own say: True to retry whatever
     the method, None to leave it to the policy. A call with retry=False
@@ -112,18 +114,19 @@ class Retry:
         if self.backoff < 0 or self.max_backoff < 0:
             raise ValueError("backoff and max_backoff can't be negative")
 
-    def delay(self, retry_number: int) -> float:
-        """Seconds to wait before retry number `retry_number` (0 is the first)."""
-        return backoff_delay(retry_number, self.backoff, self.max_backoff)
-
     def wait(self, failure: Failure) -> float | None:
         """Seconds to wait before trying `failure`'s request again, or None to stop."""
         allowed = failure.retry or failure.method in self.methods
         if not allowed or failure.attempt >= self.attempts:
             return None
+        delay = backoff_delay(failure.attempt - 1, self.backoff, self.max_backoff)
         response = failure.response
         if response is None:
-            return self.delay(failure.attempt - 1)
+            if isinstance(failure.error, ApiError):
+                # A token endpoint's failure: worth another try only for a
+                # temporary status, as for the request itself.
+                return delay if failure.error.status in self.statuses else None
+            return delay
         if failure.problem is not None:
             # A successful response reporting a problem: retry only a
             # temporary one, such as a rate limit reported in the body.
@@ -140,4 +143,4 @@ class Retry:
                 url=failure.url,
                 status=response.status_code,
             )
-        return max(asked, self.delay(failure.attempt - 1))
+        return max(asked, delay)

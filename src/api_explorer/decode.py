@@ -35,20 +35,22 @@ def json_decoder(
             return json.loads
         return _with_fallback(msgspec.json.decode)
     if prefer == "msgspec":
-        return _with_fallback(_require("msgspec").json.decode)
+        return _with_fallback(
+            _require("msgspec", 'pip install "api-explorer[fast]"').json.decode
+        )
     if prefer == "orjson":
-        return _with_fallback(_require("orjson").loads)
+        return _with_fallback(_require("orjson", "pip install orjson").loads)
     raise ValueError(
         f"prefer must be 'auto', 'json', 'msgspec' or 'orjson', got {prefer!r}"
     )
 
 
-def _require(name: str) -> Any:
+def _require(name: str, install: str) -> Any:
     try:
         return importlib.import_module(name)
     except ImportError as exc:
         raise ImportError(
-            f"{name} isn't installed; install it with: pip install {name}"
+            f"{name} isn't installed; install it with: {install}"
         ) from exc
 
 

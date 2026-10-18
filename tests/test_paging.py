@@ -549,3 +549,17 @@ def test_a_loop_is_named_by_url_and_never_shows_the_request_body():
         list(records)
     assert "hunter2" not in str(raised.value)
     assert raised.value.url == "http://api.test/api/search/"
+
+
+def test_follow_turns_a_style_s_answer_into_the_next_request():
+    from api_explorer import PageRequest, follow
+
+    post = PageRequest("http://h/api/search/?page=1", "POST", {"q": "x"})
+    answers = iter(["?page=2", "", PageRequest("http://h/other/"), None])
+    step = follow(lambda fetched, request: next(answers))
+    assert step(None, post) == PageRequest(
+        "http://h/api/search/?page=2", "POST", {"q": "x"}
+    )
+    assert step(None, post) is None
+    assert step(None, post) == PageRequest("http://h/other/")
+    assert step(None, post) is None

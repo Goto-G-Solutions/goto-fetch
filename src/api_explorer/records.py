@@ -1,13 +1,15 @@
 """Reshape lists of records (parsed JSON objects) without a dataframe library.
 
-Each function takes records and returns new records, so they chain.
+select, explode and flatten turn records into rows; select and explode
+take a list of records and give a new one, so they chain, and flatten
+works on one record. parse_datetime reads one timestamp.
 """
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import datetime
 from typing import Any, Literal
 
-from .paths import get_path
+from .paths import extend_path, get_path
 
 
 def select(
@@ -52,12 +54,7 @@ def flatten(record: dict, sep: str = ".", max_depth: int | None = None) -> dict:
     flat: dict = {}
 
     def segment(prefix: str, key: object) -> str:
-        name = str(key)
-        awkward = name == "" or name != name.strip()  # paths trim spaces
-        if awkward or sep in name or any(c in name for c in "[]|\"'"):
-            escaped = name.replace("\\", "\\\\").replace('"', '\\"')
-            return f'{prefix}["{escaped}"]'
-        return f"{prefix}{sep}{name}" if prefix else name
+        return extend_path(prefix, key, sep)
 
     def visit(value: Any, key: str, depth: int) -> None:
         deeper = max_depth is None or depth < max_depth
@@ -86,8 +83,9 @@ def explode(
     shorter lists are padded to the longest: with None, or with fill="forward"
     with their last value. A record whose lists are all empty gives one row
     of None, so no record disappears. None counts as an empty list, and any
-    other value as a one-element list. `columns` defaults to every key that
-    holds a list in any record.
+    other value as a one-element list. `columns` are top-level keys (unlike
+    select's paths; flatten first to reach nested lists), and default to
+    every key that holds a list in any record.
     """
     if fill not in ("null", "forward"):
         raise ValueError(f"fill must be 'null' or 'forward', got {fill!r}")

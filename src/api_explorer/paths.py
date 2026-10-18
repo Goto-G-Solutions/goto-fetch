@@ -4,9 +4,14 @@ import re
 from functools import lru_cache
 from typing import Any
 
-# Marks "no such key" as distinct from a key whose value is None, so an
-# explicit None never sends get_path on to the next fallback.
 MISSING = object()
+"""A default for get_path meaning "no such value", distinct from a value of None.
+
+get_path(data, path, MISSING) is MISSING only when nothing is there;
+other modules pass it to tell an absent key from an explicit null. Inside
+get_path it keeps an explicit None from sending the search on to the next
+fallback.
+"""
 
 # One piece of a path. The order matters: a quoted key is tried before a
 # plain bracket, so ["a.b"] is one key, quotes and all.
@@ -45,6 +50,21 @@ def _alternatives(path: str) -> tuple[tuple[str, ...], ...]:
 
 
 _INDEX = re.compile(r"-?[0-9]+")
+
+
+def extend_path(prefix: str, key: object, sep: str = ".") -> str:
+    """The path to `key` inside the value at `prefix`, as get_path reads it.
+
+    A key holding the separator, a path character ([ ] | " '), nothing at
+    all, or spaces at either end goes in quotes: extend_path("meta", "a.b")
+    gives 'meta["a.b"]', so it can't be mistaken for meta, then a, then b.
+    """
+    name = str(key)
+    awkward = name == "" or name != name.strip()  # paths trim spaces
+    if awkward or sep in name or any(c in name for c in "[]|\"'"):
+        escaped = name.replace("\\", "\\\\").replace('"', '\\"')
+        return f'{prefix}["{escaped}"]'
+    return f"{prefix}{sep}{name}" if prefix else name
 
 
 def parse_path(path: str) -> list[str]:
@@ -88,8 +108,9 @@ def get_path(data: Any, path: str, default: Any = None) -> Any:
     - A wildcard that collects nothing does not exist. An empty list means
       there is no data here, so the next alternative is tried.
 
-    When nothing exists, a wildcard path returns [] unless you pass a
-    default, so a column of lists never has a stray None in it.
+    When nothing exists, a wildcard path returns [], whatever the default,
+    so a column of lists never has a stray None in it; a plain path returns
+    the default.
     """
 
     def walk(node: Any, segments: tuple[str, ...]) -> Any:
