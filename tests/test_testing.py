@@ -15,8 +15,10 @@ import pytest
 
 from api_explorer import (
     ApiError,
+    Changes,
     Cursor,
     HeaderLink,
+    Incremental,
     NextLink,
     Offset,
     PageRequest,
@@ -27,6 +29,7 @@ from api_explorer.testing import (
     FakeApi,
     check_paging,
     check_retry_policy,
+    check_tracker,
     cursor_api,
     fetched,
     flaky,
@@ -236,3 +239,119 @@ class NeverStops:
 def test_check_paging_catches_a_broken_style(paging, message):
     with pytest.raises(AssertionError, match=re.escape(message)):
         check_paging(paging, next_link_api(250), list(range(250)))
+
+
+STAMPED = [
+    {"id": 1, "updated_at": "2026-01-01T00:00:00Z", "version": 3},
+    {"id": 2, "updated_at": "2026-01-02T00:00:00Z", "version": 1},
+    {"id": 3, "updated_at": "2026-01-02T00:00:00Z", "version": 1},
+]
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda state: Incremental("updated_at", state=state),
+        lambda state: Changes("id", state=state),
+        lambda state: Changes(
+            "id", fingerprint=lambda r: str(r["version"]), state=state
+        ),
+    ],
+    ids=["incremental", "changes", "changes-with-a-fingerprint"],
+)
+def test_check_tracker_passes_trackers_that_keep_the_rules(make):
+    check_tracker(make, STAMPED)
+
+
+class Passes:
+    """The base for broken trackers: delivers everything, saves a count."""
+
+    def __init__(self, state=None):
+        self._state = dict(state or {"runs": 0})
+
+    @property
+    def state(self):
+        return self._state
+
+    def apply(self, request):
+        return request
+
+    def track(self, records):
+        yield from records
+        self._state = {"runs": self._state["runs"] + 1}
+
+
+class MovesEarly(Passes):
+    """Broken: moves its state on before the run is complete."""
+
+    def track(self, records):
+        for record in records:
+            self._state = {"runs": 1}
+            yield record
+
+
+class NotJson(Passes):
+    """Broken: keeps a set in its state."""
+
+    def track(self, records):
+        yield from records
+        self._state = {"ids": {1, 2}}
+
+
+class HidesFailures(Passes):
+    """Broken: swallows its source's failure."""
+
+    def track(self, records):
+        try:
+            yield from records
+        except Exception:  # noqa: BLE001
+            return
+
+
+class Forgets(Passes):
+    """Broken: delivers the same records again on the next run."""
+
+
+class Invents(Passes):
+    """Broken: delivers a record it wasn't given."""
+
+    def track(self, records):
+        yield from records
+        yield {"id": "made up"}
+        self._state = {"runs": 1}
+
+
+class SendsText(Passes):
+    """Broken: apply returns a URL, not a PageRequest."""
+
+    def apply(self, request):
+        return request.url
+
+
+@pytest.mark.parametrize(
+    ("tracker", "message"),
+    [
+        (MovesEarly, "a run stopped early moved the state on"),
+        (NotJson, "state after a run isn't plain JSON"),
+        (HidesFailures, "track hid a failure of its source"),
+        (Forgets, "nothing changed, yet the next run delivered 3 records"),
+        (Invents, "track delivered records it wasn't given"),
+        (SendsText, "apply must return a PageRequest"),
+    ],
+    ids=[
+        "moves-early",
+        "not-json",
+        "hides-failures",
+        "forgets",
+        "invents",
+        "sends-text",
+    ],
+)
+def test_check_tracker_catches_a_broken_tracker(tracker, message):
+    with pytest.raises(AssertionError, match=re.escape(message)):
+        check_tracker(tracker, STAMPED)
+
+
+def test_check_tracker_needs_at_least_two_records():
+    with pytest.raises(ValueError, match="at least two"):
+        check_tracker(Passes, [{"id": 1}])

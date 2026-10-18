@@ -122,7 +122,7 @@ with tracked_run(state, "orders", Incremental, "updated_at", "updated_since") as
 
 Keyset pages overlap at each page's last value, and `Incremental` passes the repeats over. When more records share one value than a page holds, Keyset stops with an error rather than skip any; raise `limit`.
 
-When an API has no such field, or doesn't always update it, `Changes` fetches everything and passes on only new and changed records, by a fingerprint (a hash) of each. It also lists the records that disappeared, which a timestamp never shows. Leave out fields that change on every fetch, or every record looks changed:
+When an API has no such field, or doesn't always update it, `Changes` fetches everything and passes on only new and changed records, by a fingerprint (a hash) of each. It also lists the records that disappeared, which a timestamp never shows. Leave out fields that change on every fetch, or every record looks changed. For an API that gives each record a version or ETag, `fingerprint=lambda r: str(r["version"])` replaces the hash:
 
 ```python
 from api_explorer import Changes
@@ -149,7 +149,7 @@ with tracked_run(shop, "products", Changes, key="id") as changes:
 
 `write` stores a run all or nothing: it first copies the records to temporary files, so a failed request never touches the database, then makes one transaction of it. With a `key`, a record replaces the row with its key, which is what `updated_at` runs need; `deleted_by` removes the rows a `Changes` run lists as gone. Columns follow the records: nested objects and lists become JSON columns (`customer->>'name'` in SQL), text stays text, timestamps included, new fields add columns, and a column whose values change type is widened (integers beside floats to `DOUBLE`, anything else to text, with a warning), so no value is lost. Read it with DuckDB, or straight into a frame: `duckdb.connect("shop.duckdb").sql("SELECT * FROM products").pl()`.
 
-The interfaces are Protocols: your pieces match their shape and never inherit from ours, and a type checker confirms they fit. `Paging`, `RetryPolicy`, `Login` and `ResolvesUrls` (an auth with URLs of its own) are the main ones; `check_paging` and `check_retry_policy` check behaviour the types can't.
+The interfaces are Protocols: your pieces match their shape and never inherit from ours, and a type checker confirms they fit. `Paging`, `RetryPolicy`, `Login`, `ResolvesUrls` (an auth with URLs of its own), `Tracker` (what a run delivers: `apply`, `track`, `state`), `ReportsDeletions` (a tracker that knows what is gone) and `StateStore` are the main ones; one-function seams are plain function types (`Decoder`, `ResponseCheck`, `Fingerprint`). `check_paging`, `check_retry_policy`, `check_tracker` and `check_state_store` check behaviour the types can't.
 
 `Client.records` is built from public parts, `paginate`, a `Paging`, `read_page` and `converter`, so a loop of your own can reuse the same rules. `paginate` pages by whatever your fetch needs, not only URLs, with the same loop protection:
 
@@ -240,13 +240,21 @@ Each returns a `FakeApi`, which remembers every request (`.calls`, `.paths`, `.q
 
 ### Testing your own pieces
 
-Pieces you build on the package's interfaces test the same way: point them at a fake, and check what happened. Two checks cover the promises every retry policy and paging style must keep.
+Pieces you build on the package's interfaces test the same way: point them at a fake, and check what happened. Four checks cover the promises every retry policy, paging style, tracker and state store must keep.
 
 ```python
 import httpx2
 
 from api_explorer import Client, PageRequest, read_page
-from api_explorer.testing import check_paging, check_retry_policy, fetched, replies
+from api_explorer.testing import (
+    MemoryState,
+    check_paging,
+    check_retry_policy,
+    check_state_store,
+    check_tracker,
+    fetched,
+    replies,
+)
 
 
 def test_my_paging_style():
@@ -262,6 +270,18 @@ def test_my_retry_policy():
     api = replies(503, 200)
     api.client(retry=MyPolicy()).request("GET", "/items/")
     assert len(api.calls) == 2
+
+
+def test_my_tracker():
+    # make(state) builds a run's tracker from the last run's state. The
+    # check: plain JSON state that moves on only after a complete run, a
+    # first run that delivers everything, and a next run that delivers
+    # nothing when nothing changed.
+    check_tracker(lambda state: MyTracker(state=state), sample_records)
+
+
+def test_my_state_store():
+    check_state_store(MyStore())  # get gives copies, put replaces, names apart
 
 
 def test_my_auth_signs_each_request():

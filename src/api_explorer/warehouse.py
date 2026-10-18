@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .errors import ApiError
-from .incremental import Changes
+from .incremental import ReportsDeletions
 from .logs import log_event
 from .models import as_dict
 
@@ -123,7 +123,7 @@ class Warehouse:
         records: Iterable[Any],
         *,
         key: str | None = None,
-        deleted_by: Changes | None = None,
+        deleted_by: ReportsDeletions | None = None,
         batch_size: int = 10_000,
     ) -> int:
         """Store `records` in `table`, all or nothing, and return how many were written.
@@ -132,9 +132,9 @@ class Warehouse:
           A record whose key is already in the table replaces that row,
           and of several with one key in a run, the last wins. Without a
           key, records are added.
-        - `deleted_by`: a Changes whose run gave `records`; once they are
-          all stored, the rows of the keys it lists as deleted are removed.
-          Needs `key`.
+        - `deleted_by`: the tracker whose run gave `records`, such as a
+          Changes, or any ReportsDeletions; once they are all stored, the
+          rows of the keys it lists as deleted are removed. Needs `key`.
         - `batch_size`: records held in memory at a time.
 
         It works in two steps. First it reads every record, writing them
@@ -159,7 +159,7 @@ class Warehouse:
                 gone = deleted_by.deleted
                 if gone is None:
                     raise ApiError(
-                        "deleted_by hasn't finished a run: pass the Changes "
+                        "deleted_by hasn't finished a run: pass the tracker "
                         "whose run gave these records"
                     )
             with self._transaction() as connection:

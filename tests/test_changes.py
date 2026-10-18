@@ -95,6 +95,31 @@ def test_ignored_fields_dont_count_as_changes_but_others_do(ignore, before, afte
     assert list(again(first, ignore=ignore).track([priced])) == [priced]
 
 
+def test_a_fingerprint_of_your_own_decides_what_counts_as_a_change():
+    # An API that gives each record a version: only a new version counts.
+    def by_version(record):
+        return str(record["version"])
+
+    first = Changes("id", fingerprint=by_version)
+    list(first.track([{"id": 1, "version": 1, "seen_at": "t1"}]))
+    second = Changes("id", fingerprint=by_version, state=first.state)
+    assert list(second.track([{"id": 1, "version": 1, "seen_at": "t2"}])) == []
+    third = Changes("id", fingerprint=by_version, state=first.state)
+    bumped = {"id": 1, "version": 2, "seen_at": "t2"}
+    assert list(third.track([bumped])) == [bumped]
+
+
+def test_ignore_and_a_fingerprint_together_are_refused():
+    with pytest.raises(ValueError, match="ignore or fingerprint, not both"):
+        Changes("id", ignore=["seen_at"], fingerprint=str)
+
+
+def test_a_fingerprint_must_give_text():
+    changes = Changes("id", fingerprint=lambda record: record["version"])
+    with pytest.raises(TypeError, match="must return text, got int"):
+        list(changes.track([{"id": 1, "version": 1}]))
+
+
 def test_an_ignore_path_that_leads_nowhere_changes_nothing():
     first = Changes("id", ignore=["missing.deeper", "price.cents"])
     list(first.track([product(1)]))

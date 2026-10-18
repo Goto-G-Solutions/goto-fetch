@@ -65,6 +65,23 @@ class Tracker(Protocol):
         ...
 
 
+@runtime_checkable
+class ReportsDeletions(Protocol):
+    """A tracker that can tell which records are gone, such as Changes.
+
+    Warehouse.write(deleted_by=...) takes one, and removes those rows.
+    """
+
+    @property
+    def deleted(self) -> list[Any] | None:
+        """The keys of records gone since the last run; None until a run is complete."""
+        ...
+
+
+Fingerprint = Callable[[Any], str]
+"""Turns a record into text that changes whenever the record does (see Changes)."""
+
+
 def _digest(value: Any) -> str:
     """A short, stable fingerprint of a JSON value: 128 bits of SHA-256.
 
@@ -431,6 +448,10 @@ class Changes:
       "fetched_at" or "stats.views": values that change on every fetch
       would make every record look changed. "*" walks a list, as in
       "items[*].stock".
+    - `fingerprint`: a function of your own in place of the hash, for an
+      API that gives each record a version or ETag already:
+      fingerprint=lambda record: str(record["version"]). Give `ignore` or
+      `fingerprint`, not both.
     - `state`: what `state` held after the last run.
 
     Only for runs that fetch every record: with a filtered fetch (such as
@@ -442,10 +463,16 @@ class Changes:
         key: str,
         *,
         ignore: Iterable[str] = (),
+        fingerprint: Fingerprint | None = None,
         state: dict[str, Any] | None = None,
     ) -> None:
         self.key = key
         self.ignore = [parse_path(path) for path in ignore]
+        if fingerprint is not None and self.ignore:
+            # Two ways to set one thing: a fingerprint of your own decides
+            # what counts as a change by itself.
+            raise ValueError("Give ignore or fingerprint, not both")
+        self.fingerprint = fingerprint
         self._hashes: dict[str, str] = dict((state or {}).get("hashes", {}))
         self._state: dict[str, Any] = {"hashes": dict(self._hashes)}
         self._deleted: list[Any] | None = None
@@ -526,6 +553,13 @@ class Changes:
         )
 
     def _fingerprint(self, record: Any) -> str:
+        if self.fingerprint is not None:
+            made = self.fingerprint(record)
+            if not isinstance(made, str):
+                raise TypeError(
+                    f"fingerprint must return text, got {type(made).__name__}"
+                )
+            return made
         for path in self.ignore:
             record = _without(record, path)
         return _digest(record)

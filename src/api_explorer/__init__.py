@@ -36,7 +36,14 @@ from .client import Client, ResolvesUrls
 from .decode import Decoder, json_decoder
 from .errors import ApiError, Problem, redact_url
 from .frames import default_backend, latest_per_key, to_frame
-from .incremental import Changes, Incremental, Keyset, Tracker
+from .incremental import (
+    Changes,
+    Fingerprint,
+    Incremental,
+    Keyset,
+    ReportsDeletions,
+    Tracker,
+)
 from .logs import (
     ClientFilter,
     RedactFilter,
@@ -78,6 +85,7 @@ __all__ = [
     "Failure",
     "FetchPlan",
     "Fetched",
+    "Fingerprint",
     "HeaderLink",
     "Incremental",
     "Keyset",
@@ -90,6 +98,7 @@ __all__ = [
     "PasswordLogin",
     "Problem",
     "RedactFilter",
+    "ReportsDeletions",
     "ResolvesUrls",
     "ResponseCheck",
     "Retry",

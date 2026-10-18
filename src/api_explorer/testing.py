@@ -12,22 +12,23 @@ framework is needed.
     assert len(api.calls) == 4                   # the 503, then 3 pages
 
 For pieces of your own: fetched() builds a page to test a paging style on
-its own, and check_retry_policy(), check_paging() and check_state_store()
-check the promises every retry policy, paging style and state store must
-keep. MemoryState is a state store that never touches the disk.
+its own, and check_retry_policy(), check_paging(), check_state_store() and
+check_tracker() check the promises every retry policy, paging style, state
+store and tracker must keep. MemoryState is a state store that never touches the disk.
 """
 
 import base64
 import json
 import math
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, Literal
 
 import httpx2
 
 from .client import Client
 from .errors import ApiError, Problem
-from .paging import Fetched, Paging
+from .incremental import Tracker
+from .paging import Fetched, PageRequest, Paging
 from .retry import Failure, Retry, RetryPolicy
 from .state import StateStore
 
@@ -619,3 +620,92 @@ def check_state_store(store: StateStore) -> None:
     store.put(a, {"last": None, "seen": []})
     if store.get(a) != {"last": None, "seen": []}:
         raise AssertionError("put didn't replace the earlier value")
+
+
+def check_tracker(
+    make: Callable[[dict[str, Any] | None], Tracker], records: Sequence[Any]
+) -> None:
+    """Check a tracker keeps the promises every Tracker must keep.
+
+    `make(state)` builds the tracker for a run from the last run's saved
+    state, or None for the first run: for example
+    lambda state: Incremental("updated_at", state=state). `records` are
+    what the source holds, at least two, all different, with whatever
+    fields the tracker reads. Raises AssertionError naming the first
+    promise broken:
+
+    - apply returns a PageRequest;
+    - state is plain JSON, before and after a run;
+    - a run that stops early, or whose source fails, leaves state as it
+      was, and the failure reaches the caller;
+    - a first run delivers every record, and only those given;
+    - the next run, over the same records, delivers none.
+    """
+    if len(records) < 2:
+        raise ValueError("check_tracker needs at least two records")
+    request = PageRequest("http://api.test/api/items/")
+
+    def plain(state: Any, when: str) -> dict[str, Any]:
+        try:
+            again = json.loads(json.dumps(state, allow_nan=False))
+        except (TypeError, ValueError) as exc:
+            raise AssertionError(f"state {when} isn't plain JSON: {exc}") from exc
+        if again != state:
+            raise AssertionError(
+                f"state {when} changes in a JSON round trip: {state!r}"
+            )
+        return again
+
+    tracker = make(None)
+    applied = tracker.apply(request)
+    returns_a_request = isinstance(applied, PageRequest)
+    if not returns_a_request:
+        raise AssertionError(f"apply must return a PageRequest, got {applied!r}")
+    start = plain(tracker.state, "before a run")
+
+    stream = tracker.track(iter(records))
+    next(stream, None)
+    close = getattr(stream, "close", None)
+    if close is not None:
+        close()
+    if tracker.state != start:
+        raise AssertionError("a run stopped early moved the state on")
+
+    class SourceFailed(Exception):
+        """The failure check_tracker's source raises part way."""
+
+    def failing() -> Iterator[Any]:
+        yield records[0]
+        raise SourceFailed
+
+    tracker = make(None)
+    try:
+        for _ in tracker.track(failing()):
+            pass
+    except SourceFailed:
+        pass
+    else:
+        raise AssertionError("track hid a failure of its source")
+    if tracker.state != start:
+        raise AssertionError("a run whose source failed moved the state on")
+
+    tracker = make(None)
+    delivered = list(tracker.track(iter(records)))
+    strangers = [r for r in delivered if not any(r is given for given in records)]
+    if strangers:
+        raise AssertionError(
+            f"track delivered records it wasn't given: {strangers[:3]!r}"
+        )
+    missing = [r for r in records if not any(r is got for got in delivered)]
+    if missing:
+        raise AssertionError(
+            f"a first run didn't deliver every record: missing {missing[:3]!r}"
+        )
+    saved = plain(tracker.state, "after a run")
+
+    again = list(make(saved).track(iter(records)))
+    if again:
+        raise AssertionError(
+            f"nothing changed, yet the next run delivered {len(again)} records: "
+            f"{again[:3]!r}"
+        )

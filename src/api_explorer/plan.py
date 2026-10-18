@@ -9,7 +9,7 @@ from typing import Any, Literal
 from .auth import ClientCredentials, PasswordLogin, TokenRefresh, token_headers
 from .checks import error_at
 from .client import Client
-from .incremental import Changes, Incremental, Keyset, Tracker
+from .incremental import Changes, Incremental, Keyset, ReportsDeletions, Tracker
 from .paging import Cursor, HeaderLink, NextLink, Offset, Paging
 from .state import tracked_run
 from .warehouse import Warehouse
@@ -184,7 +184,7 @@ class FetchPlan:
                 self.table,
                 self.records(client, run),
                 key=key,
-                deleted_by=run if isinstance(run, Changes) else None,
+                deleted_by=run if isinstance(run, ReportsDeletions) else None,
             )
 
     def records(
