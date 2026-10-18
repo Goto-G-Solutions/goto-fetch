@@ -199,6 +199,7 @@ def check_limit(limit: int | None) -> None:
     if limit is not None and limit < 0:
         raise ValueError(f"limit can't be negative, got {limit}")
 
+
 def check_table(table: str) -> None:
     """Refuse the state table's name: the built-in warehouses keep tracked runs' state in it.
 

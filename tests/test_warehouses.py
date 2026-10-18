@@ -202,6 +202,7 @@ def test_a_negative_limit_is_refused_the_same_way_everywhere(database):
             shop.read("t", limit=-1)
         assert shop.read("t", limit=0) == []
 
+
 @pytest.mark.parametrize("name", ["goto_fetch_state", "GOTO_FETCH_STATE"])
 def test_the_state_table_s_name_is_refused_for_records(database, name):
     # Regression: records written to a table of that name replaced the

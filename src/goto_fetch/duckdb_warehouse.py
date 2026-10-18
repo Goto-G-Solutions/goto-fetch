@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from .incremental import ReportsDeletions
 from .state import STATE_TABLE, check_state_name
-from .warehouse import Kind, check_table, matching, quote, write_run
+from .warehouse import Kind, check_limit, check_table, matching, quote, write_run
 
 if TYPE_CHECKING:
     import duckdb
