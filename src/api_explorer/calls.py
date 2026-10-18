@@ -109,6 +109,8 @@ def code(value: Any, level: int = 0) -> str:
         return f"os.environ[{value.variable!r}]"
     if isinstance(value, Name):
         return value.text
+    if isinstance(value, list):
+        return "[" + ", ".join(code(item, level) for item in value) + "]"
     if isinstance(value, type) or callable(value):
         return value.__name__
     return repr(value)
@@ -123,7 +125,7 @@ def names(value: Any) -> set[str]:
         return found
     if isinstance(value, list):
         return set().union(*(names(item) for item in value))
-    if isinstance(value, type) or (callable(value) and not isinstance(value, Name)):
+    if isinstance(value, type) or callable(value):
         return {value.__name__}
     return set()
 

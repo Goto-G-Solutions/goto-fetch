@@ -536,3 +536,9 @@ def test_options_given_to_a_plan_s_client_go_over_its_own():
 def test_a_plan_refuses_settings_its_script_couldn_t_write(options, message):
     with pytest.raises((ValueError, TypeError), match=message):
         FetchPlan("http://h/api", "/a/", **options)
+
+
+def test_an_incremental_plan_without_a_filter_is_written_without_one():
+    # The script read Incremental('updated_at', None), a None with no meaning.
+    plan = FetchPlan("http://api.test/api", "/x/", track="incremental", table="t")
+    assert plan.tracker_call().code() == "Incremental('updated_at')"

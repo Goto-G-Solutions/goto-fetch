@@ -23,7 +23,7 @@ from .warehouse import Warehouse
 
 @dataclass(frozen=True)
 class FetchPlan:
-    """One fetch, as the Explore panel describes it.
+    """One fetch, as the explorer notebook describes it.
 
     client() and records() run it, and store() runs it into a warehouse.
     script() writes it as a PEP 723 script, with uv-installable
@@ -230,9 +230,11 @@ class FetchPlan:
         """
         if self.track == "incremental":
             options = {"send_in": self.change_in} if self.change_in != "query" else {}
-            return Call(
-                Incremental, (self.change_field, self.change_param or None), options
+            args = (
+                self.change_field,
+                *([self.change_param] if self.change_param else []),
             )
+            return Call(Incremental, args, options)
         if self.track == "changes":
             options: dict[str, Any] = {"key": self.key}
             if self.ignore:
@@ -423,8 +425,10 @@ def _import_line(imported: list[str]) -> str:
     )
 
 
+# The rest can't start with a name character: "api-explorer-tools" is
+# another package.
 _REQUIREMENT = re.compile(
-    r"(?P<name>api-explorer)(\[(?P<extras>[^\]]*)\])?(?P<rest>.*)"
+    r"(?P<name>api-explorer)(\[(?P<extras>[^\]]*)\])?(?P<rest>(?![\w.-]).*)"
 )
 
 

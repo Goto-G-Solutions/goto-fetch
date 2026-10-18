@@ -54,6 +54,14 @@ def test_a_name_or_a_method_text_can_only_be_written():
         Call("client.records").build()
 
 
+def test_a_list_is_written_item_by_item():
+    # Regression: a list was written with repr, so a Secret inside one
+    # was written as Secret(...) rather than as a read of the environment.
+    call = Call(pair, ([Secret("X", "x"), Call(pair, (1,)), "a"],))
+    assert code(call) == "pair([os.environ['X'], pair(1), 'a'])"
+    assert build(call) == (["x", (1, 0, None), "a"], 0, None)
+
+
 def test_reads_environment_finds_a_secret_at_any_depth():
     assert reads_environment(
         Call(pair, kwargs={"c": [Call(pair, (Secret("X", "x"),))]})
@@ -68,8 +76,11 @@ def test_reads_environment_finds_a_secret_at_any_depth():
         ("api-explorer==0.1.0", "api-explorer[duckdb]==0.1.0"),
         ("api-explorer @ file:///src/x", "api-explorer[duckdb] @ file:///src/x"),
         ("api-explorer[fast]==0.1.0", "api-explorer[fast,duckdb]==0.1.0"),
+        # Regression: another package starting with this one's name got
+        # the extra too.
+        ("api-explorer-tools==1", "api-explorer-tools==1"),
     ],
-    ids=["bare", "pinned", "local", "other-extra"],
+    ids=["bare", "pinned", "local", "other-extra", "other-package"],
 )
 def test_a_script_needing_duckdb_asks_for_this_package_s_extra(
     requirement, with_duckdb
