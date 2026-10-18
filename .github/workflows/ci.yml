@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v7
       - run: uv run --python ${{ matrix.python }} pytest
 
   core:
@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v7
       - run: uv run --isolated --no-dev --with pytest pytest
 
   oldest:
@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v7
       - run: >-
           uv run --isolated --no-dev --python 3.11 --resolution lowest-direct
           --with-editable . --with "pytest>=8.4" pytest
@@ -54,7 +54,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v7
       - run: uv build --wheel --out-dir dist
       - run: |
           cd /tmp
@@ -66,7 +66,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v7
       - run: uvx ruff check
       - run: uvx ruff format --check
       - run: uvx --with pytest marimo check --strict notebooks/explorer.py
@@ -76,7 +76,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v7
       - run: uv run pyright
 
   notebook:
@@ -86,7 +86,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v7
       - run: >-
           uv run --python 3.11 --with marimo --with-editable .
           marimo export html notebooks/explorer.py -o explorer.html
