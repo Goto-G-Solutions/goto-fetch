@@ -286,7 +286,7 @@ def test_an_error_path_stops_the_plan_and_its_script_alike(run_script):
         pytest.raises(ApiError, match="quota exceeded"),
     ):
         list(plan.records(client))
-    assert "check=error_at('error')" in plan.script()
+    assert "check=error_at('error')" in plan.script()  # and the script runs, below
     with pytest.raises(ApiError, match="quota exceeded"):
         run_script(plan.script(), handler)
 
@@ -401,7 +401,7 @@ def test_a_stored_plan_s_script_stores_the_same_way(tmp_path, run_script):
     )
     text = plan.script()
     assert "tracked_run(shop, 'orders', Incremental" in text
-    assert '"duckdb"' in text
+    assert '"api-explorer[duckdb]"' in text
     assert run_script(text, keyset_api(data))["count"] == 2
     data.append(stamped(3, 3))
     assert run_script(text, keyset_api(data))["count"] == 1
@@ -488,3 +488,12 @@ def test_a_script_s_docstring_hides_secrets_in_its_urls():
     first_lines = plan.script().split("from api_explorer")[0]
     assert "S3" not in first_lines.split("dependencies")[1]
     assert "T9" not in first_lines.split("dependencies")[1]
+
+
+def test_an_access_token_is_read_from_the_environment_only_if_set():
+    plan = FetchPlan(
+        "http://h/api", "/a/", auth="refresh", refresh_token="r", access_token="a"
+    )
+    text = plan.script()
+    assert "access=os.environ.get('API_ACCESS_TOKEN')" in text
+    assert "refresh=os.environ['API_REFRESH_TOKEN']" in text
