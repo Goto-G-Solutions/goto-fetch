@@ -18,7 +18,7 @@ Every warehouse keeps these promises (and `check_warehouse` checks them):
 - **All or nothing:** one `write` either stores the whole run or leaves the table as it was, even if a request fails part way. The database warehouses copy the run to temporary files first, so a failed request never touches the database.
 - **Keys:** with `key=`, a record replaces the row with its key, and of several with one key in a run, the last wins. Without one, records are added.
 - **Deletions:** `deleted_by=` removes the keys a tracker lists as gone, only once the records are stored.
-- **No value lost:** columns follow the records. Nested objects and lists are JSON columns, text stays text (timestamps included), new fields add columns, and a column whose values change type is widened: integers beside floats become floats when that loses nothing, anything else becomes text, with a warning.
+- **No value lost:** columns follow the records. Nested objects and lists are JSON columns, text stays text (timestamps included), new fields add columns, and a column whose values change type is widened: integers beside floats become floats when that loses nothing, anything else becomes text, with a warning. A record without its key, or with no fields at all, is refused before anything is written.
 
 ## Examples
 
@@ -66,5 +66,6 @@ with tracked_run(shop, "orders", Incremental, "updated_at", "updated_since") as 
 - **`key` is a top-level field** of the records (`"id"`), not a path.
 - **Fields differing only in case** (`id` and `ID`) are refused: databases treat them as one column.
 - **DuckDB lets one process write to a file at a time.** Each call opens and closes the file, so readers fit between runs.
+- **Memory:** `write` holds `batch_size` records at a time (10,000 by default) while it copies the run to disk; lower it for very wide records.
 - **Two runs under one name at once** are safe but wasteful: the last to finish wins, and at worst the next run fetches some records again.
 - Timestamps stay text, as the API sent them; cast in SQL (`CAST(updated_at AS TIMESTAMPTZ)` in DuckDB).

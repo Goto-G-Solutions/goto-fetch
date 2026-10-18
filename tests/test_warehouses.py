@@ -7,6 +7,8 @@ promises (staging a run in batches, names that differ only in case,
 refusing bad arguments), through read(), so the same test runs on both.
 """
 
+import math
+
 import pytest
 
 from api_explorer import (
@@ -66,6 +68,16 @@ class KeepsDeleted(MemoryWarehouse):
         return super().write(table, records, key=key)
 
 
+class StoresEmpty(MemoryWarehouse):
+    """Broken: stores a record with no fields as a row of nothing."""
+
+    def write(self, table, records, *, key=None, deleted_by=None):
+        records = list(records)
+        kept = [r for r in records if r]
+        stored = super().write(table, kept, key=key, deleted_by=deleted_by)
+        return stored + len(records) - len(kept)
+
+
 class Rounds(MemoryWarehouse):
     """Broken: stores floats as whole numbers."""
 
@@ -84,8 +96,9 @@ class Rounds(MemoryWarehouse):
         (Partial, "a write whose records failed must store nothing"),
         (KeepsDeleted, "deleted_by's keys must be removed"),
         (Rounds, "read must give back what was written"),
+        (StoresEmpty, "a record with no fields must be refused"),
     ],
-    ids=["ignores-key", "partial", "keeps-deleted", "rounds"],
+    ids=["ignores-key", "partial", "keeps-deleted", "rounds", "stores-empty"],
 )
 def test_check_warehouse_catches_a_broken_warehouse(broken, message):
     with pytest.raises(AssertionError, match=message):
@@ -211,6 +224,37 @@ def test_deleted_keys_match_a_key_column_that_holds_text(database):
     then = Changes("id", state=gone.state)
     shop.write("p", then.track([{"id": "a"}]), key="id", deleted_by=then)
     assert shop.read("p") == [{"id": "a"}]
+
+
+def test_integers_joining_a_float_column_become_floats(database):
+    # Regression: a float column holding a value beyond 2**53 became text
+    # when integers arrived, though a float holds those integers exactly.
+    shop = database()
+    shop.write("t", [{"id": 1, "v": 1e300}], key="id")
+    shop.write("t", [{"id": 2, "v": 3}], key="id")
+    assert {r["id"]: r["v"] for r in shop.read("t")} == {1: 1e300, 2: 3.0}
+
+
+def test_a_record_with_no_fields_is_refused(database):
+    # Regression: {} made a table with no columns impossible (the write
+    # reported records stored and stored none) and an INSERT with no
+    # columns fail in one with.
+    shop = database()
+    shop.write("t", [{"id": 1}])
+    with pytest.raises(ApiError, match="no fields"):
+        shop.write("t", [{"id": 2}, {}])
+    assert shop.read("t") == [{"id": 1}]
+
+
+def test_nan_and_infinity_survive_a_float_column(database):
+    # Regression: sqlite3 stores NaN and infinity as NULL, losing them.
+    shop = database()
+    shop.write("t", [{"id": 1, "v": math.nan}, {"id": 2, "v": math.inf}], key="id")
+    values = {r["id"]: r["v"] for r in shop.read("t")}
+    kept = {1: ("NaN", math.nan), 2: ("Infinity", math.inf)}
+    for key, (text, number) in kept.items():
+        found = values[key]
+        assert found == text or (isinstance(found, float) and str(found) == str(number))
 
 
 @pytest.mark.parametrize("one_run", [True, False], ids=["one-run", "two-runs"])

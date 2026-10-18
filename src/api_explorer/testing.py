@@ -43,6 +43,7 @@ from .warehouse import (
     check_write,
     deleted_keys,
     last_per_key,
+    refuse_empty_records,
     same_value,
 )
 
@@ -793,6 +794,7 @@ class MemoryWarehouse:
         """Store `records` in `table`, all or nothing; return how many were stored."""
         check_write(key, deleted_by)
         rows = [json.loads(json.dumps(as_dict(r), default=str)) for r in records]
+        refuse_empty_records(rows)
         if key is not None:
             rows = last_per_key(rows, key)
         gone = deleted_keys(deleted_by)
@@ -934,6 +936,15 @@ def check_warehouse(make: Callable[[], Warehouse]) -> None:
         refused = True
     if not refused:
         raise AssertionError("a record without its key must be refused")
+    if not matches(shop.read("orders"), [{"id": 1, "v": "a"}]):
+        raise fail("a refused write must store nothing", shop.read("orders"))
+    refused = False
+    try:
+        shop.write("orders", [{"id": 3, "v": "c"}, {}])
+    except Exception:  # noqa: BLE001 (any refusal will do)
+        refused = True
+    if not refused:
+        raise AssertionError("a record with no fields must be refused")
     if not matches(shop.read("orders"), [{"id": 1, "v": "a"}]):
         raise fail("a refused write must store nothing", shop.read("orders"))
 

@@ -293,13 +293,18 @@ check_state_store(lambda: JsonFileState(f"state-{os.urandom(4).hex()}"))
 
 `write(table, records, *, key=None, deleted_by=None)` stores a run and returns how many records it stored; `read(table, limit=None)` gives the rows as dicts.
 
-**Promises:** one write is all or nothing; with a key, a record replaces the row with its key, the last of a key winning; `deleted_by`'s keys are removed only after storing, and a tracker whose run isn't complete is refused; no value is lost (`read` gives it back as written, or as its JSON text); a record without its key is refused.
+**Promises:** one write is all or nothing; with a key, a record replaces the row with its key, the last of a key winning; `deleted_by`'s keys are removed only after storing, and a tracker whose run isn't complete is refused; no value is lost (`read` gives it back as written, or as its JSON text); a record without its key, or with no fields, is refused.
 
-**You get for free:** tracked runs into it (`tracked_run`, `FetchPlan.store(warehouse=...)`), and the checks. `check_write`, `deleted_keys` and `last_per_key` from `api_explorer.warehouse` handle the argument rules.
+**You get for free:** tracked runs into it (`tracked_run`, `FetchPlan.store(warehouse=...)`), and the checks. `check_write`, `deleted_keys`, `refuse_empty_records` and `last_per_key` from `api_explorer.warehouse` handle the argument rules.
 
 ```python
 from api_explorer.testing import check_warehouse
-from api_explorer.warehouse import check_write, deleted_keys, last_per_key
+from api_explorer.warehouse import (
+    check_write,
+    deleted_keys,
+    last_per_key,
+    refuse_empty_records,
+)
 
 
 class JsonLinesWarehouse:
@@ -325,6 +330,7 @@ class JsonLinesWarehouse:
         incoming = [
             dict(record) for record in records
         ]  # read all first: all or nothing
+        refuse_empty_records(incoming)
         if key is not None:
             incoming = last_per_key(incoming, key)
         gone = deleted_keys(deleted_by)

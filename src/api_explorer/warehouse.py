@@ -13,7 +13,8 @@ them):
   tracker whose run isn't complete is refused before anything is written.
 - No value is lost. read() gives each value back as written, or, where a
   column had to change type, as its JSON text ("1", "true", '{"a":1}');
-  text stays text. A record without its key is refused, never stored.
+  text stays text. A record without its key, or with no fields at all, is
+  refused, never stored.
 
 How tables and columns are made is up to each warehouse. The ones here
 are DuckDBWarehouse (the "duckdb" extra), SqliteWarehouse (Python's own
@@ -31,6 +32,7 @@ checks) are its building blocks.
 
 import json
 import logging
+import math
 import tempfile
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import AbstractContextManager
@@ -147,7 +149,8 @@ def to_kind(value: Any, kind: Kind) -> Any:
     if isinstance(value, bool):
         return value if kind == "boolean" else None
     if kind == "float" and isinstance(value, (int, float)):
-        return float(value)
+        # SQLite stores NaN and infinity as NULL; their JSON text keeps them.
+        return float(value) if math.isfinite(value) else as_text(value)
     if kind == "integer" and isinstance(value, int):
         return value
     return None
@@ -205,6 +208,12 @@ def deleted_keys(deleted_by: ReportsDeletions | None) -> list[Any]:
     return list(gone)
 
 
+def refuse_empty_records(rows: Iterable[dict[str, Any]]) -> None:
+    """Raise ApiError if a row has no fields: nothing to store, and no column to make."""
+    if any(not row for row in rows):
+        raise ApiError("A record has no fields, so there is nothing to store: {}")
+
+
 def last_per_key(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
     """`rows`, one per key, the last of each winning, in first-seen order."""
     by_key: dict[str, dict[str, Any]] = {}
@@ -257,6 +266,7 @@ def _stage(
     stream = iter(records)
     while batch := list(islice(stream, batch_size)):
         rows = [as_dict(record) for record in batch]
+        refuse_empty_records(rows)
         if key is not None:
             rows = last_per_key(rows, key)
         names = list(dict.fromkeys(name for row in rows for name in row))
@@ -291,12 +301,12 @@ def _plan_columns(
 
     `stored` maps the table's columns to their kinds ({} if there is no
     table). only_nulls(column) says whether a column holds nothing but
-    nulls, and holds_inexact(column) whether it holds an integer too large
-    for a float to keep exactly (asked only when integers meet floats).
-    Returns three maps:
-    the columns to add, the columns to change kind (each logged as a
-    "widen" warning, unless it held only nulls), and every column after.
-    A field seen only as null gets a text column as a place holder.
+    nulls, and holds_inexact(column) whether an integer column holds a
+    value too large for a float to keep exactly (asked only when floats
+    arrive in one). Returns three maps: the columns to add, the columns to
+    change kind (each logged as a "widen" warning, unless it held only
+    nulls), and every column after. A field seen only as null gets a text
+    column as a place holder.
     """
     after = dict(stored)
     added: dict[str, Kind] = {}
@@ -312,8 +322,10 @@ def _plan_columns(
             new = kind  # nothing to keep yet, so the column takes the new kind
         else:
             pair = {after[existing], kind}
+            # Only an integer column can hold an integer a float can't.
             exact = pair != {"integer", "float"} or (
-                name not in run.inexact and not holds_inexact(existing)
+                name not in run.inexact
+                and (after[existing] != "integer" or not holds_inexact(existing))
             )
             new = widen(after[existing], kind, exact=exact)
             if new == after[existing]:
