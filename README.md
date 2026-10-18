@@ -175,7 +175,7 @@ Any object with `write` and `read` that keeps those promises is a `Warehouse`, a
 
 The interfaces are Protocols: your pieces match their shape and never inherit from ours, and a type checker confirms they fit. `Paging`, `RetryPolicy`, `Login`, `ResolvesUrls` (an auth with URLs of its own), `Tracker` (what a run delivers: `apply`, `track`, `state`), `ReportsDeletions` (a tracker that knows what is gone), `StateStore` and `Warehouse` are the main ones; one-function seams are plain function types (`Decoder`, `ResponseCheck`, `Fingerprint`). `check_paging`, `check_retry_policy`, `check_tracker`, `check_state_store` and `check_warehouse` check behaviour the types can't.
 
-`Client.records` is built from public parts, `paginate`, a `Paging`, `read_page` and `converter`, so a loop of your own can reuse the same rules. `paginate` pages by whatever your fetch needs, not only URLs, with the same loop protection:
+`Client.records` is built from public parts, `paginate`, a `Paging`, `read_page` and `api_explorer.models.converter`, so a loop of your own can reuse the same rules. `paginate` pages by whatever your fetch needs, not only URLs, with the same loop protection:
 
 ```python
 from api_explorer import paginate, read_page
@@ -245,7 +245,7 @@ Each line the package logs is an event: `record.event` is a short name (`page`, 
 
 Secrets in URLs, such as `?api_key=...` or `?access_token=...`, show as `***` in errors and in the lines `enable_logging` prints, including each request's.
 
-`Client(name="crm")` labels every line from that client's requests, `[crm]` in the readable format and `record.client` for handlers. That includes lines your own pieces log during a request: log under your own logger, add it with `enable_logging(loggers=("mypkg",))`, and use `log_event` for the same `event` and `data` fields.
+`Client(name="crm")` labels every line from that client's requests, `[crm]` in the readable format and `record.client` for handlers. That includes lines your own pieces log during a request: log under your own logger, add it with `enable_logging(loggers=("mypkg",))`, and use `api_explorer.logs.log_event` for the same `event` and `data` fields.
 
 ## Testing your code
 

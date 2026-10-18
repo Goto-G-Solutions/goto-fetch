@@ -19,14 +19,13 @@ from api_explorer import (
     HeaderLink,
     NextLink,
     Offset,
-    Page,
     PageRequest,
     http,
     paginate,
     read_page,
-    request_key,
     with_query,
 )
+from api_explorer.paging import Page, request_key
 from api_explorer.testing import FakeApi, json_pages, offset_api, replies
 
 BASE = "http://api.test/api/items/"

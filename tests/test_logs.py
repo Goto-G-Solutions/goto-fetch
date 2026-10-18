@@ -20,10 +20,10 @@ from api_explorer import (
     disable_logging,
     enable_logging,
     http,
-    log_event,
     logging_to,
     to_frame,
 )
+from api_explorer.logs import log_event
 from api_explorer.testing import (
     TokenServer,
     cursor_api,

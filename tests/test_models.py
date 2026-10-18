@@ -5,7 +5,8 @@ from datetime import datetime
 
 import pytest
 
-from api_explorer import ApiError, as_dict, converter, to_frame
+from api_explorer import ApiError, to_frame
+from api_explorer.models import as_dict, converter
 from api_explorer.testing import json_pages
 
 BASE = "http://api.test/api/items/"

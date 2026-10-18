@@ -42,7 +42,7 @@ assert events[-1][1] == {
 
 The full table, with levels and data keys, is in the `api_explorer.logs` docstring (`python -c "import api_explorer.logs as l; help(l)"`). The ones to know: `page` and `done` (INFO, progress), `retry` (WARNING), `stop` (DEBUG, why paging ended), `renew` (DEBUG), `request` (INFO, with `http=True`), `no-count`, `count-short`, `text` and `widen` (WARNING, data that didn't fit), `stored` (INFO).
 
-A piece of your own logs the same way, with `log_event(logger, level, event, message, *args, data={...})` under a logger in the `api_explorer` tree or one you pass to `enable_logging(loggers=[...])`.
+A piece of your own logs the same way, with `log_event(logger, level, event, message, *args, data={...})` from `api_explorer.logs`, under a logger in the `api_explorer` tree or one you pass to `enable_logging(loggers=[...])`.
 
 ## Traps
 
