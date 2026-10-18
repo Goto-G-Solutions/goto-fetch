@@ -15,12 +15,19 @@ from api_explorer import (
     FetchPlan,
     Keyset,
     Retry,
+    SqliteWarehouse,
     package_requirement,
     select,
     to_frame,
 )
 from api_explorer import plan as plan_module
-from api_explorer.testing import TokenServer, changes_api, keyset_api
+from api_explorer.testing import (
+    MemoryState,
+    MemoryWarehouse,
+    TokenServer,
+    changes_api,
+    keyset_api,
+)
 
 SECRETS = {
     "token": "tok-secret",
@@ -301,7 +308,7 @@ def test_a_plan_that_stores_nothing_imports_no_paging_it_doesnt_use():
 @pytest.mark.parametrize(
     ("options", "message"),
     [
-        ({"track": "incremental"}, "needs a warehouse"),
+        ({"track": "incremental"}, "needs a table"),
         ({"warehouse": "x.duckdb"}, "needs a table"),
         ({"track": "changes", "warehouse": "x.duckdb", "table": "t"}, "needs a key"),
         (
@@ -316,7 +323,7 @@ def test_a_plan_that_stores_nothing_imports_no_paging_it_doesnt_use():
         ({"paging": "keyset"}, "needs change_param"),
     ],
     ids=[
-        "track-without-warehouse",
+        "track-without-table",
         "no-table",
         "changes-without-key",
         "max-pages",
@@ -400,3 +407,62 @@ def test_a_stored_plan_s_script_stores_the_same_way(tmp_path, run_script):
     assert run_script(text, keyset_api(data))["count"] == 1
     assert [row[0] for row in stored(tmp_path / "shop.duckdb")] == [1, 2, 3]
     assert api.calls == []
+
+
+def tracked(**options) -> FetchPlan:
+    return FetchPlan(
+        "http://api.test/api",
+        "/orders/",
+        table="orders",
+        key="id",
+        track="incremental",
+        change_param="updated_since",
+        **options,
+    )
+
+
+def test_a_tracked_plan_with_nowhere_to_store_is_refused_when_run_or_written():
+    plan = tracked()
+    with pytest.raises(ValueError, match="names no warehouse"):
+        plan.store(changes_api([]).client())
+    with pytest.raises(ValueError, match="needs a warehouse"):
+        plan.script()
+
+
+def test_store_takes_a_warehouse_of_your_own():
+    shop = MemoryWarehouse()
+    data = [stamped(1, 1), stamped(2, 2)]
+    assert tracked().store(changes_api(data).client(), warehouse=shop) == 2
+    data.append(stamped(3, 3))
+    assert tracked().store(changes_api(data).client(), warehouse=shop) == 1
+    assert sorted(r["id"] for r in shop.read("orders")) == [1, 2, 3]
+
+
+def test_store_needs_somewhere_to_keep_a_tracked_run_s_state():
+    class NoState:
+        def write(self, table, records, *, key=None, deleted_by=None):
+            return len(list(records))
+
+        def read(self, table, limit=None):
+            return []
+
+    with pytest.raises(TypeError, match="pass state="):
+        tracked().store(changes_api([]).client(), warehouse=NoState())
+    state = MemoryState()
+    tracked().store(
+        changes_api([stamped(1, 1)]).client(), warehouse=NoState(), state=state
+    )
+    assert state.get("orders")["last"] == stamped(1, 1)["updated_at"]
+
+
+def test_an_sqlite_plan_stores_and_writes_a_script_for_sqlite(tmp_path, run_script):
+    plan = tracked(warehouse=str(tmp_path / "shop.db"), warehouse_kind="sqlite")
+    data = [stamped(1, 1)]
+    assert plan.store(changes_api(data).client()) == 1
+    text = plan.script()
+    assert "shop = SqliteWarehouse(" in text
+    assert '"duckdb"' not in text
+    data.append(stamped(2, 2))
+    assert run_script(text, changes_api(data))["count"] == 1
+    stored_ids = [r["id"] for r in SqliteWarehouse(tmp_path / "shop.db").read("orders")]
+    assert sorted(stored_ids) == [1, 2]

@@ -151,7 +151,10 @@ def _():
     ignore = mo.ui.text(
         placeholder="fetched_at, stats.views", label="Leave out of the hash"
     )
-    warehouse = mo.ui.text(placeholder="shop.duckdb", label="DuckDB file")
+    warehouse = mo.ui.text(placeholder="shop.duckdb", label="File")
+    warehouse_kind = mo.ui.dropdown(
+        ["DuckDB", "SQLite"], value="DuckDB", label="Database"
+    )
     table = mo.ui.text(placeholder="orders", label="Table")
 
     max_pages = mo.ui.number(start=0, value=1, step=1, label="Pages (0 = all)")
@@ -215,6 +218,7 @@ def _():
         username,
         verbose,
         warehouse,
+        warehouse_kind,
     )
 
 
@@ -262,6 +266,7 @@ def _(
     username,
     verbose,
     warehouse,
+    warehouse_kind,
 ):
     def _section(title: str, *rows: Any) -> Any:
         return mo.vstack([mo.md(f"#### {title}"), *rows], gap=0.5)
@@ -368,7 +373,7 @@ def _(
             ),
         ]
 
-    _where = _row(warehouse, table, key)
+    _where = _row(warehouse_kind, warehouse, table, key)
     if track.value == "Changes, by a field":
         _store_rows = [
             _row(track),
@@ -379,7 +384,7 @@ def _(
                 "that grows, such as `updated_at`. Leave the filter empty if "
                 "the API can't filter: every page is fetched, and only new "
                 "records come through. Where the last run stopped is kept in "
-                "the DuckDB file, and saved only once the records are stored. "
+                "the same file, and saved only once the records are stored. "
                 "With a key, a changed record replaces its row."
             ),
         ]
@@ -400,7 +405,8 @@ def _(
             _row(track),
             _where,
             _hint(
-                "Optional: a DuckDB file and table to store the records in. "
+                "Optional: a DuckDB or SQLite file and table to store the "
+                "records in; SQLite needs nothing installed. "
                 "With a key, a record replaces the row with its key; without "
                 "one, records are added."
             ),
@@ -491,6 +497,7 @@ def _(
     username,
     verbose,
     warehouse,
+    warehouse_kind,
 ):
     mo.stop(
         not fetch.value,
@@ -556,6 +563,7 @@ def _(
         key=key.value,
         ignore=tuple(p.strip() for p in ignore.value.split(",") if p.strip()),
         warehouse=warehouse.value,
+        warehouse_kind="sqlite" if warehouse_kind.value == "SQLite" else "duckdb",
         table=table.value,
     )
 
@@ -578,24 +586,15 @@ def _(
         logging_to(level="DEBUG" if verbose.value else "WARNING", http=verbose.value),
         plan.client() as _client,
     ):
-        if plan.warehouse:
+        if plan.warehouse or plan.track != "none":
             stored_count = plan.store(_client)
         else:
             stored_count = None
             fetched = list(plan.records(_client))
     fetch_seconds = time.monotonic() - _started
-    if plan.warehouse:
+    if stored_count is not None:
         # Show what the table now holds, not just this run's changes.
-        import duckdb
-
-        with duckdb.connect(plan.warehouse, read_only=True) as _db:
-            _quoted = '"' + plan.table.replace('"', '""') + '"'
-            _tables = {_name for (_name,) in _db.sql("SHOW TABLES").fetchall()}
-            if plan.table in _tables:
-                _result = _db.sql(f"SELECT * FROM {_quoted} LIMIT 1000")
-                fetched = [dict(zip(_result.columns, _r)) for _r in _result.fetchall()]
-            else:
-                fetched = []
+        fetched = plan.open_warehouse().read(plan.table, limit=1000)
     return fetch_seconds, fetched, plan, stored_count
 
 

@@ -9,9 +9,11 @@ from typing import Any, Literal
 from .auth import ClientCredentials, PasswordLogin, TokenRefresh, token_headers
 from .checks import error_at
 from .client import Client
+from .duckdb_warehouse import DuckDBWarehouse
 from .incremental import Changes, Incremental, Keyset, ReportsDeletions, Tracker
 from .paging import Cursor, HeaderLink, NextLink, Offset, Paging
-from .state import tracked_run
+from .sqlite_warehouse import SqliteWarehouse
+from .state import StateStore, tracked_run
 from .warehouse import Warehouse
 
 
@@ -26,14 +28,15 @@ class FetchPlan:
     repr, and never written: scripts read $API_TOKEN, $API_REFRESH_TOKEN,
     $API_USERNAME, $API_PASSWORD and $API_CLIENT_SECRET instead.
 
-    Storing: `warehouse` (a DuckDB file) and `table` say where records go,
-    and `key` which field identifies one. `track` chooses what a run
+    Storing: `warehouse` (a file, DuckDB or SQLite as `warehouse_kind`
+    says) and `table` say where records go, and `key` which field
+    identifies one; store() also takes any Warehouse of your own. `track` chooses what a run
     delivers: everything ("none"), what changed by a field ("incremental":
     `change_field`, filtered by `change_param` if the API can), or what
     changed by a hash of each record ("changes", which needs `key` and can
-    `ignore` fields). A tracked plan needs a warehouse, since saving where
-    a run stopped without storing its records would skip them, and can't
-    use max_pages. paging="keyset" pages by `change_field` itself.
+    `ignore` fields). A tracked plan stores into a warehouse (store() and
+    script() refuse to run one without), since saving where a run stopped
+    without storing its records would skip them, and can't use max_pages. paging="keyset" pages by `change_field` itself.
     """
 
     base_url: str
@@ -74,16 +77,15 @@ class FetchPlan:
     key: str = ""
     ignore: tuple[str, ...] = ()
     warehouse: str = ""
+    warehouse_kind: Literal["duckdb", "sqlite"] = "duckdb"
     table: str = ""
 
     def __post_init__(self) -> None:
-        if self.track != "none" and not self.warehouse:
+        if (self.warehouse or self.track != "none") and not self.table:
             raise ValueError(
-                "A tracked plan needs a warehouse: saving where a run stopped "
-                "without storing its records would skip them next time"
+                "A plan that stores or tracks needs a table name: where its "
+                "records, and where its runs stopped, are kept"
             )
-        if self.warehouse and not self.table:
-            raise ValueError("A plan with a warehouse needs a table name")
         if self.track == "changes" and not self.key:
             raise ValueError("track='changes' needs a key, such as 'id'")
         if self.track != "none" and self.max_pages:
@@ -165,21 +167,39 @@ class FetchPlan:
             return Changes, (), options
         return None, (), {}
 
-    def store(self, client: Client) -> int:
-        """Run this plan into its warehouse, and return how many records were stored.
-
-        A tracked plan starts from where its last run stopped (saved in the
-        warehouse under the table's name) and saves where this one stopped
-        only once the records are stored.
-        """
+    def open_warehouse(self) -> Warehouse:
+        """The warehouse this plan names: a DuckDB or SQLite file."""
         if not self.warehouse:
-            raise ValueError("This plan has no warehouse to store into")
-        shop = Warehouse(self.warehouse)
+            raise ValueError(
+                "This plan names no warehouse: set warehouse, or pass one to store()"
+            )
+        if self.warehouse_kind == "sqlite":
+            return SqliteWarehouse(self.warehouse)
+        return DuckDBWarehouse(self.warehouse)
+
+    def store(
+        self,
+        client: Client,
+        warehouse: Warehouse | None = None,
+        state: StateStore | None = None,
+    ) -> int:
+        """Run this plan into a warehouse, and return how many records were stored.
+
+        The warehouse is `warehouse`, or the one the plan names. A tracked
+        plan starts from where its last run stopped, kept in `state` under
+        the table's name (by default in the warehouse, if it is also a
+        StateStore, as the built-in ones are), and saves where this one
+        stopped only once the records are stored.
+        """
+        shop = warehouse if warehouse is not None else self.open_warehouse()
         key = self.key or None
         kind, args, options = self.tracker()
         if kind is None:
             return shop.write(self.table, self.records(client), key=key)
-        with tracked_run(shop, self.table, kind, *args, **options) as run:
+        keeper = state if state is not None else shop
+        if not isinstance(keeper, StateStore):
+            raise TypeError(f"{shop!r} can't keep a tracked run's state: pass state=")
+        with tracked_run(keeper, self.table, kind, *args, **options) as run:
             return shop.write(
                 self.table,
                 self.records(client, run),
@@ -304,8 +324,14 @@ class FetchPlan:
         if any(a.startswith("paging=") for a in record_args):
             names.add(type(self.paging_strategy()).__name__)
 
+        if self.track != "none" and not self.warehouse:
+            raise ValueError(
+                "A tracked plan's script needs a warehouse: it would save where "
+                "each run stopped without storing the records"
+            )
         if self.warehouse:
-            deps.append("duckdb")
+            if self.warehouse_kind == "duckdb":
+                deps.append("duckdb")
             body += self._storing_lines(client_args, record_args, names)
             columns, backend = (), None  # the records are in the warehouse
         else:
@@ -343,8 +369,6 @@ class FetchPlan:
         reads_secrets = any("os.environ" in line for line in body + client_args)
         imports = ["import os", ""] if reads_secrets else []
         imports.append(f"from api_explorer import {', '.join(sorted(names))}")
-        if self.warehouse:
-            imports.append("from api_explorer.warehouse import Warehouse")
         doc = (
             f'"""Fetch {self.endpoint} from {self.base_url}, '
             'as set up in the API explorer."""'
@@ -356,6 +380,7 @@ class FetchPlan:
     ) -> list[str]:
         """The script lines that run this plan into its warehouse, as store() does."""
         kind, args, options = self.tracker()
+        names.add(type(self.open_warehouse()).__name__)
         clients = ["Client(", *(f"    {a}," for a in client_args), ")"]
         if kind is None:
             opening = ["with " + clients[0], *clients[1:-1], ") as client:"]
@@ -379,7 +404,7 @@ class FetchPlan:
                 "):",
             ]
         return [
-            f"shop = Warehouse({self.warehouse!r})",
+            f"shop = {type(self.open_warehouse()).__name__}({self.warehouse!r})",
             *opening,
             "    count = shop.write(",
             f"        {self.table!r},",

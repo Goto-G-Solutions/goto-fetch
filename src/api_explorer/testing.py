@@ -12,25 +12,34 @@ framework is needed.
     assert len(api.calls) == 4                   # the 503, then 3 pages
 
 For pieces of your own: fetched() builds a page to test a paging style on
-its own, and check_retry_policy(), check_paging(), check_state_store() and
-check_tracker() check the promises every retry policy, paging style, state
-store and tracker must keep. MemoryState is a state store that never touches the disk.
+its own, and check_retry_policy(), check_paging(), check_state_store(), check_tracker()
+and check_warehouse() check the promises every retry policy, paging style,
+state store, tracker and warehouse must keep. MemoryState and
+MemoryWarehouse never touch the disk.
 """
 
 import base64
 import json
 import math
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import Any, Literal
 
 import httpx2
 
 from .client import Client
 from .errors import ApiError, Problem
-from .incremental import Tracker
+from .incremental import ReportsDeletions, Tracker
+from .models import as_dict
 from .paging import Fetched, PageRequest, Paging
 from .retry import Failure, Retry, RetryPolicy
 from .state import StateStore
+from .warehouse import (
+    Warehouse,
+    check_write,
+    deleted_keys,
+    last_per_key,
+    same_value,
+)
 
 Answer = Callable[[httpx2.Request], httpx2.Response]
 """Turns one request into a response, as httpx2.MockTransport expects."""
@@ -708,4 +717,211 @@ def check_tracker(
         raise AssertionError(
             f"nothing changed, yet the next run delivered {len(again)} records: "
             f"{again[:3]!r}"
+        )
+
+
+class MemoryWarehouse:
+    """A Warehouse in memory, for tests: nothing touches the disk, nothing to install.
+
+    It keeps every promise of Warehouse, and stores values exactly as
+    written (it never needs to widen a column). It is also a StateStore,
+    like the database warehouses, so tracked_run can keep state in it.
+    `writes` counts the writes that were stored.
+    """
+
+    def __init__(self) -> None:
+        self._tables: dict[str, list[str]] = {}
+        self._state = MemoryState()
+        self.writes = 0
+
+    def write(
+        self,
+        table: str,
+        records: Iterable[Any],
+        *,
+        key: str | None = None,
+        deleted_by: ReportsDeletions | None = None,
+    ) -> int:
+        """Store `records` in `table`, all or nothing; return how many were stored."""
+        check_write(key, deleted_by, 1)
+        rows = [json.loads(json.dumps(as_dict(r), default=str)) for r in records]
+        if key is not None:
+            rows = last_per_key(rows, key)
+        gone = deleted_keys(deleted_by)
+        kept = [json.loads(text) for text in self._tables.get(table, [])]
+        if key is not None:
+            replaced = {json.dumps(row[key], sort_keys=True) for row in rows}
+            kept = [
+                r
+                for r in kept
+                if json.dumps(r.get(key), sort_keys=True) not in replaced
+            ]
+        kept += rows
+        if gone:
+            removed = {json.dumps(k, sort_keys=True) for k in gone}
+            kept = [
+                r for r in kept if json.dumps(r.get(key), sort_keys=True) not in removed
+            ]
+        if kept or table in self._tables:
+            self._tables[table] = [json.dumps(r) for r in kept]
+        self.writes += 1
+        return len(rows)
+
+    def read(self, table: str, limit: int | None = None) -> list[dict[str, Any]]:
+        """`table`'s rows as dicts, at most `limit`, each with every column."""
+        rows = [json.loads(text) for text in self._tables.get(table, [])]
+        names = list(dict.fromkeys(n for row in rows for n in row))
+        full = [{n: row.get(n) for n in names} for row in rows]
+        return full if limit is None else full[:limit]
+
+    def get(self, name: str) -> Any:
+        """The state last saved under `name`, or None."""
+        return self._state.get(name)
+
+    def put(self, name: str, value: Any) -> None:
+        """Save `value` under `name`, replacing what was there."""
+        self._state.put(name, value)
+
+
+class _Finished:
+    """A tracker stand-in whose run is complete, listing `deleted`."""
+
+    def __init__(self, deleted: list[Any] | None) -> None:
+        self.deleted = deleted
+
+
+def check_warehouse(make: Callable[[], Warehouse]) -> None:
+    """Check a warehouse keeps the promises every Warehouse must keep.
+
+    `make()` gives a new, empty warehouse each time it is called (a fresh
+    file, say). Raises AssertionError naming the first promise broken. The
+    promises are in api_explorer.warehouse; values may come back as
+    written or as their JSON text.
+    """
+
+    def matches(rows: list[dict[str, Any]], expected: list[dict[str, Any]]) -> bool:
+        def fits(row: dict[str, Any], want: dict[str, Any]) -> bool:
+            return all(same_value(row.get(k), v) for k, v in want.items()) and all(
+                row[k] is None for k in row if k not in want
+            )
+
+        left = list(rows)
+        for want in expected:
+            found = next((r for r in left if fits(r, want)), None)
+            if found is None:
+                return False
+            left.remove(found)
+        return not left
+
+    def fail(promise: str, rows: list[dict[str, Any]]) -> AssertionError:
+        return AssertionError(f"{promise}; the table holds {rows!r}")
+
+    class SourceFailed(Exception):
+        """The failure check_warehouse's source raises part way."""
+
+    def failing(rows: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:
+        yield from rows
+        raise SourceFailed
+
+    varied = {
+        "id": 1,
+        "n": 2,
+        "x": 2.5,
+        "ok": True,
+        "name": "Ann",
+        "meta": {"a": [1, "b"]},
+        "tags": ["new"],
+        "none": None,
+    }
+
+    shop = make()
+    if shop.read("orders") != []:
+        raise fail("a table never written must read as []", shop.read("orders"))
+    stored = shop.write("orders", [varied, {**varied, "id": 2}])
+    if stored != 2:
+        raise AssertionError(f"write must return how many it stored: 2, got {stored!r}")
+    rows = shop.read("orders")
+    if not matches(rows, [varied, {**varied, "id": 2}]):
+        raise fail("read must give back what was written", rows)
+    shop.write("orders", [{"id": 1, "name": "Ann"}])
+    if len(shop.read("orders")) != 3:
+        raise fail("without a key, write must add records", shop.read("orders"))
+
+    shop = make()
+    shop.write("orders", [{"id": 1, "v": "a"}, {"id": 2, "v": "b"}], key="id")
+    shop.write("orders", [{"id": 1, "v": "old"}, {"id": 1, "v": "new"}], key="id")
+    rows = shop.read("orders")
+    if not matches(rows, [{"id": 1, "v": "new"}, {"id": 2, "v": "b"}]):
+        raise fail("with a key, a record must replace its row, the last winning", rows)
+
+    shop = make()
+    try:
+        shop.write("orders", failing([{"id": 1}, {"id": 2}]))
+    except SourceFailed:
+        pass
+    else:
+        raise AssertionError("write hid a failure of its records")
+    if shop.read("orders") != []:
+        raise fail(
+            "a write whose records failed must store nothing", shop.read("orders")
+        )
+    shop.write("orders", [{"id": 1, "v": "a"}], key="id")
+    try:
+        shop.write(
+            "orders", failing([{"id": 1, "v": "b"}, {"id": 2, "v": 1.5}]), key="id"
+        )
+    except SourceFailed:
+        pass
+    if not matches(shop.read("orders"), [{"id": 1, "v": "a"}]):
+        raise fail(
+            "a write whose records failed must leave the table as it was",
+            shop.read("orders"),
+        )
+    refused = False
+    try:
+        shop.write("orders", [{"id": 3}, {"v": "no key"}], key="id")
+    except Exception:  # noqa: BLE001 - any refusal will do
+        refused = True
+    if not refused:
+        raise AssertionError("a record without its key must be refused")
+    if not matches(shop.read("orders"), [{"id": 1, "v": "a"}]):
+        raise fail("a refused write must store nothing", shop.read("orders"))
+
+    shop = make()
+    shop.write("orders", [{"id": 1}, {"id": 2}, {"id": 3}], key="id")
+    shop.write("orders", [{"id": 4}], key="id", deleted_by=_Finished([1, 3]))
+    if not matches(shop.read("orders"), [{"id": 2}, {"id": 4}]):
+        raise fail(
+            "deleted_by's keys must be removed once the records are stored",
+            shop.read("orders"),
+        )
+    refused = False
+    try:
+        shop.write("orders", [{"id": 5}], key="id", deleted_by=_Finished(None))
+    except Exception:  # noqa: BLE001 - any refusal will do
+        refused = True
+    if not refused:
+        raise AssertionError("a deleted_by whose run isn't complete must be refused")
+    if not matches(shop.read("orders"), [{"id": 2}, {"id": 4}]):
+        raise fail("a refused write must store nothing", shop.read("orders"))
+
+    shop = make()
+    shop.write("t", [{"id": 1, "v": 1}, {"id": 2, "v": True}, {"id": 3, "v": {"a": 1}}])
+    shop.write("t", [{"id": 4, "v": "text"}, {"id": 5, "v": 2.5}])
+    expected = [
+        {"id": i, "v": v}
+        for i, v in [(1, 1), (2, True), (3, {"a": 1}), (4, "text"), (5, 2.5)]
+    ]
+    if not matches(shop.read("t"), expected):
+        raise fail(
+            "a change of kind must keep every value, as written or as JSON text",
+            shop.read("t"),
+        )
+
+    shop = make()
+    odd = {"id": 1, 'it\'s "odd"': "a", "drop table x; --": "b"}
+    shop.write('my "table"; --', [odd])
+    if not matches(shop.read('my "table"; --'), [odd]):
+        raise fail(
+            "table and field names must be stored as given", shop.read('my "table"; --')
         )

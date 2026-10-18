@@ -18,6 +18,7 @@ from api_explorer import (
     ClientCredentials,
     Cursor,
     Decoder,
+    DuckDBWarehouse,
     Fingerprint,
     HeaderLink,
     Incremental,
@@ -34,14 +35,21 @@ from api_explorer import (
     Retry,
     RetryPolicy,
     SqliteState,
+    SqliteWarehouse,
     StateStore,
     TokenRefresh,
     Tracker,
+    Warehouse,
     error_at,
     json_decoder,
     tracked_run,
 )
-from api_explorer.testing import MemoryState, check_tracker, next_link_api
+from api_explorer.testing import (
+    MemoryState,
+    MemoryWarehouse,
+    check_tracker,
+    next_link_api,
+)
 
 
 class NewIds:
@@ -96,6 +104,12 @@ def test_built_in_pieces_fit_their_interfaces(tmp_path):
     resolves: ResolvesUrls = TokenRefresh("/token/refresh/", refresh="r")
     stores: list[StateStore] = [SqliteState(tmp_path / "s.db"), MemoryState()]
     trackers: list[Tracker] = [Incremental("updated_at"), Changes("id")]
+    warehouses: list[Warehouse] = [
+        DuckDBWarehouse(tmp_path / "w.duckdb"),
+        SqliteWarehouse(tmp_path / "w.db"),
+        MemoryWarehouse(),
+    ]
+    stores += [w for w in warehouses if isinstance(w, StateStore)]
     reports: ReportsDeletions = Changes("id")
     check: ResponseCheck = error_at()
     decode: Decoder = json_decoder()
@@ -103,6 +117,8 @@ def test_built_in_pieces_fit_their_interfaces(tmp_path):
     # And at run time, for the interfaces isinstance can check.
     assert all(isinstance(s, StateStore) for s in stores)
     assert all(isinstance(t, Tracker) for t in trackers)
+    assert all(isinstance(w, Warehouse) for w in warehouses)
+    assert all(isinstance(w, StateStore) for w in warehouses)
     assert isinstance(reports, ReportsDeletions)
     assert isinstance(resolves, ResolvesUrls)
     del paging, policy, logins, check, decode, fingerprint  # for pyright only
@@ -146,9 +162,7 @@ def test_a_user_built_tracker_runs_where_a_built_in_one_does():
 
 def test_a_user_built_tracker_s_deletions_reach_the_warehouse(tmp_path):
     duckdb = pytest.importorskip("duckdb")
-    from api_explorer.warehouse import Warehouse
-
-    shop = Warehouse(tmp_path / "shop.duckdb")
+    shop = DuckDBWarehouse(tmp_path / "shop.duckdb")
     first = NewIds()
     shop.write("items", first.track([{"id": 1}, {"id": 2}]), key="id", deleted_by=first)
     second = NewIds(first.state)
@@ -158,10 +172,7 @@ def test_a_user_built_tracker_s_deletions_reach_the_warehouse(tmp_path):
 
 
 def test_a_tracker_that_reports_nothing_yet_stops_the_write(tmp_path):
-    pytest.importorskip("duckdb")
-    from api_explorer.warehouse import Warehouse
-
     with pytest.raises(ApiError, match="hasn't finished a run"):
-        Warehouse(tmp_path / "shop.duckdb").write(
+        SqliteWarehouse(tmp_path / "shop.db").write(
             "items", [{"id": 1}], key="id", deleted_by=NewIds()
         )

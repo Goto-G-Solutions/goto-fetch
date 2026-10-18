@@ -16,8 +16,8 @@ JSON faster, pydantic or msgspec models type the records, and polars,
 pandas or pyarrow hold the frames.
 
 HTML scraping lives in api_explorer.scrape and needs the "scrape" extra.
-Storing records in DuckDB lives in api_explorer.warehouse and needs the
-"duckdb" extra.
+Records are kept in a Warehouse: SqliteWarehouse needs nothing more, and
+DuckDBWarehouse needs the "duckdb" extra.
 Fake APIs for testing your own code live in api_explorer.testing.
 
 The package logs nothing until asked: enable_logging() switches it on.
@@ -34,6 +34,7 @@ from .auth import (
 from .checks import ResponseCheck, error_at
 from .client import Client, ResolvesUrls
 from .decode import Decoder, json_decoder
+from .duckdb_warehouse import DuckDBWarehouse
 from .errors import ApiError, Problem, redact_url
 from .frames import default_backend, latest_per_key, to_frame
 from .incremental import (
@@ -72,7 +73,9 @@ from .paths import get_path, parse_path
 from .plan import FetchPlan, package_requirement
 from .records import explode, flatten, parse_datetime, select
 from .retry import Failure, Retry, RetryPolicy, backoff_delay, retry_after_seconds
+from .sqlite_warehouse import SqliteWarehouse
 from .state import SqliteState, StateStore, tracked_run
+from .warehouse import Warehouse
 
 __all__ = [
     "ApiError",
@@ -82,6 +85,7 @@ __all__ = [
     "ClientFilter",
     "Cursor",
     "Decoder",
+    "DuckDBWarehouse",
     "Failure",
     "FetchPlan",
     "Fetched",
@@ -104,9 +108,11 @@ __all__ = [
     "Retry",
     "RetryPolicy",
     "SqliteState",
+    "SqliteWarehouse",
     "StateStore",
     "TokenRefresh",
     "Tracker",
+    "Warehouse",
     "as_dict",
     "backoff_delay",
     "converter",
