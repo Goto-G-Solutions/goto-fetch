@@ -21,6 +21,7 @@ from .http import (
     TransportError,
     is_absolute,
     join_url,
+    keeps_credentials,
 )
 from .incremental import Tracker
 from .limits import RateLimit
@@ -79,7 +80,11 @@ class Client:
     `auth` signs every request, for tokens that change, such as
     TokenRefresh: any Auth (see goto_fetch.http). Its own URLs (login,
     refresh) follow the endpoint rules. A fixed token can go in `headers`
-    instead (token_headers).
+    instead (token_headers). Both stay on the API's own host: a request to
+    another host, such as an absolute next link elsewhere, goes out with
+    the call's own headers only and unsigned, and a "withheld" warning
+    says so. A client with no `base_url` has no home host, and sends them
+    everywhere.
 
     `transport` sends the requests: Urllib3Transport by default, or any
     Transport, such as Httpx2Transport for HTTP/2 or an httpx2.Client of
@@ -187,9 +192,27 @@ class Client:
     ) -> Response:
         method = method.upper()
         url = _with_params(self.url(endpoint), kwargs.pop("params", None))
-        # Merged by name without regard to case, the call's own winning.
-        headers = Headers(self.headers)
-        headers.update(kwargs.pop("headers", None) or {})
+        own = kwargs.pop("headers", None) or {}
+        at_home = not self.base_url or keeps_credentials(self.base_url, url)
+        if at_home:
+            # Merged by name without regard to case, the call's own winning.
+            headers = Headers(self.headers)
+            headers.update(own)
+        else:
+            # The client's headers and auth belong to its API's host; a URL
+            # elsewhere, such as a next link, must not carry them.
+            headers = Headers(own)
+            log_event(
+                logger,
+                logging.WARNING,
+                "withheld",
+                "%s %s is on another host than %s, so it goes without this "
+                "client's headers and auth",
+                method,
+                url,
+                self.base_url,
+                data={"method": method, "url": url, "base_url": self.base_url},
+            )
         request = Request(method, url, headers=headers.raw(), **kwargs)
         attempt = 0
         while True:
@@ -198,7 +221,7 @@ class Client:
             error: Exception | None = None
             problem: Problem | None = None
             try:
-                response = self._exchange(request)
+                response = self._exchange(request, self.auth if at_home else None)
             # No connection, a timeout, or a reply cut short: each may pass,
             # so it goes to the retry policy.
             except NetworkError as exc:
@@ -267,16 +290,16 @@ class Client:
             )
             time.sleep(wait)
 
-    def _exchange(self, request: Request) -> Response:
-        """Send `request` through the auth, if any, and the transport.
+    def _exchange(self, request: Request, auth: Auth | None) -> Response:
+        """Send `request` through `auth`, if any, and the transport.
 
         An auth's flow may send requests of its own first (to renew a token)
         and send the request again after a 401; every one goes through the
         transport, so a rate limit counts them all.
         """
-        if self.auth is None:
+        if auth is None:
             return self._one(request)
-        flow = self.auth.auth_flow(request)
+        flow = auth.auth_flow(request)
         # Closed whatever happens: a flow paused mid-renewal holds its lock
         # (TokenRefresh does), and a send that raises would leave it held,
         # so the retry after it would wait on that lock for ever.
@@ -285,7 +308,7 @@ class Client:
                 outgoing = next(flow)
             except StopIteration:
                 raise TypeError(
-                    f"{type(self.auth).__name__}.auth_flow yielded no request to send"
+                    f"{type(auth).__name__}.auth_flow yielded no request to send"
                 ) from None
             while True:
                 response = self._one(outgoing)
