@@ -172,7 +172,9 @@ def test_default_backend_says_what_to_install_when_there_is_none(no_frame_librar
 
 
 def test_to_frame_without_a_backend_uses_the_default(backend):
-    # The other tests pass the backend; this one checks None means default_backend().
+    # The other tests pass the backend; this one checks None means
+    # default_backend(). It takes the fixture only to skip with the rest when
+    # no library is installed.
     assert type(to_frame([{"id": 1}])) is type(to_frame([{"id": 1}], default_backend()))
 
 

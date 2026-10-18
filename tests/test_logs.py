@@ -6,6 +6,7 @@ import subprocess
 import sys
 
 import pytest
+from conftest import Collect
 
 from api_explorer import (
     ApiError,
@@ -34,20 +35,6 @@ from api_explorer.testing import (
     offset_api,
     replies,
 )
-
-
-class Collect(logging.Handler):
-    """A handler that keeps every record it is given."""
-
-    def __init__(self):
-        super().__init__()
-        self.records: list[logging.LogRecord] = []
-
-    def emit(self, record):
-        self.records.append(record)
-
-    def events(self):
-        return [(r.event, r.data) for r in self.records if hasattr(r, "event")]
 
 
 def test_nothing_prints_until_logging_is_switched_on():

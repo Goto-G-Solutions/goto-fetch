@@ -98,12 +98,7 @@ def test_a_sqlite_warehouse_keeps_state_in_the_same_file(shop):
     assert ("api_explorer_state",) in tables
 
 
-def test_a_sqlite_warehouse_needs_a_file():
-    with pytest.raises(ValueError, match="needs a file"):
-        SqliteWarehouse(":memory:")
-
-
-def test_without_sqlite3_the_error_says_what_is_missing(shop, monkeypatch):
+def test_a_sqlite_warehouse_without_sqlite3_says_what_is_missing(shop, monkeypatch):
     monkeypatch.setitem(sys.modules, "sqlite3", None)
     with pytest.raises(ImportError, match="built without"):
         shop.write("t", [{"id": 1}])

@@ -20,13 +20,15 @@ from api_explorer import (
     NextLink,
     Offset,
     PageRequest,
+    PaginationLoop,
+    follow,
     http,
     paginate,
     read_page,
     with_query,
 )
 from api_explorer.paging import Page, request_key
-from api_explorer.testing import FakeApi, json_pages, offset_api, replies
+from api_explorer.testing import FakeApi, cursor_api, json_pages, offset_api, replies
 
 BASE = "http://api.test/api/items/"
 
@@ -113,26 +115,9 @@ def test_records_follow_a_link_header_with_header_link(mock_client):
     assert list(records) == [1, 2]
 
 
-def search_api(pages: dict) -> tuple:
-    """A POST search endpoint: the body's "cursor" picks the page. Also logs bodies."""
-    bodies = []
-
-    def handler(request):
-        body = json.loads(request.content)
-        bodies.append((request.method, body))
-        return http.Response(200, json=pages[body.get("cursor")])
-
-    return handler, bodies
-
-
 def test_records_page_a_post_search_by_a_cursor_in_the_body(mock_client):
-    handler, bodies = search_api(
-        {
-            None: {"hits": [1, 2], "next_cursor": "c2"},
-            "c2": {"hits": [3], "next_cursor": None},
-        }
-    )
-    records = mock_client(handler).records(
+    api = cursor_api([1, 2, 3], page_size=2, send_in="body", results_key="hits")
+    records = mock_client(api).records(
         "/search/",
         method="POST",
         json={"q": "late"},
@@ -140,7 +125,8 @@ def test_records_page_a_post_search_by_a_cursor_in_the_body(mock_client):
         paging=Cursor(send_in="body"),
     )
     assert list(records) == [1, 2, 3]
-    assert bodies == [("POST", {"q": "late"}), ("POST", {"q": "late", "cursor": "c2"})]
+    sent = [(call.method, body) for call, body in zip(api.calls, api.bodies)]
+    assert sent == [("POST", {"q": "late"}), ("POST", {"q": "late", "cursor": "2"})]
 
 
 def test_a_cursor_can_go_back_in_the_query(mock_client):
@@ -194,12 +180,8 @@ def test_records_pass_retry_through_so_a_post_search_can_be_retried(mock_client)
 
 
 def test_a_cursor_that_repeats_is_caught_as_a_loop(mock_client):
-    handler, _ = search_api(
-        {
-            None: {"hits": [1], "next_cursor": "c"},
-            "c": {"hits": [2], "next_cursor": "c"},
-        }
-    )
+    # Every page names the same cursor, "c": the second request repeats.
+    handler = replies(http.Response(200, json={"hits": [1], "next_cursor": "c"}))
     records = mock_client(handler).records(
         "/search/",
         method="POST",
@@ -217,6 +199,8 @@ def test_cursor_refuses_an_unknown_place_to_send_it():
 
 
 def test_request_key_compares_page_requests_by_value():
+    # The JSON-form test above covers dicts; a PageRequest is a dataclass,
+    # keyed through its fields.
     first = PageRequest("http://h/s", "POST", {"q": "x", "cursor": "c"})
     same = PageRequest("http://h/s", "POST", {"cursor": "c", "q": "x"})
     assert request_key(first) == request_key(same)
@@ -309,14 +293,19 @@ def test_records_read_pages_with_read_page_and_name_the_url(mock_client):
 
 def test_records_follow_a_next_link_at_any_path(mock_client):
     handler = json_pages(
-        {"http://api.test/api/geo/": {"results": [1], "meta": {"next": None}}}
+        {
+            f"{BASE}": {"results": [1], "meta": {"next": "?page=2"}},
+            f"{BASE}?page=2": {"results": [2], "meta": {"next": None}},
+        }
     )
     assert list(
-        mock_client(handler).records("/geo/", paging=NextLink("meta.next"))
-    ) == [1]
+        mock_client(handler).records("/items/", paging=NextLink("meta.next"))
+    ) == [1, 2]
 
 
-def test_records_refuse_a_next_link_that_is_not_a_string(mock_client):
+def test_a_next_link_that_is_not_a_string_is_refused_even_on_an_empty_page(
+    mock_client,
+):
     with pytest.raises(ApiError, match="'next' holds a int, not a URL"):
         list(
             mock_client(json_pages({BASE: {"results": [], "next": 2}})).records(
@@ -536,15 +525,6 @@ def test_a_cursor_path_that_finds_several_values_is_refused(mock_client):
         )
 
 
-def test_a_malformed_next_link_is_refused_even_on_an_empty_page(mock_client):
-    with pytest.raises(ApiError, match="holds a int, not a URL"):
-        list(
-            mock_client(json_pages({BASE: {"results": [], "next": 2}})).records(
-                "/items/"
-            )
-        )
-
-
 def test_a_204_is_an_empty_page(mock_client):
     # Guard (dlt #1849): an empty 204 failed as "did not return JSON".
     assert list(mock_client(replies(http.Response(204))).records("/items/")) == []
@@ -560,8 +540,6 @@ def test_an_empty_200_is_an_error_not_an_empty_page(mock_client):
 def test_a_loop_is_named_by_url_and_never_shows_the_request_body():
     # Regression: the loop error showed the request's repr, body included,
     # which redaction (URLs only) couldn't clean.
-    from api_explorer import Cursor, PaginationLoop
-
     api = replies(http.Response(200, json={"hits": [1], "next_cursor": "same"}))
     records = api.client().records(
         "/search/",
@@ -578,8 +556,6 @@ def test_a_loop_is_named_by_url_and_never_shows_the_request_body():
 
 
 def test_follow_turns_a_style_s_answer_into_the_next_request():
-    from api_explorer import PageRequest, follow
-
     post = PageRequest("http://h/api/search/?page=1", "POST", {"q": "x"})
     answers = iter(["?page=2", "", PageRequest("http://h/other/"), None])
     step = follow(lambda fetched, request: next(answers))

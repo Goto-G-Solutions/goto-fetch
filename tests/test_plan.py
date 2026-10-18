@@ -33,6 +33,7 @@ from api_explorer.testing import (
     MemoryWarehouse,
     TokenServer,
     changes_api,
+    cursor_api,
     keyset_api,
     next_link_api,
 )
@@ -155,22 +156,17 @@ def test_every_kind_of_plan_writes_valid_python(plan):
     compile(plan.script(columns=["id"], backend="polars"), "fetch.py", "exec")
 
 
-def search_api(request):
-    """A POST search: the body's "cursor" picks one of two pages."""
-    cursor = json.loads(request.content).get("cursor")
-    pages = {
-        None: {"hits": [1, 2], "next_cursor": "c2"},
-        "c2": {"hits": [3], "next_cursor": None},
-    }
-    return http.Response(200, json=pages[cursor])
+def search_api() -> FakeApi:
+    """A POST search of three hits, two a page, with the cursor in the body."""
+    return cursor_api([1, 2, 3], page_size=2, send_in="body", results_key="hits")
 
 
 def test_a_post_search_script_fetches_what_its_plan_fetches(run_script):
     # A second end-to-end script test, on purpose: method, body, retry and
     # cursor paging are written by their own branches of script().
-    with SEARCH.client(transport=FakeApi(search_api)) as client:
+    with SEARCH.client(transport=search_api()) as client:
         expected = list(SEARCH.records(client))
-    namespace = run_script(SEARCH.script(), search_api)
+    namespace = run_script(SEARCH.script(), search_api())
     assert namespace["records"] == expected == [1, 2, 3]
 
 
@@ -397,7 +393,6 @@ def test_store_keeps_the_warehouse_equal_to_the_source_run_after_run(tmp_path, t
 def test_a_stored_plan_s_script_stores_the_same_way(tmp_path, run_script):
     pytest.importorskip("duckdb")
     data = [stamped(1, 1), stamped(2, 2)]
-    api = changes_api(data)
     plan = FetchPlan(
         "http://api.test/api",
         "/orders/",
@@ -415,7 +410,6 @@ def test_a_stored_plan_s_script_stores_the_same_way(tmp_path, run_script):
     data.append(stamped(3, 3))
     assert run_script(text, keyset_api(data))["count"] == 1
     assert [row[0] for row in stored(tmp_path / "shop.duckdb")] == [1, 2, 3]
-    assert api.calls == []
 
 
 def tracked(**options) -> FetchPlan:

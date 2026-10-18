@@ -4,6 +4,7 @@ import io
 import logging
 
 import pytest
+from conftest import Collect
 
 from api_explorer import ApiError, Retry, logging_to, redact_url
 from api_explorer.testing import replies
@@ -61,22 +62,17 @@ def test_a_failed_request_with_a_key_in_its_query_never_shows_the_key():
 
 def test_log_lines_and_their_data_never_show_the_key():
     stream = io.StringIO()
-    records = []
-
-    class Keep(logging.Handler):
-        def emit(self, record):
-            records.append(record)
-
+    collect = Collect()
     client = replies(503).client(retry=Retry(attempts=2, backoff=0))
     with (
         logging_to(logging.StreamHandler(stream), "DEBUG", http=True),
-        logging_to(Keep(), "DEBUG"),
+        logging_to(collect, "DEBUG"),
         pytest.raises(ApiError),
     ):
         client.request("GET", "/x/?api_key=S3")
     assert "api_key=***" in stream.getvalue()
     assert "S3" not in stream.getvalue()  # the request events included
-    assert all("S3" not in str(r.data) for r in records if hasattr(r, "data"))
+    assert all("S3" not in str(data) for _, data in collect.events())
 
 
 def test_a_password_written_into_a_url_is_hidden():

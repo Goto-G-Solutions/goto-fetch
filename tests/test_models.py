@@ -3,6 +3,7 @@
 import dataclasses
 from datetime import datetime
 
+import narwhals.stable.v2 as nw
 import pytest
 
 from api_explorer import ApiError, to_frame
@@ -100,4 +101,5 @@ def test_a_record_that_doesnt_fit_names_its_position_and_the_model(mock_client):
 
 def test_to_frame_takes_models_as_well_as_dicts(backend):
     frame = to_frame([ItemDataclass(1, "Ann"), {"id": 2, "name": "Bo"}], backend)
-    assert len(frame) == 2
+    columns = nw.from_native(frame, eager_only=True).to_dict(as_series=False)
+    assert columns == {"id": [1, 2], "name": ["Ann", "Bo"]}

@@ -120,7 +120,7 @@ def test_a_state_name_must_be_text(tmp_path, name):
         SqliteState(tmp_path / "state.db").get(name)
 
 
-def test_without_sqlite3_the_error_says_what_is_missing(tmp_path, monkeypatch):
+def test_sqlite_state_without_sqlite3_says_what_is_missing(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "sqlite3", None)
     with pytest.raises(ImportError, match="built without"):
         SqliteState(tmp_path / "state.db").get("orders")
@@ -175,6 +175,8 @@ def test_a_tracked_run_passes_its_options_to_incremental():
 
 
 def test_a_tracked_run_that_stops_reading_early_keeps_its_old_place():
+    # test_incremental checks the tracker's state; this checks what reaches
+    # the store.
     store = MemoryState({"orders": {"last": "2026-01-01T00:00:00Z", "seen": []}})
     with tracked_run(store, "orders", Incremental, "updated_at") as since:
         records = since.track([rec(1, 2), rec(2, 3)])

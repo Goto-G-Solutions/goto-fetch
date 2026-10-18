@@ -9,9 +9,9 @@ filters are checked here too, as the tests depend on them.
 """
 
 import json
-import logging
 
 import pytest
+from conftest import Collect
 
 from api_explorer import ApiError, Incremental, Keyset, PageRequest, http, logging_to
 from api_explorer.testing import FakeApi, changes_api, keyset_api, replies
@@ -281,11 +281,14 @@ def test_without_a_param_nothing_is_sent_and_old_records_are_dropped_here():
 
 
 def test_an_api_that_ignores_the_filter_still_gives_only_changes():
+    # Overlaps with the test above on purpose: here the filter is sent, and
+    # the records below it are still passed over.
     api = changes_api([rec(1, 1), rec(2, 2), rec(3, 3)], compare=None)
     since = Incremental(
         "updated_at", "updated_since", key="id", state={"last": at(2), "seen": ["2"]}
     )
     assert run(api, since) == [3]
+    assert api.queries == [{"updated_since": at(2)}]
 
 
 def test_the_filter_can_go_in_a_post_body():
@@ -347,17 +350,12 @@ def test_a_model_sees_only_the_records_that_come_through():
 
 
 def test_a_finished_run_logs_what_it_kept_and_where_the_next_starts():
-    kept = []
-
-    class Keep(logging.Handler):
-        def emit(self, record):
-            kept.append(record)
-
+    collect = Collect()
     since = Incremental("updated_at", key="id", state={"last": at(1), "seen": ["1"]})
     api = changes_api([rec(1, 1), rec(2, 2)])
-    with logging_to(Keep(), "DEBUG"):
+    with logging_to(collect, "DEBUG"):
         list(api.client(name="shop").records("/orders/", incremental=since))
-    [event] = [r for r in kept if getattr(r, "event", None) == "incremental"]
+    [event] = [r for r in collect.records if getattr(r, "event", None) == "incremental"]
     assert event.data == {"kept": 1, "dropped": 1, "last": at(2)}
     assert event.client == "shop"
 

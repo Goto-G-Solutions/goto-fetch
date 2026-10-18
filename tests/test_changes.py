@@ -7,9 +7,9 @@ test_properties checks the same rules over many random runs.
 """
 
 import json
-import logging
 
 import pytest
+from conftest import Collect
 
 from api_explorer import (
     ApiError,
@@ -160,7 +160,7 @@ def test_a_record_without_the_key_stops_the_run():
     assert changes.state == {"hashes": {}}
 
 
-def test_the_state_survives_a_round_trip_through_json():
+def test_a_changes_state_survives_a_round_trip_through_json():
     first = Changes("id")
     list(first.track([product(1), product(2)]))
     saved = json.loads(json.dumps(first.state))
@@ -190,15 +190,10 @@ def test_records_with_changes_fetch_everything_and_deliver_the_changes():
 
 
 def test_a_finished_run_logs_what_changed():
-    kept = []
-
-    class Keep(logging.Handler):
-        def emit(self, record):
-            kept.append(record)
-
+    collect = Collect()
     first = Changes("id")
     list(first.track([product(1), product(2), product(3)]))
-    with logging_to(Keep(), "DEBUG"):
+    with logging_to(collect, "DEBUG"):
         list(again(first).track([product(1), product(2, price=1), product(4)]))
-    [event] = [r for r in kept if getattr(r, "event", None) == "changes"]
+    [event] = [r for r in collect.records if getattr(r, "event", None) == "changes"]
     assert event.data == {"new": 1, "changed": 1, "unchanged": 1, "deleted": 1}

@@ -135,6 +135,7 @@ def test_a_failed_refresh_without_a_login_names_the_url_and_asks_for_new_tokens(
     assert "refreshing at http://api.test/api/token/refresh/ returned HTTP 401" in str(
         raised.value
     )
+    assert raised.value.url == "http://api.test/api/token/refresh/"
     assert server.paths == ["/api/token/refresh/"]
 
 
@@ -216,7 +217,7 @@ def test_secrets_stay_out_of_repr():
 def test_concurrent_requests_renew_a_rotating_token_only_once():
     # Regression: requests sharing one TokenRefresh each renewed at once,
     # and with rotation only the first refresh token worked: 1 of 8
-    # requests succeeded. Renewal is one at a time now, and a request that
+    # requests succeeded. Renewal is one at a time, and a request that
     # finds the token already renewed uses it.
     server = TokenServer(rotate=True)
     answer = server._answer
@@ -300,12 +301,12 @@ def test_a_temporary_failure_at_the_token_endpoint_is_retried():
     answer = server._answer
     failures = [http.Response(503)]
 
-    def flaky(request):
+    def answer_flaky(request):
         if request.url.path == "/api/token/" and failures:
             return failures.pop()
         return answer(request)
 
-    server._answer = flaky
+    server._answer = answer_flaky
     auth = TokenRefresh(login=ClientCredentials("/token/", "client", "secret"))
     assert list(server.client(auth=auth).records("/items/")) == [{"id": 1}]
     assert server.paths.count("/api/token/") == 2
@@ -371,17 +372,6 @@ def test_a_refresh_reply_without_a_token_falls_back_to_logging_in():
     )
     client = Client("http://api.test/api", auth=auth, transport=FakeApi(answer))
     assert client.get_json("/items/") == {"ok": True}
-
-
-def test_a_failed_refresh_names_the_refresh_endpoint():
-    def answer(request):
-        return http.Response(400)
-
-    auth = TokenRefresh("/token/refresh/", refresh="r")
-    client = Client("http://api.test/api", auth=auth, transport=FakeApi(answer))
-    with pytest.raises(ApiError) as raised:
-        client.get_json("/items/")
-    assert raised.value.url == "http://api.test/api/token/refresh/"
 
 
 def test_a_token_request_that_fails_then_succeeds_doesn_t_hang_the_retry():

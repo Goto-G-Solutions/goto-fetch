@@ -7,10 +7,10 @@ and the transaction order a regression taught.
 """
 
 import dataclasses
-import logging
 import sys
 
 import pytest
+from conftest import Collect
 
 duckdb = pytest.importorskip("duckdb", reason="the warehouse needs the duckdb extra")
 
@@ -96,8 +96,8 @@ def test_integers_beyond_64_bits_are_text_with_every_digit(shop):
 def test_a_column_emptied_during_a_run_is_widened_not_retyped(shop):
     # Regression: the run replaced the only row holding "" with a null, then
     # retyped the column to BIGINT for a later 0. DuckDB still held the old
-    # row inside the transaction and failed to convert "". Columns now
-    # change before any row does, judged on what the table held before.
+    # row inside the transaction and failed to convert "". Columns change
+    # before any row does, judged on what the table held before.
     shop.write("t", [{"id": 0, "v": ""}], key="id")
     run = [{"id": 0, "v": None}, {"id": 1, "v": None}, {"id": 2, "v": 0}]
     shop.write("t", run, key="id", batch_size=2)
@@ -106,16 +106,11 @@ def test_a_column_emptied_during_a_run_is_widened_not_retyped(shop):
 
 
 def test_widening_a_column_is_logged_as_a_warning(shop):
-    kept = []
-
-    class Keep(logging.Handler):
-        def emit(self, record):
-            kept.append(record)
-
+    collect = Collect()
     shop.write("t", [{"id": 1, "v": 1}])
-    with logging_to(Keep(), "INFO"):
+    with logging_to(collect, "INFO"):
         shop.write("t", [{"id": 2, "v": "x"}])
-    events = {r.event: r.data for r in kept if hasattr(r, "event")}
+    events = dict(collect.events())
     assert events["widen"] == {"table": "t", "column": "v", "type": "text"}
     assert events["stored"] == {"table": "t", "records": 1}
 

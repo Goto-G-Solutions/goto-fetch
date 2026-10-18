@@ -34,6 +34,21 @@ def backend(request: pytest.FixtureRequest) -> str:
     return request.param
 
 
+class Collect(logging.Handler):
+    """A handler that keeps every record it is given, for checking log events."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+    def events(self) -> list[tuple[str, dict[str, Any]]]:
+        """Each record's (event, data), for the records logged with log_event."""
+        return [(r.event, r.data) for r in self.records if hasattr(r, "event")]
+
+
 @pytest.fixture
 def mock_client() -> Callable[..., Client]:
     """Make a Client for http://api.test/api whose requests go to a handler.

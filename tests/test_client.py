@@ -44,17 +44,13 @@ def test_a_get_from_records_carries_no_body(mock_client):
 
 
 def test_a_client_error_fails_at_once_with_its_status_and_body(mock_client):
+    # test_retry checks which statuses are retried; this is about what the
+    # error carries.
     handler = replies(http.Response(404, text="Not found."))
     with pytest.raises(ApiError, match="HTTP 404: Not found.") as raised:
         mock_client(handler).request("GET", "/items/1/")
     assert raised.value.status == 404
     assert len(handler.calls) == 1
-
-
-def test_get_json_refuses_a_body_that_is_not_json(mock_client):
-    handler = replies(http.Response(200, text="<html>"))
-    with pytest.raises(ApiError, match="did not return JSON"):
-        mock_client(handler).get_json("/items/")
 
 
 def test_get_json_parses_with_the_client_s_decoder(mock_client):

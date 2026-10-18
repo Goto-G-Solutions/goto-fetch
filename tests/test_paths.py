@@ -128,6 +128,8 @@ def test_a_wildcard_over_anything_but_a_list_gives_an_empty_list(data):
 
 
 def test_an_empty_wildcard_falls_through_to_the_next_alternative():
+    # Overlaps with the "items.*" regression test on purpose: this is the
+    # rule itself, and what a wildcard gives when every alternative is empty.
     data = {"items": [], "backup": [{"name": "B"}]}
     assert get_path(data, "items[*].name|backup[*].name") == ["B"]
     assert get_path(data, "items[*].name|missing[*].name") == []

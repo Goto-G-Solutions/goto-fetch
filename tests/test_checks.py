@@ -8,6 +8,8 @@ temporary one goes to the retry policy, and records stops instead of
 loading part of the data.
 """
 
+import json
+
 import pytest
 
 from api_explorer import ApiError, Problem, Retry, error_at, http
@@ -155,7 +157,8 @@ def test_error_at_reads_false_and_zero_as_no_error(value):
 
 @pytest.mark.parametrize("value", [True, 1, "0"], ids=["true", "one", "zero-as-text"])
 def test_error_at_still_reports_true_one_and_text(value):
-    assert error_at()(ok({"error": value})) is not None
+    found = error_at()(ok({"error": value}))
+    assert found == Problem(f"'error|errors' holds {json.dumps(value)}")
 
 
 def test_error_at_parses_with_the_decoder_it_is_given():

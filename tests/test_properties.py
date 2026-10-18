@@ -137,7 +137,7 @@ def test_explode_gives_each_record_as_many_rows_as_its_longest_list(records):
     assert len(explode(records, columns=columns)) == expected
 
 
-# 200 examples: at 60, this missed ints beside floats in a list for a while.
+# 200 examples: fewer can miss ints beside floats inside a list.
 @settings(max_examples=200, deadline=None)
 @given(records=RECORDS, backend=st.sampled_from(BACKENDS))
 def test_to_frame_builds_a_frame_from_any_json_records(records, backend):
@@ -153,7 +153,7 @@ def test_to_frame_builds_a_frame_from_any_json_records(records, backend):
     total=st.integers(0, 300),
     limit=st.integers(1, 120),
     cap=st.none() | st.integers(1, 120),
-    count=st.sampled_from(["actual", None]),
+    count=st.booleans(),
 )
 def test_offset_paging_returns_every_record_once_whatever_the_server_does(
     total, limit, cap, count
@@ -283,7 +283,7 @@ def flaky_source(rows: list[dict], data) -> "Client":
     connection. Retries (3 tries, no waiting) rescue some failures; three
     in a row end the run with ApiError.
     """
-    from api_explorer.testing import FakeApi, changes_api
+    from api_explorer.testing import changes_api
 
     api = changes_api(rows, page_size=2)
 
@@ -386,7 +386,7 @@ def test_keyset_runs_mirror_the_source_while_it_changes_mid_run(sizes, limit, da
     # retries run out, or when more records share a time than a page
     # holds (Keyset refuses those); then the state must not move.
     from api_explorer import ApiError, Incremental, Keyset, tracked_run
-    from api_explorer.testing import FakeApi, MemoryState, keyset_api
+    from api_explorer.testing import MemoryState, keyset_api
 
     store = MemoryState()
     source: dict[int, dict] = {}
