@@ -12,6 +12,7 @@ from api_explorer import (
     ClientFilter,
     Cursor,
     HeaderLink,
+    Keyset,
     Offset,
     PasswordLogin,
     Retry,
@@ -27,6 +28,7 @@ from api_explorer.testing import (
     TokenServer,
     cursor_api,
     json_pages,
+    keyset_api,
     link_header_api,
     next_link_api,
     offset_api,
@@ -190,6 +192,11 @@ def test_a_retry_and_a_give_up_are_events_with_their_details():
             {"results_key": "items", "paging": Offset(limit=2)},
             "short page",
         ),
+        (
+            lambda: keyset_api([]),
+            {"paging": Keyset("updated_at", "updated_since")},
+            "empty page",
+        ),
     ],
     ids=[
         "next-link",
@@ -198,6 +205,7 @@ def test_a_retry_and_a_give_up_are_events_with_their_details():
         "offset-count",
         "offset-empty",
         "offset-short",
+        "keyset-empty",
     ],
 )
 def test_each_paging_style_says_why_it_stopped(make, options, reason):

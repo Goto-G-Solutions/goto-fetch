@@ -95,9 +95,10 @@ def paginate(
         page = fetch(request)
         yield page
         following = next_request(page, request)
-        if isinstance(following, str) and isinstance(request, str):
-            following = urljoin(request, following) if following else None
-        request = following or None
+        if isinstance(following, str) and isinstance(request, str) and following:
+            following = urljoin(request, following)
+        # Only None and "" end the run: a cursor of 0 is a request like any.
+        request = None if following == "" else following
 
 
 class Page(NamedTuple):
@@ -371,7 +372,14 @@ class Offset:
         self, first: PageRequest, read: Callable[[Fetched], Page]
     ) -> tuple[PageRequest, NextLinkFunction]:
         """Start a run: set limit and offset on the first request's query."""
-        start = int(URL(first.url).params.get(self.offset_param, 0))
+        written = URL(first.url).params.get(self.offset_param, "0")
+        if not written.isdigit():
+            raise ApiError(
+                f"{self.offset_param!r} in the URL holds {written!r}, not a whole "
+                "number, so Offset can't start from it",
+                url=first.url,
+            )
+        start = int(written)
         begun = with_param(first, self.limit_param, self.limit)
         begun = with_param(begun, self.offset_param, start)
         received = 0
@@ -558,6 +566,7 @@ class Keyset:
             nonlocal current, page_size, previous
             items = read(fetched).items
             if not items:
+                _stopped("a page came back empty", "empty page")
                 return None
             bottom, top = self._value_range(items, request)
             # The request asked from send_as(current), which may be coarser

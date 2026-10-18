@@ -70,6 +70,15 @@ def test_paginate_can_page_by_request_body_as_well_as_url():
     assert rows == [1, 2]
 
 
+def test_paginate_ends_only_on_none_or_an_empty_string():
+    # Regression: any falsy request ended the run, so a cursor of 0 did.
+    pages = {2: "second", 1: "first", 0: "zeroth"}
+    following = {2: 1, 1: 0, 0: None}
+    fetched = list(paginate(pages.get, 2, lambda page, cursor: following[cursor]))
+    assert fetched == ["second", "first", "zeroth"]
+    assert list(paginate(str, "a", lambda page, url: "")) == ["a"]
+
+
 def test_paginate_detects_a_loop_in_request_bodies():
     with pytest.raises(ApiError, match="Pagination loops"):
         list(paginate(lambda body: body, {"q": "x"}, lambda page, body: {"q": "x"}))
@@ -437,6 +446,17 @@ def test_offset_names_its_own_query_parameters(mock_client):
         mock_client(handler).records("/items/", results_key="items", paging=paging)
     ) == [0, 1, 2, 3, 4]
     assert [q["skip"] for q in seen] == ["0", "2", "4"]
+
+
+def test_offset_names_an_offset_in_the_url_that_isnt_a_number(mock_client):
+    # Regression: int() failed with "invalid literal", naming nothing.
+    with pytest.raises(ApiError, match="'offset' in the URL holds 'abc'") as raised:
+        list(
+            mock_client(offset_api(3)).records(
+                "/items/?offset=abc", results_key="items", paging=Offset()
+            )
+        )
+    assert raised.value.url == "http://api.test/api/items/?offset=abc"
 
 
 def test_offset_refuses_a_limit_below_one():
