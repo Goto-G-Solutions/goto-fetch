@@ -466,3 +466,25 @@ def test_an_sqlite_plan_stores_and_writes_a_script_for_sqlite(tmp_path, run_scri
     assert run_script(text, changes_api(data))["count"] == 1
     stored_ids = [r["id"] for r in SqliteWarehouse(tmp_path / "shop.db").read("orders")]
     assert sorted(stored_ids) == [1, 2]
+
+
+@pytest.mark.parametrize("table", ['my "orders"', "{orders}"], ids=["quote", "braces"])
+def test_a_script_runs_whatever_the_table_is_called(tmp_path, run_script, table):
+    # Regression: the table name went inside an f-string, where a quote is
+    # a SyntaxError on Python 3.11 and braces break it.
+    plan = FetchPlan(
+        "http://api.test/api",
+        "/orders/",
+        warehouse=str(tmp_path / "shop.db"),
+        warehouse_kind="sqlite",
+        table=table,
+    )
+    namespace = run_script(plan.script(), changes_api([stamped(1, 1)]))
+    assert namespace["count"] == 1
+
+
+def test_a_script_s_docstring_hides_secrets_in_its_urls():
+    plan = FetchPlan("http://h/api?api_key=S3", "/a/?token=T9")
+    first_lines = plan.script().split("from api_explorer")[0]
+    assert "S3" not in first_lines.split("dependencies")[1]
+    assert "T9" not in first_lines.split("dependencies")[1]

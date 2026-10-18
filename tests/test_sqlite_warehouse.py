@@ -107,3 +107,11 @@ def test_without_sqlite3_the_error_says_what_is_missing(shop, monkeypatch):
     monkeypatch.setitem(sys.modules, "sqlite3", None)
     with pytest.raises(ImportError, match="built without"):
         shop.write("t", [{"id": 1}])
+
+
+def test_an_in_memory_sqlite_warehouse_points_to_the_memory_warehouse():
+    # Regression: the message named SqliteState and MemoryState.
+    with pytest.raises(
+        ValueError, match="SqliteWarehouse needs a file.*MemoryWarehouse"
+    ):
+        SqliteWarehouse(":memory:")

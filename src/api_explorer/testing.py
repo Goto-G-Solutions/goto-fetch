@@ -30,7 +30,7 @@ from .client import Client
 from .errors import ApiError, Problem
 from .incremental import ReportsDeletions, Tracker
 from .models import as_dict
-from .paging import Fetched, PageRequest, Paging
+from .paging import Fetched, PageRequest, PaginationLoop, Paging
 from .retry import Failure, Retry, RetryPolicy
 from .state import StateStore
 from .warehouse import (
@@ -539,6 +539,7 @@ def check_paging(
     saying which rule broke and how.
     """
     limit = len(expected) + 2 if max_requests is None else max_requests
+    before = len(api.calls)  # requests the fake had already answered
     try:
         records = list(
             api.client().records(
@@ -551,14 +552,12 @@ def check_paging(
                 max_pages=limit + 1,
             )
         )
-    except ApiError as error:
-        if "Pagination loops" in str(error):
-            raise AssertionError(f"the paging style looped: {error}") from error
-        raise
-    if len(api.calls) > limit:
+    except PaginationLoop as error:
+        raise AssertionError(f"the paging style looped: {error}") from error
+    made = len(api.calls) - before
+    if made > limit:
         raise AssertionError(
-            f"the paging style didn't stop within {limit} requests "
-            f"(it made {len(api.calls)})"
+            f"the paging style didn't stop within {limit} requests (it made {made})"
         )
     if records != list(expected):
         missing = [r for r in expected if r not in records]
@@ -872,6 +871,8 @@ def check_warehouse(make: Callable[[], Warehouse]) -> None:
         )
     except SourceFailed:
         pass
+    else:
+        raise AssertionError("write hid a failure of its records")
     if not matches(shop.read("orders"), [{"id": 1, "v": "a"}]):
         raise fail(
             "a write whose records failed must leave the table as it was",

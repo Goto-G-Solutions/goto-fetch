@@ -134,3 +134,19 @@ def test_a_body_that_is_not_json_says_what_it_was(mock_client):
     ) as raised:
         mock_client(replies(page)).get_json("/x/")
     assert raised.value.status == 200
+
+
+@pytest.mark.parametrize(
+    "setting", [{"timeout": 0}, {"headers": {}}], ids=["zero-timeout", "empty-headers"]
+)
+def test_an_empty_setting_beside_http_is_refused_too(setting):
+    # Regression: falsy settings beside http= were dropped without a word.
+    with pytest.raises(ValueError, match="on the httpx2.Client you pass as http"):
+        Client(http=httpx2.Client(), **setting)
+
+
+def test_a_corrupt_gzip_body_is_an_api_error():
+    response = httpx2.Response(200, content=b"\x1f\x8bnot gzip at all")
+    client = replies(response).client()
+    with pytest.raises(ApiError, match="gzip body that won't unpack"):
+        client.get_json("/x/")

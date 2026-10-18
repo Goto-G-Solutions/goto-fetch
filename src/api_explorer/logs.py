@@ -1,7 +1,8 @@
 """Logging: silent unless switched on, one switch, and events every handler can read.
 
-The package logs under "api_explorer" (api_explorer.client, .paging, .auth,
-.frames) and prints nothing until the application asks:
+The package logs under "api_explorer", each module under its own name
+(api_explorer.client, api_explorer.paging and so on), and prints nothing
+until the application asks:
 
     enable_logging()                      # INFO and up, on stderr
     enable_logging("DEBUG", http=True)    # every decision, and each request
@@ -43,6 +44,7 @@ import logging
 import sys
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any
 
 from .errors import redact
@@ -134,6 +136,20 @@ class _Formatter(logging.Formatter):
         return super().format(record)
 
 
+_ATTACHED = "_api_explorer_attached"
+"""The attribute enable_logging marks a handler with, to undo its changes."""
+
+
+@dataclass
+class _Attached:
+    """What enable_logging changed, so disable_logging can put it back."""
+
+    levels: dict[str, int]
+    handler_level: int
+    filters: list[logging.Filter]
+    formatter_added: bool
+
+
 def _level(level: int | str) -> int:
     if isinstance(level, int):
         return level
@@ -162,31 +178,53 @@ def enable_logging(
     """
     number = _level(level)
     handler = handler or logging.StreamHandler(sys.stderr)
-    if handler.formatter is None:
+    if hasattr(handler, _ATTACHED):
+        raise ValueError(
+            "This handler is already attached; disable_logging(handler) first"
+        )
+    filters = [ClientFilter(), RedactFilter()]
+    attached = _Attached(
+        levels={},
+        handler_level=handler.level,
+        filters=filters,
+        formatter_added=handler.formatter is None,
+    )
+    if attached.formatter_added:
         handler.setFormatter(_Formatter())
     handler.setLevel(number)
-    handler.addFilter(ClientFilter())
-    handler.addFilter(RedactFilter())
-    names = [ROOT, *loggers, *([HTTP] if http else [])]
-    previous = {}
-    for name in names:
+    for one in filters:
+        handler.addFilter(one)
+    for name in [ROOT, *loggers, *([HTTP] if http else [])]:
         logger = logging.getLogger(name)
-        previous[name] = logger.level
+        attached.levels[name] = logger.level
         # Lower the logger's level if needed, never raise it: another
         # handler may already want more than this one does.
         logger.setLevel(min(logger.getEffectiveLevel(), number))
         logger.addHandler(handler)
-    handler._api_explorer_previous = previous  # type: ignore[attr-defined]
+    setattr(handler, _ATTACHED, attached)
     return handler
 
 
 def disable_logging(handler: logging.Handler) -> None:
-    """Take off a handler enable_logging put on, and put the loggers' levels back."""
-    previous: dict[str, int] = getattr(handler, "_api_explorer_previous", {})
-    for name, level in previous.items():
+    """Take off a handler enable_logging put on, and undo what it changed.
+
+    The loggers get their levels back, and the handler loses the filters,
+    formatter and level enable_logging gave it, so a handler of yours is
+    left as it was. A handler that isn't attached is left alone.
+    """
+    attached: _Attached | None = getattr(handler, _ATTACHED, None)
+    if attached is None:
+        return
+    for name, level in attached.levels.items():
         logger = logging.getLogger(name)
         logger.removeHandler(handler)
         logger.setLevel(level)
+    for one in attached.filters:
+        handler.removeFilter(one)
+    if attached.formatter_added:
+        handler.setFormatter(None)
+    handler.setLevel(attached.handler_level)
+    delattr(handler, _ATTACHED)
 
 
 @contextmanager

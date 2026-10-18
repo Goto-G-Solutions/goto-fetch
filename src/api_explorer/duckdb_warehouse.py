@@ -23,9 +23,12 @@ from typing import TYPE_CHECKING, Any
 
 from .incremental import ReportsDeletions
 from .warehouse import (
+    FLOAT_EXACT,
     Kind,
+    Staged,
     check_write,
     deleted_keys,
+    keys_of_kind,
     log_stored,
     matching,
     plan_columns,
@@ -107,15 +110,17 @@ class DuckDBWarehouse:
                 # Columns change before any row does: DuckDB keeps the old
                 # versions of rows a transaction replaced, and retyping a
                 # column would have to convert those too.
-                columns = self._fit_columns(connection, table, run.kinds)
+                columns = self._fit_columns(connection, table, run)
                 for part in run.parts:
                     self._load(connection, table, part, run.kinds, columns, key)
                 if gone and columns:
-                    connection.execute(
-                        f"DELETE FROM {quote(table)} WHERE "
-                        f"{quote(matching(columns, key or ''))} IN (SELECT unnest(?))",
-                        [gone],
-                    )
+                    column = matching(columns, key or "")
+                    if keys := keys_of_kind(gone, columns[column]):
+                        connection.execute(
+                            f"DELETE FROM {quote(table)} WHERE {quote(column)} "
+                            "IN (SELECT unnest(?))",
+                            [keys],
+                        )
         log_stored(table, run.count)
         return run.count
 
@@ -176,7 +181,7 @@ class DuckDBWarehouse:
     def _fit_columns(
         connection: "duckdb.DuckDBPyConnection",
         table: str,
-        incoming: dict[str, Kind | None],
+        run: Staged,
     ) -> dict[str, Kind]:
         """Make `table`'s columns take the run, and return every column's kind."""
         stored = _columns(connection, table)
@@ -187,7 +192,16 @@ class DuckDBWarehouse:
             ).fetchone()
             return found is not None and found[0] == 0
 
-        added, changed, after = plan_columns(stored, incoming, only_nulls, table)
+        def holds_inexact(column: str) -> bool:
+            found = connection.execute(
+                f"SELECT count(*) FROM {quote(table)} "
+                f"WHERE abs({quote(column)}) > {FLOAT_EXACT}"
+            ).fetchone()
+            return found is not None and found[0] > 0
+
+        added, changed, after = plan_columns(
+            stored, run, only_nulls, holds_inexact, table
+        )
         if not stored:
             if after:
                 columns = ", ".join(f"{quote(n)} {TYPES[k]}" for n, k in after.items())

@@ -290,7 +290,9 @@ class Incremental:
         """What recognises `record` among those seen at the last value, as text."""
         if self.key is not None:
             found = get_path(record, self.key, MISSING)
-            if found is MISSING:
+            # A null key is no key: two records with null keys would look
+            # like one, and the second would be passed over for good.
+            if found is MISSING or found is None:
                 raise ApiError(f"A record has no key {self.key!r}")
             return json.dumps(found, sort_keys=True, default=str)
         return _digest(record)
@@ -335,7 +337,10 @@ class Keyset:
       Keyset needs it to tell the last page from a page full of one value.
       At least 2, since each page repeats the last record of the one before.
     - `send_in`, `send_as`: where the parameters go, and the form of the
-      value, as for Incremental.
+      value, as for Incremental. A coarser form, such as the date of a
+      time, widens the overlap to every record since that date: they come
+      again (store with a key, so they replace their rows), and a page
+      can't move past a date holding more records than `limit`.
 
     Raises ApiError when a page isn't sorted by `field`, or when more
     records share one value than fit on a page, since it can't move past
@@ -376,10 +381,13 @@ class Keyset:
             if not items:
                 return None
             bottom, top = self._value_range(items, request)
-            if current is not None and _greater(current, bottom, self.field):
+            # The request asked from send_as(current), which may be coarser
+            # (a date for a time), so earlier records from it are fine.
+            asked = None if current is None else self.send_as(current)
+            if asked is not None and _greater(asked, bottom, self.field):
                 raise ApiError(
                     f"The page starts at {self.field}={bottom!r}, before the "
-                    f"{current!r} it asked from: the API ignores {self.param!r}",
+                    f"{asked!r} it asked from: the API ignores {self.param!r}",
                     url=request.url,
                 )
             following = with_param(request, self.param, self.send_as(top), self.send_in)

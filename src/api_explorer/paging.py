@@ -24,6 +24,10 @@ def _stopped(why: str, reason: str) -> None:
     )
 
 
+class PaginationLoop(ApiError):
+    """Raised when paging asks for a page it already fetched, which would loop forever."""
+
+
 R = TypeVar("R")
 """What paginate fetches by: a URL, a request body, a cursor."""
 P = TypeVar("P")
@@ -81,9 +85,11 @@ def paginate(
     while request is not None and (max_pages is None or len(seen) < max_pages):
         identity = key(request)
         if identity in seen:
-            url = request if isinstance(request, str) else None
-            raise ApiError(
-                f"Pagination loops: {request!r} was already fetched", url=url
+            # Named by URL, not repr: a repr would show a request body,
+            # which redaction (URLs only) can't clean.
+            url = request if isinstance(request, str) else getattr(request, "url", None)
+            raise PaginationLoop(
+                f"Pagination loops: {url or 'a request'} was already fetched", url=url
             )
         seen.add(identity)
         page = fetch(request)

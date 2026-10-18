@@ -358,3 +358,49 @@ def test_the_leeway_is_capped_at_half_a_short_token_s_life():
     # Regression (authlib #716): a 30s leeway on a 20s token made it look
     # expired on arrival, so every request fetched a new one.
     assert token_requests(20, leeway=30) == 1
+
+
+def test_a_refresh_reply_without_a_token_falls_back_to_logging_in():
+    # Regression: a 2xx refresh reply with no access token raised at once,
+    # though the docstring promises a login when refreshing fails.
+    def answer(request):
+        if request.url.path.endswith("/refresh/"):
+            return httpx2.Response(200, json={"detail": "ok"})
+        if request.url.path.endswith("/token/"):
+            return httpx2.Response(200, json={"access": "fresh"})
+        assert request.headers["Authorization"] == "Bearer fresh"
+        return httpx2.Response(200, json={"ok": True})
+
+    auth = TokenRefresh(
+        "/token/refresh/", refresh="r", login=PasswordLogin("/token/", "me", "pw")
+    )
+    client = Client(
+        "http://api.test/api", auth=auth, transport=httpx2.MockTransport(answer)
+    )
+    assert client.get_json("/items/") == {"ok": True}
+
+
+def test_a_failed_refresh_names_the_refresh_endpoint():
+    def answer(request):
+        return httpx2.Response(400)
+
+    auth = TokenRefresh("/token/refresh/", refresh="r")
+    client = Client(
+        "http://api.test/api", auth=auth, transport=httpx2.MockTransport(answer)
+    )
+    with pytest.raises(ApiError) as raised:
+        client.get_json("/items/")
+    assert raised.value.url == "http://api.test/api/token/refresh/"
+
+
+def test_an_async_client_is_refused_with_a_clear_error():
+    import asyncio
+
+    async def fetch():
+        auth = TokenRefresh("/token/refresh/", refresh="r")
+        transport = httpx2.MockTransport(lambda request: httpx2.Response(200))
+        async with httpx2.AsyncClient(auth=auth, transport=transport) as http:
+            await http.get("http://api.test/x")
+
+    with pytest.raises(TypeError, match="sync clients only"):
+        asyncio.run(fetch())

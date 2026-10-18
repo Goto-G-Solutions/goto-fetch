@@ -355,3 +355,11 @@ def test_check_tracker_catches_a_broken_tracker(tracker, message):
 def test_check_tracker_needs_at_least_two_records():
     with pytest.raises(ValueError, match="at least two"):
         check_tracker(Passes, [{"id": 1}])
+
+
+def test_check_paging_counts_only_the_requests_it_makes():
+    # Regression: requests the fake had answered before the check counted
+    # against the style.
+    api = next_link_api(10, page_size=5)
+    list(api.client().records("/items/"))  # two requests before the check
+    check_paging(NextLink(), api, list(range(10)), max_requests=2)

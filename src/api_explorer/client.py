@@ -10,7 +10,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx2
 
-from .checks import ResponseCheck
+from .checks import ResponseCheck, as_problem
 from .decode import Decoder, json_decoder
 from .errors import ApiError, Problem
 from .incremental import Tracker
@@ -124,7 +124,13 @@ class Client:
                 "auth": auth,
                 "transport": transport,
             }
-            doubled = [name for name, value in settings.items() if value]
+            # Any value given counts, empty ones too: timeout=0 beside http
+            # would otherwise be dropped without a word.
+            doubled = [
+                name
+                for name, value in settings.items()
+                if value is not None and value != ""
+            ]
             if doubled:
                 raise ValueError(
                     f"Set {', '.join(doubled)} on the httpx2.Client you pass as http, "
@@ -286,8 +292,7 @@ class Client:
     def _problem(self, response: httpx2.Response) -> Problem | None:
         if self.check is None:
             return None
-        verdict = self.check(response)
-        return Problem(verdict) if isinstance(verdict, str) else verdict
+        return as_problem(self.check(response))
 
     def get_json(self, endpoint: str, **kwargs: Any) -> Any:
         """GET `endpoint` and return its parsed JSON body, or raise ApiError."""
@@ -314,7 +319,14 @@ class Client:
                 status=response.status_code,
             )
         if content[:2] == b"\x1f\x8b":
-            content = gzip.decompress(content)
+            try:
+                content = gzip.decompress(content)
+            except (OSError, EOFError) as exc:
+                raise ApiError(
+                    f"{where} sent a gzip body that won't unpack: {exc}",
+                    url=str(response.url),
+                    status=response.status_code,
+                ) from exc
         try:
             return self.decode(content)
         except ValueError as exc:

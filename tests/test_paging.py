@@ -529,3 +529,23 @@ def test_an_empty_200_is_an_error_not_an_empty_page(mock_client):
     # than "no data", and must not end a run quietly.
     with pytest.raises(ApiError, match="returned HTTP 200 with an empty body"):
         list(mock_client(replies(httpx2.Response(200, content=b""))).records("/items/"))
+
+
+def test_a_loop_is_named_by_url_and_never_shows_the_request_body():
+    # Regression: the loop error showed the request's repr, body included,
+    # which redaction (URLs only) couldn't clean.
+    from api_explorer import Cursor, PaginationLoop
+
+    api = replies(httpx2.Response(200, json={"hits": [1], "next_cursor": "same"}))
+    records = api.client().records(
+        "/search/",
+        method="POST",
+        json={"password": "hunter2"},
+        retry=True,
+        results_key="hits",
+        paging=Cursor(send_in="body"),
+    )
+    with pytest.raises(PaginationLoop) as raised:
+        list(records)
+    assert "hunter2" not in str(raised.value)
+    assert raised.value.url == "http://api.test/api/search/"

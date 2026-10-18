@@ -145,3 +145,27 @@ def test_records_stops_at_a_page_reporting_an_error_instead_of_loading_part():
     with pytest.raises(ApiError, match="rate limited"):
         seen.extend(client.records("/items/"))
     assert seen == [1, 2]
+
+
+@pytest.mark.parametrize("value", [False, 0, 0.0], ids=["false", "zero", "zero-float"])
+def test_error_at_reads_false_and_zero_as_no_error(value):
+    # Regression: {"error": false}, which many APIs send on success, failed
+    # every request.
+    assert error_at()(ok({"error": value, "results": []})) is None
+
+
+@pytest.mark.parametrize("value", [True, 1, "0"], ids=["true", "one", "zero-as-text"])
+def test_error_at_still_reports_true_one_and_text(value):
+    assert error_at()(ok({"error": value})) is not None
+
+
+def test_error_at_parses_with_the_decoder_it_is_given():
+    seen = []
+
+    def decode(content):
+        seen.append(content)
+        return {"error": "from my decoder"}
+
+    problem = error_at(decode=decode)(httpx2.Response(200, content=b"{}"))
+    assert seen == [b"{}"]
+    assert "from my decoder" in problem.message

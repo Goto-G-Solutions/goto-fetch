@@ -25,7 +25,7 @@ few kinds, widening it when its values change kind.
 
 import json
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from itertools import islice
 from pathlib import Path
@@ -66,16 +66,20 @@ Kind = Literal["boolean", "integer", "float", "text", "json"]
 """What a column holds, whatever the database calls it."""
 
 INT64 = range(-(2**63), 2**63)
+FLOAT_EXACT = 2**53
+"""The largest integer a float holds exactly: beyond it, a float would lose digits."""
 
 
 def kind_of(values: Iterable[Any]) -> Kind | None:
     """The kind of column that holds every one of `values`, or None if all are null.
 
     Nested objects and lists are "json". Mixed kinds give "text", except
-    integers beside floats, which give "float". Integers beyond 64 bits
-    give "text", so no digit is lost.
+    integers beside floats, which give "float" if a float holds every one
+    of them exactly. Integers beyond 64 bits give "text", so no digit is
+    lost.
     """
     kinds: set[Kind] = set()
+    exact = True
     for value in values:
         if value is None:
             continue
@@ -83,6 +87,7 @@ def kind_of(values: Iterable[Any]) -> Kind | None:
             kinds.add("boolean")
         elif isinstance(value, int):
             kinds.add("integer" if value in INT64 else "text")
+            exact = exact and abs(value) <= FLOAT_EXACT
         elif isinstance(value, float):
             kinds.add("float")
         elif isinstance(value, (dict, list)):
@@ -93,16 +98,50 @@ def kind_of(values: Iterable[Any]) -> Kind | None:
         return None
     if len(kinds) == 1:
         return kinds.pop()
-    return "float" if kinds == {"integer", "float"} else "text"
+    return widen(*sorted(kinds), exact=exact) if len(kinds) == 2 else "text"
 
 
-def widen(stored: Kind, incoming: Kind) -> Kind:
-    """The kind a column needs to keep its `stored` values and take `incoming` ones."""
+def widen(stored: Kind, incoming: Kind, *, exact: bool = True) -> Kind:
+    """The kind a column needs to keep its `stored` values and take `incoming` ones.
+
+    Integers beside floats give "float", but only if `exact`: every integer
+    among them fits a float exactly (see FLOAT_EXACT). Otherwise, and for
+    any other mix, "text", so no value is lost.
+    """
     if stored == incoming:
         return stored
     if {stored, incoming} == {"integer", "float"}:
-        return "float"
+        return "float" if exact else "text"
     return "text"
+
+
+def has_inexact_integers(values: Iterable[Any]) -> bool:
+    """Whether some integer among `values` is too large for a float to hold exactly."""
+    return any(
+        isinstance(v, int) and not isinstance(v, bool) and abs(v) > FLOAT_EXACT
+        for v in values
+    )
+
+
+def to_kind(value: Any, kind: Kind) -> Any:
+    """`value` as a column of `kind` holds it, or None if no such column could hold it.
+
+    For loading values and for matching keys against a column: a key of
+    the wrong kind can't be in the column, so it matches nothing.
+    """
+    if value is None:
+        return None
+    if kind == "text":
+        return as_text(value)
+    if kind == "json":
+        return json.dumps(value, separators=(",", ":"), default=str)
+    if isinstance(value, bool):
+        return value if kind == "boolean" else None
+    if kind == "float" and isinstance(value, (int, float)):
+        return float(value)
+    if kind == "integer" and isinstance(value, int):
+        return value
+    return None
 
 
 def as_text(value: Any) -> str | None:
@@ -126,6 +165,15 @@ def matching(columns: Iterable[str], name: str) -> str:
     """The column `name` lands in, matched without regard to case, as SQL does."""
     lowered = name.lower()
     return next((column for column in columns if column.lower() == lowered), name)
+
+
+def keys_of_kind(keys: Iterable[Any], kind: Kind) -> list[Any]:
+    """`keys` as a key column of `kind` holds them, leaving out any it couldn't hold.
+
+    A key of another kind can't be in the column, so it would match no row.
+    """
+    converted = (to_kind(key, kind) for key in keys)
+    return [key for key in converted if key is not None]
 
 
 def check_write(
@@ -186,6 +234,7 @@ class Staged:
 
     parts: list[Path] = field(default_factory=list)
     kinds: dict[str, Kind | None] = field(default_factory=dict)
+    inexact: set[str] = field(default_factory=set)
     count: int = 0
 
     def rows(self, part: Path) -> Iterable[dict[str, Any]]:
@@ -212,12 +261,15 @@ def stage(
             rows = last_per_key(rows, key)
         names = list(dict.fromkeys(name for row in rows for name in row))
         for name in names:
-            kind = kind_of(row.get(name) for row in rows)
+            values = [row.get(name) for row in rows]
+            if has_inexact_integers(values):
+                run.inexact.add(name)
+            kind = kind_of(values)
             known = run.kinds.get(name)
             if known is None:
                 run.kinds[name] = kind
             elif kind is not None:
-                run.kinds[name] = widen(known, kind)
+                run.kinds[name] = widen(known, kind, exact=name not in run.inexact)
         refuse_case_clashes(run.kinds)
         part = folder / f"part-{len(run.parts)}.ndjson"
         with part.open("w", encoding="utf-8") as file:
@@ -230,15 +282,18 @@ def stage(
 
 def plan_columns(
     stored: dict[str, Kind],
-    incoming: dict[str, Kind | None],
-    only_nulls: Any,
+    run: Staged,
+    only_nulls: Callable[[str], bool],
+    holds_inexact: Callable[[str], bool],
     table: str,
 ) -> tuple[dict[str, Kind], dict[str, Kind], dict[str, Kind]]:
     """Work out how a table's columns must change to take a run.
 
     `stored` maps the table's columns to their kinds ({} if there is no
-    table), `incoming` the run's fields to theirs, and only_nulls(column)
-    says whether a column holds nothing but nulls. Returns three maps:
+    table). only_nulls(column) says whether a column holds nothing but
+    nulls, and holds_inexact(column) whether it holds an integer too large
+    for a float to keep exactly (asked only when integers meet floats).
+    Returns three maps:
     the columns to add, the columns to change kind (each logged as a
     "widen" warning, unless it held only nulls), and every column after.
     A field seen only as null gets a text column as a place holder.
@@ -246,7 +301,7 @@ def plan_columns(
     after = dict(stored)
     added: dict[str, Kind] = {}
     changed: dict[str, Kind] = {}
-    for name, kind in incoming.items():
+    for name, kind in run.kinds.items():
         existing = matching(after, name)
         if existing not in after:
             added[name] = after[name] = kind or "text"
@@ -256,7 +311,11 @@ def plan_columns(
         if only_nulls(existing):
             new = kind  # nothing to keep yet, so the column takes the new kind
         else:
-            new = widen(after[existing], kind)
+            pair = {after[existing], kind}
+            exact = pair != {"integer", "float"} or (
+                name not in run.inexact and not holds_inexact(existing)
+            )
+            new = widen(after[existing], kind, exact=exact)
             if new == after[existing]:
                 continue
             log_event(

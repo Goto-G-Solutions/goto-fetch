@@ -170,3 +170,51 @@ def test_deleted_by_needs_a_key(database):
 def test_batch_size_must_be_positive(database, batch_size):
     with pytest.raises(ValueError, match="batch_size"):
         database().write("t", [], batch_size=batch_size)
+
+
+class SwallowsLater(MemoryWarehouse):
+    """Broken: swallows a failure once the table holds something."""
+
+    def write(self, table, records, *, key=None, deleted_by=None):
+        if not self.read(table):
+            return super().write(table, records, key=key, deleted_by=deleted_by)
+        try:
+            return super().write(table, records, key=key, deleted_by=deleted_by)
+        except Exception:  # noqa: BLE001 - the broken behaviour under test
+            return 0
+
+
+def test_check_warehouse_catches_a_failure_swallowed_on_a_later_write():
+    # Regression: the second failing write had no check that the failure
+    # reached the caller.
+    with pytest.raises(AssertionError, match="write hid a failure of its records"):
+        check_warehouse(SwallowsLater)
+
+
+def test_deleted_keys_match_a_key_column_that_holds_text(database):
+    # Regression: ids that mixed numbers and text made the key column text,
+    # and DuckDB refused to compare it with the numbers deleted_by listed.
+    # SQLite converted them by itself; the test runs on both all the same.
+    shop = database()
+    gone = Changes("id")
+    list(gone.track([{"id": 1}, {"id": "a"}, {"id": 2}]))
+    shop.write("p", [{"id": 1}, {"id": "a"}, {"id": 2}], key="id")
+    then = Changes("id", state=gone.state)
+    shop.write("p", then.track([{"id": "a"}]), key="id", deleted_by=then)
+    assert shop.read("p") == [{"id": "a"}]
+
+
+@pytest.mark.parametrize("one_run", [True, False], ids=["one-run", "two-runs"])
+def test_large_integers_beside_floats_keep_every_digit(database, one_run):
+    # Regression: integers beside floats became floats, and one above 2**53
+    # lost its last digits.
+    shop = database()
+    big = 2**53 + 1
+    rows = [{"id": 1, "v": big}, {"id": 2, "v": 1.5}]
+    if one_run:
+        shop.write("t", rows)
+    else:
+        shop.write("t", rows[:1])
+        shop.write("t", rows[1:])
+    values = {r["id"]: r["v"] for r in shop.read("t")}
+    assert values == {1: str(big), 2: "1.5"}

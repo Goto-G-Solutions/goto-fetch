@@ -173,3 +173,9 @@ def test_default_backend_says_what_to_install_when_there_is_none(no_frame_librar
 def test_to_frame_without_a_backend_uses_the_default(backend):
     # The other tests pass the backend; this one checks None means default_backend().
     assert type(to_frame([{"id": 1}])) is type(to_frame([{"id": 1}], default_backend()))
+
+
+def test_to_frame_refuses_records_that_aren_t_dicts(backend):
+    # Regression: plain values failed deep inside with an AttributeError.
+    with pytest.raises(TypeError, match="dicts or typed models, got str"):
+        to_frame(["a", "b"], backend)

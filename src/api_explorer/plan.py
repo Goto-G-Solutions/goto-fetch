@@ -10,6 +10,7 @@ from .auth import ClientCredentials, PasswordLogin, TokenRefresh, token_headers
 from .checks import error_at
 from .client import Client
 from .duckdb_warehouse import DuckDBWarehouse
+from .errors import redact_url
 from .incremental import Changes, Incremental, Keyset, ReportsDeletions, Tracker
 from .paging import Cursor, HeaderLink, NextLink, Offset, Paging
 from .sqlite_warehouse import SqliteWarehouse
@@ -347,7 +348,9 @@ class FetchPlan:
             ]
         result = "records"
         if self.warehouse:
-            result = f'f"Stored {{count:,}} records in {self.table!r}"'
+            # The table name goes in as its own literal, never inside the
+            # f-string, where a brace or quote in it would break the script.
+            result = f'f"Stored {{count:,}} records in", {self.table!r}'
         elif columns:
             names.add("select")
             body += ["", f"rows = select(records, {list(columns)!r})"]
@@ -369,9 +372,11 @@ class FetchPlan:
         reads_secrets = any("os.environ" in line for line in body + client_args)
         imports = ["import os", ""] if reads_secrets else []
         imports.append(f"from api_explorer import {', '.join(sorted(names))}")
-        doc = (
-            f'"""Fetch {self.endpoint} from {self.base_url}, '
-            'as set up in the API explorer."""'
+        # A literal, so no character in the URLs can break it, with their
+        # secrets hidden: a script gets copied and shared.
+        doc = repr(
+            f"Fetch {redact_url(self.endpoint)} from {redact_url(self.base_url)}, "
+            "as set up in the API explorer."
         )
         return "\n".join([*header, doc, "", *imports, "", *body]) + "\n"
 

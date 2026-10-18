@@ -1,4 +1,4 @@
-"""The one exception this package raises, and redaction of secrets in URLs."""
+"""The package's own exception, the Problem a response check reports, and redaction of secrets in URLs."""
 
 import re
 from dataclasses import dataclass
@@ -14,14 +14,19 @@ _URL = re.compile(r"https?://[^\s'\"<>]+")
 
 
 def redact_url(url: str) -> str:
-    """Return `url` with the values of sensitive query parameters replaced by "***".
+    """Return `url` with its secrets replaced by "***".
 
-    A parameter is sensitive when its name matches SENSITIVE, such as
-    api_key, access_token, client_secret or signature. Everything else is
-    kept exactly as written, encoding included, so a redacted URL still
-    shows what was sent.
+    The secrets are a password written into the URL (user:password@host)
+    and the values of sensitive query parameters, whose names match
+    SENSITIVE, such as api_key, access_token, client_secret or signature.
+    Everything else is kept exactly as written, encoding included, so a
+    redacted URL still shows what was sent.
     """
     parts = urlsplit(url)
+    if parts.password is not None:
+        user, _, host = parts.netloc.rpartition("@")
+        parts = parts._replace(netloc=f"{user.partition(':')[0]}:***@{host}")
+        url = urlunsplit(parts)
     if not parts.query:
         return url
 

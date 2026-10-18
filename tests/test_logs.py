@@ -286,3 +286,24 @@ def test_client_filter_stamps_records_for_a_handler_of_your_own():
         logger.removeHandler(collect)
         logger.setLevel(logging.NOTSET)
     assert {r.client for r in collect.records} == {"billing"}
+
+
+def test_disabling_logging_leaves_a_handler_of_yours_as_it_was():
+    # Regression: the filters, formatter and level enable_logging gave a
+    # handler stayed on it after disable_logging.
+    handler = logging.StreamHandler(io.StringIO())
+    handler.setLevel(logging.ERROR)
+    with logging_to(handler, "DEBUG"):
+        assert handler.filters
+    assert (handler.filters, handler.formatter, handler.level) == (
+        [],
+        None,
+        logging.ERROR,
+    )
+
+
+def test_a_handler_can_t_be_attached_twice():
+    handler = logging.StreamHandler(io.StringIO())
+    with logging_to(handler), pytest.raises(ValueError, match="already attached"):
+        enable_logging(handler=handler)
+    assert handler.filters == []

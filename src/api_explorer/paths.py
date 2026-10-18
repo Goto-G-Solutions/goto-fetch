@@ -44,6 +44,9 @@ def _alternatives(path: str) -> tuple[tuple[str, ...], ...]:
     return tuple(tuple(segments) for segments in alternatives)
 
 
+_INDEX = re.compile(r"-?[0-9]+")
+
+
 def parse_path(path: str) -> list[str]:
     """Split one path into its segments.
 
@@ -102,9 +105,13 @@ def get_path(data: Any, path: str, default: Any = None) -> Any:
                     return MISSING
                 node = node[segment]
             elif isinstance(node, (list, tuple)):
+                # Only plain digits, maybe negative, are an index: int()
+                # alone would also take "1_0", "+1" and other scripts' digits.
+                if not _INDEX.fullmatch(segment):
+                    return MISSING
                 try:
                     node = node[int(segment)]
-                except (ValueError, IndexError):
+                except IndexError:
                     return MISSING
             else:
                 return MISSING

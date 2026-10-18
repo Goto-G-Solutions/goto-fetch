@@ -492,3 +492,31 @@ def test_incremental_passes_over_a_record_it_already_passed_this_run():
     since = Incremental("updated_at", key="id")
     records = [rec(1, 1), rec(2, 2), rec(3, 2), rec(2, 2)]
     assert ids(since.track(records)) == [1, 2, 3]
+
+
+def test_a_null_key_is_refused_like_a_missing_one():
+    # Regression: a null key became the identity "null", so two records at
+    # the newest value with null keys looked like one repeat.
+    since = Incremental("t", key="id")
+    with pytest.raises(ApiError, match="no key 'id'"):
+        list(since.track([{"id": None, "t": 1}]))
+
+
+def test_keyset_with_a_coarser_filter_is_not_taken_for_one_ignored():
+    # Regression: sending only the date returned earlier records from that
+    # day, which Keyset read as an API ignoring its filter. The overlap is
+    # wider than one value, so record 2 comes twice (see Keyset); record 3,
+    # at the newest value, is a repeat Incremental passes over.
+    data = [rec(1, 1, 9), rec(2, 2, 9), rec(3, 2, 10), rec(4, 3, 1)]
+    api = keyset_api(data)
+    records = api.client().records(
+        "/o/",
+        paging=keyset(limit=3, send_as=lambda value: value[:10]),
+        incremental=orders(),
+    )
+    assert ids(records) == [1, 2, 3, 2, 4]
+    assert [q.get("updated_since") for q in api.queries] == [
+        None,
+        "2026-01-02",
+        "2026-01-03",
+    ]

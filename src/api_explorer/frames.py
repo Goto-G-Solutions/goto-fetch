@@ -139,6 +139,12 @@ def to_frame(records: Sequence[Any], backend: str | ModuleType | None = None) ->
         return values
 
     records = [as_dict(record) for record in records]
+    strangers = [r for r in records if not isinstance(r, dict)]
+    if strangers:
+        raise TypeError(
+            f"to_frame needs records that are dicts or typed models, got "
+            f"{type(strangers[0]).__name__}: {strangers[0]!r:.80}"
+        )
     columns = list(dict.fromkeys(key for record in records for key in record))
     data = {c: even_out(c, [r.get(c) for r in records]) for c in columns}
     # narwhals types `backend` with names of its own; any library name or

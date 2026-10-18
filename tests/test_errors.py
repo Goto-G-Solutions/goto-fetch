@@ -77,3 +77,10 @@ def test_log_lines_and_their_data_never_show_the_key():
     assert "api_key=***" in stream.getvalue()
     assert "S3" not in stream.getvalue()  # httpx2's request lines included
     assert all("S3" not in str(r.data) for r in records if hasattr(r, "data"))
+
+
+def test_a_password_written_into_a_url_is_hidden():
+    # Regression: redaction looked only at the query, so user:password@host
+    # reached errors and log lines as written.
+    assert redact_url("https://me:hunter2@h/x?page=2") == "https://me:***@h/x?page=2"
+    assert "hunter2" not in str(ApiError("GET https://me:hunter2@h/x failed"))

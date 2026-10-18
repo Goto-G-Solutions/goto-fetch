@@ -29,15 +29,18 @@ from typing import TYPE_CHECKING, Any
 from .incremental import ReportsDeletions
 from .state import SqliteState
 from .warehouse import (
+    FLOAT_EXACT,
     Kind,
-    as_text,
+    Staged,
     check_write,
     deleted_keys,
+    keys_of_kind,
     log_stored,
     matching,
     plan_columns,
     quote,
     stage,
+    to_kind,
 )
 
 if TYPE_CHECKING:
@@ -53,21 +56,6 @@ TYPES: dict[Kind, str] = {
     "json": "JSON",
 }
 KINDS: dict[str, Kind] = {name: kind for kind, name in TYPES.items()}
-
-
-def _stored(value: Any, kind: Kind) -> Any:
-    """`value` in the form SQLite keeps for a column of `kind`."""
-    if value is None:
-        return None
-    if kind == "text":
-        return as_text(value)
-    if kind == "json":
-        return json.dumps(value, separators=(",", ":"))
-    if kind == "boolean":
-        return int(value)
-    if kind == "float":
-        return float(value)
-    return value
 
 
 def _read_back(value: Any, kind: Kind) -> Any:
@@ -90,6 +78,13 @@ class SqliteWarehouse:
     """
 
     def __init__(self, path: str | Path, *, timeout: float = 30.0) -> None:
+        if str(path) == ":memory:" or str(path).startswith("file::memory:"):
+            # Each call opens the file anew, so memory would be empty every
+            # time.
+            raise ValueError(
+                "SqliteWarehouse needs a file; for one in memory, use "
+                "api_explorer.testing.MemoryWarehouse"
+            )
         self._state = SqliteState(path, timeout=timeout)
         self.path = self._state.path
         self.timeout = timeout
@@ -116,16 +111,16 @@ class SqliteWarehouse:
             run = stage(records, Path(folder), key, batch_size)
             gone = deleted_keys(deleted_by)
             with self._transaction() as connection:
-                columns = self._fit_columns(connection, table, run.kinds)
+                columns = self._fit_columns(connection, table, run)
                 if key is not None and columns:
                     _index(connection, table, matching(columns, key))
                 for part in run.parts:
                     self._load(connection, table, run.rows(part), columns, key)
                 if gone and columns:
-                    column = quote(matching(columns, key or ""))
+                    column = matching(columns, key or "")
                     connection.executemany(
-                        f"DELETE FROM {quote(table)} WHERE {column} = ?",
-                        [(k,) for k in gone],
+                        f"DELETE FROM {quote(table)} WHERE {quote(column)} = ?",
+                        [(k,) for k in keys_of_kind(gone, columns[column])],
                     )
         log_stored(table, run.count)
         return run.count
@@ -186,7 +181,7 @@ class SqliteWarehouse:
     def _fit_columns(
         connection: "sqlite3.Connection",
         table: str,
-        incoming: dict[str, Kind | None],
+        run: Staged,
     ) -> dict[str, Kind]:
         """Make `table`'s columns take the run, and return every column's kind."""
         stored = _columns(connection, table)
@@ -197,7 +192,16 @@ class SqliteWarehouse:
             ).fetchone()
             return found is not None and found[0] == 0
 
-        added, changed, after = plan_columns(stored, incoming, only_nulls, table)
+        def holds_inexact(column: str) -> bool:
+            found = connection.execute(
+                f"SELECT count(*) FROM {quote(table)} "
+                f"WHERE abs({quote(column)}) > {FLOAT_EXACT}"
+            ).fetchone()
+            return found is not None and found[0] > 0
+
+        added, changed, after = plan_columns(
+            stored, run, only_nulls, holds_inexact, table
+        )
         if not stored:
             if after:
                 _create(connection, table, after)
@@ -230,7 +234,7 @@ class SqliteWarehouse:
             connection.executemany(
                 f"DELETE FROM {quote(table)} WHERE {column} = ?",
                 [
-                    (_stored(row[key], columns[matching(columns, key)]),)
+                    (to_kind(row[key], columns[matching(columns, key)]),)
                     for row in batch
                 ],
             )
@@ -240,7 +244,7 @@ class SqliteWarehouse:
             f"VALUES ({placeholders})",
             [
                 tuple(
-                    _stored(row.get(n), columns[t])
+                    to_kind(row.get(n), columns[t])
                     for n, t in zip(names, targets, strict=True)
                 )
                 for row in batch
@@ -298,7 +302,7 @@ def _rebuild(
         f"VALUES ({', '.join('?' for _ in names)})",
         [
             tuple(
-                _stored(_read_back(value, before[name]), after[name])
+                to_kind(_read_back(value, before[name]), after[name])
                 for name, value in zip(names, row, strict=True)
             )
             for row in old

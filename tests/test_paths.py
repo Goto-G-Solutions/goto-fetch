@@ -131,3 +131,11 @@ def test_an_empty_wildcard_gives_a_custom_default_when_one_is_passed():
 
 def test_fallbacks_can_mix_wildcard_and_plain_paths():
     assert get_path({"items": [{"url": "a"}]}, "download_url|items[*].url") == ["a"]
+
+
+@pytest.mark.parametrize(
+    "segment", ["1_0", "+1", "١"], ids=["underscore", "plus", "arabic-one"]
+)
+def test_only_plain_digits_index_a_list(segment):
+    # Regression: int() took these as indexes too.
+    assert get_path({"a": list(range(20))}, f"a.{segment}") is None

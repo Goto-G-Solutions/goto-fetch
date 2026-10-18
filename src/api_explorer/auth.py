@@ -6,7 +6,7 @@ import json
 import logging
 import threading
 import time
-from collections.abc import Callable, Generator
+from collections.abc import AsyncGenerator, Callable, Generator
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 from urllib.parse import urljoin
@@ -176,6 +176,8 @@ class TokenRefresh(httpx2.Auth):
     Safe across threads: requests sharing this object renew one at a time,
     and a request that finds the token already renewed by another uses it
     instead of renewing again, which matters when refresh tokens rotate.
+    For sync clients only: an async client gets a TypeError, since the
+    lock would block its event loop.
 
     Through Client, `refresh_url` and the login's `token_url` follow the
     same rules as endpoints, because Client calls bind() with its own url().
@@ -199,7 +201,7 @@ class TokenRefresh(httpx2.Auth):
         refresh_key: str = "refresh|refresh_token",
         expires_key: str = "expires_in",
         refresh_field: str = "refresh",
-        scheme: str = "Bearer",
+        scheme: str | None = "Bearer",
         header: str = "Authorization",
         leeway: float = 30.0,
         now: Callable[[], float] = time.time,
@@ -218,10 +220,8 @@ class TokenRefresh(httpx2.Auth):
         self.header = header
         self.leeway = leeway
         self.now = now
-        self._access = access
+        self._token = None if access is None else _Token(access)
         self._refresh = refresh
-        self._expires_at: float | None = None
-        self._lifetime: float | None = None
         self._resolve: Callable[[str], str] | None = None
         self._lock = threading.Lock()
 
@@ -239,46 +239,63 @@ class TokenRefresh(httpx2.Auth):
         self, request: httpx2.Request
     ) -> Generator[httpx2.Request, httpx2.Response, None]:
         """Sign `request`, renewing the access token before or after as needed."""
-        seen = self._access
-        if seen is None or self._expiring():
-            why = "no access token yet" if seen is None else "it expires soon"
-            yield from self._renew_unless_done(str(request.url), why, seen)
-        used = self._access
-        request.headers[self.header] = f"{self.scheme} {used}"
+        # One read of the token: its access, expiry and lifetime change
+        # together, in one assignment, so another thread can't be seen
+        # half way through renewing.
+        token = self._token
+        if token is None or self._expiring(token):
+            why = "no access token yet" if token is None else "it expires soon"
+            yield from self._renew_unless_done(str(request.url), why, token)
+        used = self._token
+        request.headers.update(self._headers(used))
         response = yield request
         if response.status_code == 401:
             yield from self._renew_unless_done(
                 str(request.url), "the server answered 401", used
             )
-            request.headers[self.header] = f"{self.scheme} {self._access}"
+            request.headers.update(self._headers(self._token))
             yield request
 
-    def _expiring(self) -> bool:
-        expiry = self._expires_at
+    async def async_auth_flow(
+        self, request: httpx2.Request
+    ) -> AsyncGenerator[httpx2.Request, httpx2.Response]:
+        """Refuse async clients: the renewal lock would block their event loop."""
+        raise TypeError(
+            "TokenRefresh works with sync clients only: its renewal lock would "
+            "block an async client's event loop"
+        )
+        yield request  # pragma: no cover - makes this an async generator
+
+    def _headers(self, token: "_Token | None") -> dict[str, str]:
+        return token_headers(token.access if token else "", self.scheme, self.header)
+
+    def _expiring(self, token: "_Token") -> bool:
+        expiry = token.expires_at
         if expiry is None:
-            expiry = jwt_expiry(self._access or "")
+            expiry = jwt_expiry(token.access)
         if expiry is None:
             return False
         # Never more than half a token's life: a leeway longer than a
         # short-lived token would make it look expired as it arrives.
         margin = (
             self.leeway
-            if self._lifetime is None
-            else min(self.leeway, self._lifetime / 2)
+            if token.lifetime is None
+            else min(self.leeway, token.lifetime / 2)
         )
         return self.now() >= expiry - margin
 
     def _renew_unless_done(
-        self, against: str, why: str, seen: str | None
+        self, against: str, why: str, seen: "_Token | None"
     ) -> Generator[httpx2.Request, httpx2.Response, None]:
         # One renewal at a time. A request that waited here while another
         # renewed finds a new, fresh token, and uses it: renewing again
         # would spend a refresh token that rotation has already replaced.
         with self._lock:
+            current = self._token
             if (
-                self._access is not None
-                and self._access != seen
-                and not self._expiring()
+                current is not None
+                and current is not seen
+                and not self._expiring(current)
             ):
                 return
             yield from self._renew(against, why)
@@ -288,21 +305,28 @@ class TokenRefresh(httpx2.Auth):
     ) -> Generator[httpx2.Request, httpx2.Response, None]:
         failure = "there is no refresh token"
         status: int | None = None
+        failed_at = against
         if self._refresh is not None and self.refresh_url is not None:
             body = {self.refresh_field: self._refresh}
-            url = self._url(self.refresh_url, against)
+            url = failed_at = self._url(self.refresh_url, against)
             _renewing("refresh", why)
             response = yield httpx2.Request("POST", url, json=body)
             if response.is_success:
-                self._take(response)
-                return
-            failure = f"refreshing at {url} returned HTTP {response.status_code}"
-            status = response.status_code
+                try:
+                    self._take(response)
+                    return
+                except ApiError as exc:
+                    # A 2xx without a usable token is a failed refresh too,
+                    # so login, if any, gets its turn.
+                    failure = f"refreshing at {url} gave no usable token ({exc})"
+            else:
+                failure = f"refreshing at {url} returned HTTP {response.status_code}"
+                status = response.status_code
         if self.login is None:
             raise ApiError(
                 f"Can't renew the access token: {failure}, and there is no "
                 "login to fall back on. Paste new tokens.",
-                url=against,
+                url=failed_at,
                 status=status,
             )
         url = self._url(self.login.token_url, against)
@@ -312,12 +336,13 @@ class TokenRefresh(httpx2.Auth):
             raise ApiError(
                 f"Logging in at {url} returned HTTP {response.status_code}: "
                 f"{response.text[:300]}",
-                url=str(response.url),
+                url=url,
                 status=response.status_code,
             )
         self._take(response)
 
     def _take(self, response: httpx2.Response) -> None:
+        """Keep the tokens a reply holds, or raise ApiError naming what is missing."""
         try:
             body = response.json()
         except ValueError as exc:
@@ -330,10 +355,18 @@ class TokenRefresh(httpx2.Auth):
                 f"No access token at {self.access_key!r} in the reply",
                 url=str(response.url),
             )
-        self._access = access
         lifetime = _seconds(get_path(body, self.expires_key))
-        self._lifetime = lifetime
-        self._expires_at = None if lifetime is None else self.now() + lifetime
+        expires_at = None if lifetime is None else self.now() + lifetime
+        self._token = _Token(access, expires_at, lifetime)
         refresh = get_path(body, self.refresh_key)
         if isinstance(refresh, str):
             self._refresh = refresh
+
+
+@dataclass(frozen=True)
+class _Token:
+    """An access token and when it expires, replaced as one value when renewed."""
+
+    access: str
+    expires_at: float | None = None
+    lifetime: float | None = None
