@@ -72,7 +72,10 @@ class Warehouse(Protocol):
         ...
 
     def read(self, table: str, limit: int | None = None) -> list[dict[str, Any]]:
-        """`table`'s rows as dicts (at most `limit`), in no set order; [] if none."""
+        """`table`'s rows as dicts (at most `limit`), in no set order; [] if none.
+
+        A negative limit is refused with ValueError (check_limit).
+        """
         ...
 
 
@@ -189,6 +192,12 @@ def keys_of_kind(keys: Iterable[Any], kind: Kind) -> list[Any]:
     """
     converted = (to_kind(key, kind) for key in keys)
     return [key for key in converted if key is not None]
+
+
+def check_limit(limit: int | None) -> None:
+    """Refuse a negative read limit, which each database would read differently."""
+    if limit is not None and limit < 0:
+        raise ValueError(f"limit can't be negative, got {limit}")
 
 
 def check_table(table: str) -> None:
