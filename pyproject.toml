@@ -1,7 +1,7 @@
 [project]
 name = "api-explorer"
 version = "0.1.0"
-description = "Pull data from paginated JSON APIs, and shape it for any dataframe library."
+description = "Pull data from paginated JSON APIs safely, fetch only what changed, and store it for analysis."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

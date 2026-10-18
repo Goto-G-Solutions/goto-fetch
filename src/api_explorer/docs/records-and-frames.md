@@ -33,9 +33,19 @@ assert flatten({"user": {"name": "Ann"}, "tags": ["a"]}) == {
 long = explode([{"id": 1, "tags": ["a", "b"]}, {"id": 2, "tags": []}], columns=["tags"])
 assert long == [{"id": 1, "tags": "a"}, {"id": 1, "tags": "b"}, {"id": 2, "tags": None}]
 
-# "pandas" and "pyarrow" work too, and None picks whichever is installed
+# "pandas" and "pyarrow" work too; None takes a library already imported,
+# else the first one installed (default_backend)
 frame = to_frame(rows, "polars")
 assert frame.shape == (2, 3)
+```
+
+`latest_per_key` keeps one row per key on any frame, the one with the latest (or earliest) value of another column:
+
+```python
+from api_explorer import latest_per_key
+
+versions = to_frame([{"id": 1, "v": 1}, {"id": 1, "v": 2}, {"id": 2, "v": 1}], "polars")
+assert latest_per_key(versions, "id", "v")["v"].to_list() == [2, 1]
 ```
 
 Typed records come from `records(model=...)`: a pydantic model, msgspec Struct, dataclass or function.
@@ -44,5 +54,5 @@ Typed records come from `records(model=...)`: a pydantic model, msgspec Struct, 
 
 - `explode`'s columns are top-level keys; `flatten` first to reach nested lists.
 - A key holding the path separator or path characters is quoted by `flatten` and in warnings (`meta["a.b"]`), so it reads back with `get_path`.
-- A key named exactly `*` can't be reached by a path, since `*` is the wildcard.
+- A key named exactly `*` can't be reached by a path, since `*` is the wildcard. `parse_path` splits a path into its segments, for a piece of your own that walks records.
 - Parse text dates (`parse_datetime`) before sorting by them: text sorts right only when every value shares one format and zone.

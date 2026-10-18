@@ -48,6 +48,8 @@ assert run_once() == 1  # only the new record
 assert api.queries[-1] == {"updated_since": "2026-01-02T00:00:00Z"}
 ```
 
+`Incremental(start=...)` says where a first run begins when there is no state; `send_in="body"` puts the filter in a POST body; `send_as=` changes the form of the value sent, such as a date for a time.
+
 `Changes` fetches everything and compares a fingerprint of each record:
 
 ```python
@@ -107,6 +109,8 @@ assert [r["id"] for r in records] == [0, 1, 2, 3, 4, 5]
 - **Page numbers and offsets with `Incremental`** can lose a record for good when the data changes during a run, since the rest shift a place. Use a cursor, `Keyset`, or `Changes`, which finds such a record on its next run.
 - **`Changes.deleted` needs all-or-nothing storing.** The built-in warehouses are; a store that writes as records arrive can keep a row whose record was deleted.
 - **`max_pages` with a tracker is refused:** a run cut short looks complete.
-- A tracker's `key=` recognises records by a field; without it, by their whole content, which also notices a record edited twice in the same instant.
+- `Incremental`'s `key=` recognises the records seen at the last value by a field; without it, by their whole content, which also notices a record edited twice in the same instant. `Changes` always matches records by its `key`.
+- A record without the tracked field stops the run (`missing="raise"`); pass `missing="keep"` or `"drop"` to allow it.
+- `Changes` needs a run that fetches every record: on a filtered fetch, the records not fetched would look deleted.
 - Make one tracker per run, or let `tracked_run` make it.
 - Read the records inside the `with tracked_run(...)` block, by storing them or with `list()`. `records()` is lazy: records read after the block ends were never part of the tracked run, so its state doesn't move and the next run fetches them again.

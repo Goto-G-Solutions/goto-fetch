@@ -1,6 +1,6 @@
 # Auth
 
-Three kinds of authentication are built in, and an `Auth` of your own works too.
+Four kinds of authentication are built in, and an `Auth` of your own works too.
 
 ## Choosing
 
@@ -58,9 +58,11 @@ auth = TokenRefresh(
 )
 ```
 
-Reply fields are paths: the defaults read simplejwt's names and OAuth's (`"access|access_token"`, `"refresh|refresh_token"`, `"expires_in"`). Change them with `access_key=`, `refresh_key=` and `expires_key=`, and the header with `scheme=` and `header=`.
+Reply fields are paths: the defaults read simplejwt's names and OAuth's (`"access|access_token"`, `"refresh|refresh_token"`, `"expires_in"`). Change them with `access_key=`, `refresh_key=` and `expires_key=`, and the header with `scheme=` and `header=`. `access=` starts from an access token you already hold, `leeway=` is how many seconds before expiry a token is renewed (30, and never more than half a token's life), and `refresh_field=` names the field the refresh token is posted under. `ClientCredentials(credentials_in="body")` sends the client ID and secret in the form instead of a Basic header.
+
+Through a `Client`, the refresh and login URLs resolve like endpoints: the client calls `bind(resolve)` on an auth that has it (`ResolvesUrls`). On its own, `TokenRefresh` resolves them against each request's URL, so give absolute URLs there.
 
 ## Traps
 
-- Keep secrets in environment variables, not in code or URLs. Generated scripts read them from `$API_TOKEN`, `$API_REFRESH_TOKEN`, `$API_USERNAME`, `$API_PASSWORD` and `$API_CLIENT_SECRET`.
+- Keep secrets in environment variables, not in code or URLs. Generated scripts read them from `$API_TOKEN`, `$API_REFRESH_TOKEN`, `$API_ACCESS_TOKEN`, `$API_USERNAME`, `$API_PASSWORD` and `$API_CLIENT_SECRET`.
 - A login of your own is any object with `token_url` and `build_request(url)`; see [build-your-own](build-your-own.md).

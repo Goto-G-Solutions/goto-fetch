@@ -6,8 +6,7 @@ For pages without an API, `api_explorer.scrape` (the `scrape` extra) follows "ne
 ## Examples
 
 ```python
-from api_explorer import http
-from api_explorer import Client
+from api_explorer import Client, http
 from api_explorer.scrape import CSSField, ScraperConfig, XPathField, scrape
 from api_explorer.testing import FakeApi
 
@@ -38,7 +37,7 @@ assert rows == [
 ]
 ```
 
-A field of your own is any object with `extract_value(element)`; see [build-your-own](build-your-own.md).
+`scrape(client, url, config, max_pages=3)` stops after that many pages, for a look at the first few. A field of your own is any object with `extract_value(element)`; see [build-your-own](build-your-own.md).
 
 ## Traps
 

@@ -16,7 +16,6 @@ A `FetchPlan` describes one fetch as data: the API, its auth, paging, tracking a
 ## Examples
 
 ```python
-from api_explorer import http
 from api_explorer import FetchPlan
 from api_explorer.testing import changes_api
 
@@ -42,7 +41,7 @@ assert "tracked_run(" in script
 
 `rate_limit=2` keeps every request the plan sends to two a second, in its script too. Without a warehouse, `plan.records(client)` yields the records, and `plan.script(columns=[...], backend="polars")` writes a script that selects columns and builds a frame. `plan.store(client, warehouse=...)` stores into any `Warehouse` of your own.
 
-The script's header installs this package the way it is installed here (`package_requirement()`), with the `duckdb` extra when needed:
+The script's header installs `requirement`, `"api-explorer"` by default, with the `duckdb` extra when needed. Pass `package_requirement()` to install this package the way it is installed here: an editable checkout, a git commit or a pinned version.
 
 ```python skip
 print(plan.script(requirement=package_requirement()))
@@ -55,7 +54,7 @@ print(plan.script(requirement=package_requirement()))
 uvx marimo edit --sandbox notebooks/explorer.py
 ```
 
-Its fields fill from `$API_BASE_URL` and the secret variables above. The **Store** section picks a DuckDB or SQLite file, a table, a key, and what each run fetches; a tracked fetch reads every page, so set **Pages** to 0.
+Its fields fill from `$API_BASE_URL`, `$API_CLIENT_ID` and the secret variables above. The **Store** section picks a DuckDB or SQLite file, a table, a key, and what each run fetches; a tracked fetch reads every page, so set **Pages** to 0.
 
 ## Traps
 

@@ -36,7 +36,7 @@ assert events[-1][1] == {
 ## What it handles for you
 
 - **Secrets:** URLs in every line, the request events included, have their secrets hidden.
-- **Which client:** `Client(name="shop")` stamps `record.client` on every line logged during its requests, including lines from pieces of your own.
+- **Which client:** `Client(name="shop")` stamps `record.client` on every line logged during its requests, including lines from pieces of your own. Two filters do this work, `ClientFilter` (the name) and `RedactFilter` (secrets in URLs, see `redact_url`); `enable_logging` and `logging_to` put them on their handler, and a handler of your own takes them the same way.
 
 ## The events
 

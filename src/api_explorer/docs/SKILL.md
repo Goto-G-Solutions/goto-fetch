@@ -11,7 +11,7 @@ description: Use when writing Python that pulls data from a paginated JSON (REST
 
 1. Read the guide for the piece you need: `python -m api_explorer.docs <page>`. The index is `python -m api_explorer.docs`. Pages: client, paging, auth, retries, incremental, storage, records-and-frames, fetch-plan, logging, testing, scraping, build-your-own.
 2. Start from a `Client`, page with `client.records(...)` and a paging style, and keep results with a warehouse and a tracker when runs repeat.
-3. When no built-in piece fits, implement the interface ([build-your-own]) and run its `check_*` from `api_explorer.testing`.
+3. When no built-in piece fits, implement the interface (the build-your-own page) and run its `check_*` from `api_explorer.testing`.
 4. Test with the fake APIs in `api_explorer.testing`; never call a real API in tests.
 
 ## The usual shape
@@ -41,5 +41,3 @@ With a real API: `Client("https://api.example.com", headers=token_headers(os.env
 - A POST that only reads needs `retry=True`; other POSTs are never retried.
 - For a small or busy server, keep to a rate: `Client(url, rate_limit=RateLimit(2))`.
 - Keep secrets in environment variables and headers, never in URLs or code.
-
-[build-your-own]: python -m api_explorer.docs build-your-own

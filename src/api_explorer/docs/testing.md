@@ -16,7 +16,7 @@
 | `json_pages(pages)`, `replies(*responses)` | fixed pages by URL, or fixed responses in turn |
 | `flaky(api, 503, ...)` | any of these, failing first as told |
 
-`records` is a list, or a number n for the records 0 to n-1. `changes_api` and `keyset_api` read their list on every request, so a test can change the data between runs, or during one.
+`records` is a list, or a number n for the records 0 to n-1; `changes_api` and `keyset_api` take a list of dicts, since they read a field of each. Both read their list on every request, so a test can change the data between runs, or during one.
 
 Each returns a `FakeApi`, which remembers every request (`.calls`, `.paths`, `.queries`, `.bodies`). `.client()` gives a `Client` wired to it, whose retries don't wait.
 
@@ -42,8 +42,7 @@ test_my_pipeline_survives_a_capped_server_and_a_hiccup()
 A client set up elsewhere, with its own auth or settings, takes the fake as its transport:
 
 ```python
-from api_explorer import http
-from api_explorer import Client
+from api_explorer import Client, http
 from api_explorer.testing import replies
 
 api = replies(http.Response(200, json={"results": [1], "next": None}))
@@ -56,7 +55,7 @@ assert api.paths == ["/api/items/"]
 
 ## Checking pieces of your own
 
-Each interface with promises the types can't state has a check, which raises `AssertionError` naming the first promise broken: `check_paging`, `check_retry_policy`, `check_tracker`, `check_state_store`, `check_warehouse`, `check_transport`. See [build-your-own](build-your-own.md).
+Each interface with promises the types can't state has a check, which raises `AssertionError` naming the first promise broken: `check_paging`, `check_retry_policy`, `check_tracker`, `check_state_store`, `check_warehouse`, `check_transport`. `fetched(body, headers=...)` builds the page a paging style receives, to test a style on its own. See [build-your-own](build-your-own.md).
 
 `serve(api)` puts a fake behind a real HTTP server on this machine, for testing a real transport, or code that only takes a URL:
 

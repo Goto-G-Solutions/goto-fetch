@@ -5,7 +5,7 @@ Needs the "scrape" extra: pip install "api-explorer[scrape]".
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Protocol
 
 try:
     from parsel import Selector
@@ -38,7 +38,7 @@ class CSSField:
     """Extract a field with a CSS selector: its text, or an attribute."""
 
     selector: str
-    extract: Literal["text"] | str = "text"
+    extract: str = "text"
 
     def extract_value(self, element: Selector) -> str | None:
         """Return the stripped text, or the named attribute, of the first match."""

@@ -83,9 +83,9 @@ class Client:
 
     `transport` sends the requests: Urllib3Transport by default, or any
     Transport, such as Httpx2Transport for HTTP/2 or an httpx2.Client of
-    your own. Every request goes
-    through it, token requests and retries included. A transport you pass
-    stays open when this client closes, so several clients can share one;
+    your own. Every request goes through it, token requests and retries
+    included. A transport you pass stays open when this client closes, so
+    several clients can share one;
     it is yours to close.
 
     `check` looks at every successful response and says whether it really
@@ -420,7 +420,8 @@ class Client:
         and lets Offset stop exactly at the end. `paging` says how to reach
         the next page: NextLink() (the default) follows a next-page URL in
         each page, Offset(...) steps a limit/offset query, HeaderLink()
-        follows the Link header, and Cursor(...) sends back a cursor.
+        follows the Link header, Cursor(...) sends back a cursor, and
+        Keyset(...) asks each page from the last value of the one before.
         `params` are added to the first URL; later pages carry or work out
         their own. `max_pages` stops after that many pages, for a look at
         the first few.

@@ -42,8 +42,9 @@ def _():
     Pull records from a paginated JSON API and look through them, or store
     them, fetching only what changed. Fill in the request below, press
     **Fetch**, then pick columns from the results. The fields fill from
-    `$API_BASE_URL`, `$API_TOKEN`, `$API_REFRESH_TOKEN`, `$API_USERNAME`,
-    `$API_PASSWORD`, `$API_CLIENT_ID` and `$API_CLIENT_SECRET` when set.
+    `$API_BASE_URL`, `$API_TOKEN`, `$API_REFRESH_TOKEN`, `$API_ACCESS_TOKEN`,
+    `$API_USERNAME`, `$API_PASSWORD`, `$API_CLIENT_ID` and `$API_CLIENT_SECRET`
+    when set.
     Secrets live only in this session, never in the file, and the script
     the **Code** tab writes reads them from the same variables.
 
@@ -104,7 +105,11 @@ def _():
         kind="password",
         label="Refresh token",
     )
-    access_token = mo.ui.text(kind="password", label="Access token")
+    access_token = mo.ui.text(
+        value=os.environ.get("API_ACCESS_TOKEN", ""),
+        kind="password",
+        label="Access token",
+    )
     login_url = mo.ui.text(value="/token/", label="Login URL")
     username = mo.ui.text(
         value=os.environ.get("API_USERNAME", ""), label="Username"

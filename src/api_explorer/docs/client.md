@@ -48,7 +48,7 @@ assert api.queries == [{}, {"page": "2"}, {"page": "3"}]
 - `max_pages`: stop early, to look at the first few pages.
 - `incremental`: fetch only what changed (see [incremental](incremental.md)).
 
-`Client(rate_limit=RateLimit(2))` keeps every request to two a second, retries and token requests included, for a server that can't take a fast run; pass one `RateLimit` to several clients for one budget between them.
+`Client(rate_limit=RateLimit(2))` keeps every request to two a second, retries and token requests included, for a server that can't take a fast run; `RateLimit(2, burst=5)` lets five go at once after a quiet spell, and one `RateLimit` passed to several clients is one budget between them. The timeout is 20 seconds at each stage (connecting, and each read) unless `timeout=` says otherwise: a number for both, or `Timeout(connect=5, read=60)` to set them apart.
 
 A missing results path is an error, not an empty page, so a mistyped key can't pass for "no data":
 

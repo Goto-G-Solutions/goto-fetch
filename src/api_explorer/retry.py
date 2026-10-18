@@ -56,11 +56,11 @@ class Failure:
     failure). Exactly one of `response` (the server answered) and `error` is
     set. `error` is a network error or timeout, or an ApiError an auth
     raised while renewing its token, whose `status` is the token
-    endpoint's (None when it didn't answer with one). A response is a failure either for its
-    status, or because the client's response check found a `problem` in a
-    successful one. `retry` is the call's own say: True to retry whatever
-    the method, None to leave it to the policy. A call with retry=False
-    never reaches the policy.
+    endpoint's (None when it didn't answer with one). A response is a
+    failure either for its status, or because the client's response check
+    found a `problem` in a successful one. `retry` is the call's own say:
+    True to retry whatever the method, None to leave it to the policy. A
+    call with retry=False never reaches the policy.
     """
 
     attempt: int

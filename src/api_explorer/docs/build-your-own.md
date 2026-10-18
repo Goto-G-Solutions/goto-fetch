@@ -14,6 +14,9 @@ Every piece you might replace sits behind a small interface, and the built-in on
 | how tokens are fetched | `Login`: `token_url`, `build_request(url)` | |
 | how requests are sent | `Transport`: `send(request, timeout)`, `close()` | `check_transport` |
 | how requests are signed | `Auth`: `auth_flow(request)` | |
+| an auth's own URLs, resolved like endpoints | `ResolvesUrls`: `bind(resolve)` | |
+| what a record becomes | `model`: a class or function `records(model=...)` calls | |
+| which dataframe library | `backend`: a name or module for `to_frame` | |
 | what counts as a failed 200 | `ResponseCheck`: a function | |
 | how JSON is parsed | `Decoder`: a function | |
 | what a run delivers | `Tracker`: `state`, `apply`, `track` | `check_tracker` |
@@ -89,7 +92,7 @@ check_retry_policy(FixedWait())
 
 A transport sends one request and gives back the response: `send(request, timeout)` and `close()`. `Request`, `Response` and `Timeout` (`timeout.connect` and `timeout.read`, in seconds, or None for no limit) come from `api_explorer.http`, and so do the errors to raise.
 
-**Promises:** what is sent arrives as sent; the response is the server's (status, headers by any case, body unpacked); an error status is returned, never raised; redirects are followed; the connect and read timeouts apply apart (a short connect limit never cuts a slow read short); a refused connection or a timeout raises `NetworkError` (or a subclass: `ConnectError`, `TimeoutError`, `ConnectionDropped`), and anything else that sent nothing raises `TransportError`.
+**Promises:** what is sent arrives as sent; the response is the server's (status, headers by any case, body unpacked); an error status is returned, never raised; redirects are followed; the connect and read timeouts apply apart (a short connect limit never cuts a slow read short); a refused connection raises `ConnectError`, a timeout `TimeoutError` and a reply cut short `ConnectionDropped` (the three `NetworkError`s, which the retry policy sees as worth another try), and anything else that sent nothing raises `TransportError`.
 
 **You get for free:** retries, auth and token renewal, paging, logging, and every piece above it, whatever library sends.
 
@@ -117,7 +120,7 @@ class Counting:
 check_transport(lambda: Counting(Urllib3Transport()))  # over real HTTP, on this machine
 ```
 
-For another library, translate its exceptions to those three meanings, follow redirects, and unpack the body; `api_explorer/urllib3_transport.py` is a short model.
+For another library, translate its exceptions into those errors by meaning (worth retrying or not), follow redirects, and unpack the body; `api_explorer/urllib3_transport.py` is a short model.
 
 ## A login
 
@@ -126,8 +129,7 @@ A login has a `token_url` and `build_request(url)`, which builds the request tha
 **You get for free:** renewal before expiry and after a 401, safety across threads, URL resolution, and retries at the token endpoint.
 
 ```python
-from api_explorer import http
-from api_explorer import Client, TokenRefresh
+from api_explorer import Client, TokenRefresh, http
 from api_explorer.testing import TokenServer
 
 
@@ -354,7 +356,7 @@ check_warehouse(lambda: JsonLinesWarehouse(f"shop-{os.urandom(4).hex()}"))
 
 ### An SQL database
 
-For an SQL database, don't write the promises again: implement `SqlTables` and call `write_run`, which owns the order that keeps them (stage the run to disk, change columns, store rows, remove deletions) and decides each column's kind. `SqlTables` has five methods: `transaction()` (a DB-API connection, committed or rolled back), `columns(connection, table)`, `alter(...)`, `load(connection, table, part, fields, columns, key)` and `delete(connection, table, column, keys)`. The SQLite warehouse is about a hundred lines on it; read `api_explorer/sqlite_warehouse.py` as the model.
+For an SQL database, don't write the promises again: implement `SqlTables` and call `write_run`, which owns the order that keeps them (stage the run to disk, change columns, store rows, remove deletions) and decides each column's kind. `SqlTables` has five methods: `transaction()` (a DB-API connection, committed or rolled back), `columns(connection, table)`, `alter(...)`, `load(connection, table, part, fields, columns, key)` and `delete(connection, table, column, keys)`. The SQLite warehouse's `SqlTables` is about a hundred lines; read `api_explorer/sqlite_warehouse.py` as the model.
 
 ```python skip
 from api_explorer import SqlTables, write_run

@@ -12,10 +12,11 @@ framework is needed.
     assert len(api.calls) == 4                   # the 503, then 3 pages
 
 For pieces of your own: fetched() builds a page to test a paging style on
-its own, and check_retry_policy(), check_paging(), check_state_store(), check_tracker(),
-check_warehouse() and check_transport() check the promises every retry
-policy, paging style, state store, tracker, warehouse and transport must
-keep. MemoryState and MemoryWarehouse never touch the disk, and serve()
+its own, and check_retry_policy(), check_paging(), check_state_store(),
+check_tracker(), check_warehouse() and check_transport() check the
+promises every retry policy, paging style, state store, tracker, warehouse
+and transport must keep. MemoryState and MemoryWarehouse never touch the
+disk, and serve()
 puts a fake behind a real HTTP server on this machine, to test a real
 transport.
 """
@@ -382,9 +383,9 @@ class TokenServer(FakeApi):
     {"access": ..., "refresh": ...}. The same path also takes the OAuth2
     client credentials grant: a form with grant_type=client_credentials and
     the client's ID and secret (in a Basic header or the form), answered
-    with {"access_token": ..., "token_type": "Bearer"}. POST `refresh_path` with
-    {"refresh": ...} gives a new access token, and with `rotate`, a new
-    refresh token that replaces the old one. Any other path wants
+    with {"access_token": ..., "token_type": "Bearer"}. POST `refresh_path`
+    with {"refresh": ...} gives a new access token, and with `rotate`, a
+    new refresh token that replaces the old one. Any other path wants
     "Authorization: Bearer <access>" and answers {"results": [...],
     "next": null}: `records`, or a request's own JSON body as the one
     record, so a test can see what was sent.
@@ -510,8 +511,9 @@ def check_retry_policy(policy: RetryPolicy, *, max_attempts: int = 100) -> None:
 
     The policy is shown failures that never go away, of each kind: a 503, a
     429, a network error, a POST answered with a 503, a 200 whose body
-    reports a temporary problem, and a token endpoint answering 503. For each, it must
-    give up (return None, or raise ApiError) within `max_attempts` tries,
+    reports a temporary problem, and a token endpoint answering 503. For
+    each, it must give up (return None, or raise ApiError) within
+    `max_attempts` tries,
     and every wait it asks for must be a number of seconds that is neither
     negative nor endless. Nothing sleeps, so this is quick.
 

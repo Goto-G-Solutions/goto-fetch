@@ -14,7 +14,7 @@ A paging style tells `client.records()` how to reach the next page. Pick the one
 
 ## What it handles for you
 
-- **The end:** an empty page ends a run, even when the API keeps sending a next link (turn off with `stop_on_empty=False`); `Offset` stops at the count, or at an empty or short page when there is none.
+- **The end:** an empty page ends a run, even when the API keeps sending a next link (`NextLink`, `HeaderLink` and `Cursor` turn that off with `stop_on_empty=False`); `Offset` stops at the count, or at an empty or short page when there is none; `Keyset` at an empty page, or one that moves nowhere.
 - **Loops:** asking for a page already fetched raises `PaginationLoop`, rather than looping forever.
 - **Server caps:** `Offset` keeps going when the server sends fewer records than asked.
 - **Relative links** resolve against the current page, and a link keeps a POST's method and body.
@@ -83,4 +83,4 @@ A style of your own is any object with `begin(first, read)`; see [build-your-own
 
 - **Page numbers and offsets over changing data** skip a record when one before it is edited or deleted during the run, as the rest shift a place. That matters most with incremental fetching: prefer a cursor, `Keyset`, or `Changes`.
 - **A key holding dots**, such as `@odata.nextLink`, goes in quotes: `NextLink('["@odata.nextLink"]')`.
-- `Offset` asks for `limit` records; set it no higher than the server allows, or rely on its cap handling.
+- `Keyset` needs `limit` of at least 2, since each page repeats the last record of the one before, and no higher than the server allows: until a short page turns out not to be the last, a short page that moves nowhere counts as the end. `send_in="body"` and `send_as=` work as for `Incremental`.

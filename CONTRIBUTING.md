@@ -26,7 +26,7 @@ Writing these down is how we make sure the problem is understood before anyone w
    - a rule that should hold for any input belongs in `tests/test_properties.py`, as a property test.
 4. Update the guides. The guides in `src/api_explorer/docs/` ship with the package, and people and coding agents rely on them, so a valid change keeps them true:
    - a change to what a piece does, or to its public interface, updates that piece's guide, and `build-your-own.md` if it changes an interface;
-   - a new piece or guide is added to the index (`docs/README.md`), to `llms.txt`, and to `SKILL.md` if an agent needs to know of it;
+   - a new piece or guide is added to the index (`src/api_explorer/docs/README.md`), to `llms.txt`, and to `SKILL.md` if an agent needs to know of it;
    - every example in a guide runs as part of `uv run pytest` (`tests/test_docs.py`), so a stale example fails the tests;
    - update `README.md` and `CHANGELOG.md` the same way, under "Unreleased".
 5. Run the checks:
