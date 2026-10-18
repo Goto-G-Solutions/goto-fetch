@@ -3,8 +3,9 @@
 The promises, in order: what a run asks the API for, which records come
 through, when the state moves on (only after a whole run), how values
 compare, and the settings for APIs that differ (body filters, no filter,
-other forms, records without the field). changes_api is the fake API
-throughout; its filter is checked here too, as the tests depend on it.
+other forms, records without the field), then Keyset paging, which pairs
+with it. changes_api and keyset_api are the fake APIs throughout; their
+filters are checked here too, as the tests depend on them.
 """
 
 import json

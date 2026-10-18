@@ -36,7 +36,7 @@ fast = ["msgspec>=0.22"]
 scrape = ["parsel>=1.10.0"]
 # The explorer notebook
 explorer = ["marimo>=0.25.1"]
-# Storing records and run state in DuckDB (api_explorer.warehouse)
+# Storing records and run state in DuckDB (DuckDBWarehouse)
 duckdb = ["duckdb>=1.5"]
 
 [dependency-groups]

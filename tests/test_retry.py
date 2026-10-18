@@ -11,7 +11,8 @@ from api_explorer.testing import replies
 OK = httpx2.Response(200, json={"ok": True})
 
 
-def test_a_server_error_is_retried_and_each_retry_is_logged(mock_client, caplog):
+def test_a_server_error_is_retried_until_the_tries_run_out(mock_client):
+    # test_logs checks the "retry" and "give-up" events these tries log.
     handler = replies(httpx2.Response(503))
     with pytest.raises(ApiError) as raised:
         mock_client(handler, retry=Retry(attempts=3, backoff=0)).request(
@@ -19,8 +20,6 @@ def test_a_server_error_is_retried_and_each_retry_is_logged(mock_client, caplog)
         )
     assert raised.value.status == 503
     assert len(handler.calls) == 3
-    retries = [m.rsplit("; ", 1)[1].split(" in ")[0] for m in caplog.messages]
-    assert retries == ["retry 1", "retry 2"]
 
 
 @pytest.mark.parametrize(
@@ -29,7 +28,7 @@ def test_a_server_error_is_retried_and_each_retry_is_logged(mock_client, caplog)
         httpx2.Response(429),
         httpx2.Response(408),
         httpx2.ConnectError("refused"),
-        # Regression (dlt b7500775): a connection dropped mid-response wasn't retried.
+        # Guard (dlt b7500775): a connection dropped mid-response wasn't retried.
         httpx2.RemoteProtocolError(
             "peer closed connection without sending complete message body"
         ),

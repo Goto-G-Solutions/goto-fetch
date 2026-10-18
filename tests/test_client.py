@@ -111,7 +111,7 @@ def test_closing_leaves_a_client_you_bring_open_and_closes_its_own():
 
 
 def test_params_merge_into_a_query_the_endpoint_already_has(mock_client):
-    # Regression (httpx #3433): httpx2 replaced the endpoint's query.
+    # Guard (httpx #3433): httpx2 replaced the endpoint's query.
     handler = replies(OK)
     mock_client(handler).request("GET", "/items/?a=1", params={"b": "2"})
     assert dict(handler.calls[0].url.params) == {"a": "1", "b": "2"}

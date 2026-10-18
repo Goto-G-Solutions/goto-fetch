@@ -46,13 +46,14 @@ def test_to_frame_finds_a_type_that_first_appears_late(backend):
 
 
 def test_to_frame_stores_a_column_of_mixed_types_as_text(backend, caplog):
-    # Regression for the message: it called the ints "float".
+    # Regression: the message called the ints "float".
     records = [{"value": "123"}, {"value": 456}, {"value": None}]
     assert [r["value"] for r in rows_of(to_frame(records, backend))] == [
         "123",
         "456",
         None,
     ]
+    # The text a person reads; test_logs checks the event's data.
     assert "Column 'value' mixes number, str; storing it as text" in caplog.messages
 
 
@@ -78,8 +79,8 @@ def test_to_frame_evens_out_the_fields_of_nested_objects(backend, caplog):
 
 
 def test_to_frame_turns_ints_beside_floats_into_floats(backend):
-    # Regression, found by the property tests: polars refused [0, 0.0]
-    # inside a list.
+    # Regression: polars refused [0, 0.0] inside a list (found by the
+    # property tests).
     records = [{"v": [None, 0, 0.5]}, {"n": 1}, {"n": 2.5}]
     rows = rows_of(to_frame(records, backend))
     assert list(rows[0]["v"]) == [None, 0.0, 0.5]

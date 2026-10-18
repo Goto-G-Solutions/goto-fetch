@@ -1,4 +1,10 @@
-"""FetchPlan and package_requirement: running a fetch, and writing it as a script."""
+"""FetchPlan and package_requirement: running a fetch, storing it, writing it as a script.
+
+The plan and its script must do the same fetch, so several tests run the
+script itself. Also here: store() into a warehouse, tracked or not, and
+the plans refused because they could lose records. api_explorer.calls,
+which keeps the two in step, has its own tests in test_calls.
+"""
 
 import functools
 import json
@@ -298,11 +304,11 @@ def test_a_plan_without_an_error_path_has_no_check():
         assert client.check is None
 
 
-# Storing
-
-
 def test_a_plan_that_stores_nothing_imports_no_paging_it_doesnt_use():
     assert "NextLink" not in FetchPlan("http://h/api", "/a/").script()
+
+
+# Storing
 
 
 @pytest.mark.parametrize(

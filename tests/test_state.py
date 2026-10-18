@@ -1,4 +1,4 @@
-"""State stores and tracked_run: keeping an incremental run's place between runs.
+"""State stores and tracked_run: keeping a tracked run's place between runs.
 
 The StateStore promises are checked once per store by check_state_store,
 and its own tests show it catches each kind of broken store. The other
@@ -31,7 +31,7 @@ def store(request, tmp_path) -> StateStore:
 
 def test_the_built_in_stores_keep_every_state_store_promise(store):
     assert isinstance(store, StateStore)
-    check_state_store(store)
+    check_state_store(lambda: store)
 
 
 class SameObject(MemoryState):
@@ -77,10 +77,10 @@ class NeverEmpty(MemoryState):
 @pytest.mark.parametrize(
     ("store", "message"),
     [
-        (SameObject(), "not a copy"),
-        (FirstWins(), "didn't replace"),
-        (OneSlot(), "changed 'check-state-store-b'"),
-        (NeverEmpty(), "must give None for a name never saved"),
+        (SameObject, "not a copy"),
+        (FirstWins, "didn't replace"),
+        (OneSlot, "changed 'check-state-store-b'"),
+        (NeverEmpty, "must give None for a name never saved"),
     ],
     ids=["same-object", "first-wins", "one-slot", "never-empty"],
 )

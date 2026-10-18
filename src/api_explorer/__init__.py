@@ -1,24 +1,30 @@
-"""Pull data from paginated JSON APIs, and shape it for any dataframe library.
+"""Pull data from paginated JSON APIs safely, keep only what changed, and store it.
 
 The layers, each built only on the ones before it:
 
-- paths, decode: reading values by path, and parsing JSON.
-- models, records, retry: typed records, reshaping lists of dicts, and
-  the retry policy.
-- frames, paging: dataframes through narwhals, and the paging loop.
-- auth, incremental, state, client: Client fetches the records, page by page,
-  or only those changed since the last run, whose state a StateStore
-  keeps.
-- plan: FetchPlan describes one fetch, and writes it as a script.
+- errors, paths, decode, models, calls: the exception and redaction,
+  reading values by path, parsing JSON, typed records, and calls
+  described once.
+- logs, records, retry, checks: logging events, reshaping records, the
+  retry policy, and response checks.
+- ordering, frames, auth: comparing a field's values, dataframes, and
+  authentication.
+- paging: the paging loop and styles.
+- incremental: the trackers, Incremental and Changes.
+- client, state, warehouse: the HTTP client, state stores and
+  tracked_run, and the Warehouse interface with write_run.
+- duckdb_warehouse, sqlite_warehouse, scrape, testing: the built-in
+  warehouses, HTML scraping, and fakes and checks for your tests.
+- plan: FetchPlan describes one fetch, to run, store or write as a script.
 
 Optional packages make it faster or richer when installed: msgspec parses
-JSON faster, pydantic or msgspec models type the records, and polars,
-pandas or pyarrow hold the frames.
+JSON faster, pydantic or msgspec models type the records, polars, pandas
+or pyarrow hold the frames, and DuckDB holds a warehouse.
 
 HTML scraping lives in api_explorer.scrape and needs the "scrape" extra.
 Records are kept in a Warehouse: SqliteWarehouse needs nothing more, and
-DuckDBWarehouse needs the "duckdb" extra.
-Fake APIs for testing your own code live in api_explorer.testing.
+DuckDBWarehouse needs the "duckdb" extra. Fake APIs and checks for
+testing your own code live in api_explorer.testing.
 
 The package logs nothing until asked: enable_logging() switches it on.
 """

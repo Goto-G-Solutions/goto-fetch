@@ -39,14 +39,17 @@ def _():
     mo.md(r"""
     # API explorer
 
-    Pull records from a paginated JSON API and look through them. Fill in
-    the request below, press **Fetch**, then pick columns from the results.
-    Secrets come from `$API_TOKEN`, `$API_REFRESH_TOKEN`, `$API_USERNAME`,
-    `$API_PASSWORD`, `$API_CLIENT_ID` and `$API_CLIENT_SECRET` when set. They live only in this session, never in
-    the file.
+    Pull records from a paginated JSON API and look through them, or store
+    them, fetching only what changed. Fill in the request below, press
+    **Fetch**, then pick columns from the results. The fields fill from
+    `$API_BASE_URL`, `$API_TOKEN`, `$API_REFRESH_TOKEN`, `$API_USERNAME`,
+    `$API_PASSWORD`, `$API_CLIENT_ID` and `$API_CLIENT_SECRET` when set.
+    Secrets live only in this session, never in the file, and the script
+    the **Code** tab writes reads them from the same variables.
 
     The panel is built on the `api_explorer` package; the examples below
-    show the same calls in your own code.
+    show the same calls in your own code, and the README shows storing and
+    incremental fetching.
     """)
     return
 
@@ -930,13 +933,16 @@ def _():
     mo.md(r"""
     ## Not built yet
 
-    Ideas parked until this package saves files rather than returning data:
+    Ideas parked until a real API needs them:
 
-    - **Atomic file writes.** Write to a `.tmp` path and `os.replace()` it on
-      success, so a crash can't leave a half-written file.
-    - **Resuming a download.** Skipping items already fetched is safe only
-      for data that never changes. Most APIs' data does change, so a resume
-      would need a staleness check, not just "is it there".
+    - **Async and parallel fetching**, for many independent requests at
+      once. Meanwhile, a thread pool over `client.get_json` works: the
+      client and its token renewal are safe across threads.
+    - **A rate limiter** (requests per second), beyond retrying 429s and
+      honouring `Retry-After`.
+    - **An overall deadline** for a run, beyond each request's timeout.
+    - **Interactive OAuth logins** (authorization code, PKCE); any
+      `httpx2.Auth` of your own works with `Client(auth=...)` meanwhile.
     """)
     return
 

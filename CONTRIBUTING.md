@@ -20,8 +20,9 @@ Writing these down is how we make sure the problem is understood before anyone w
 2. Make the change in small commits, each one passing the tests, in the form `type(scope): lowercase summary`. The commit body says why.
 3. Add tests:
    - a new feature gets tests at its interface;
-   - a bug fix gets a regression test, marked `# Regression:`;
-   - keep tests orthogonal, and explain any overlap in a comment.
+   - a bug fix gets a regression test, marked `# Regression:`, that fails without the fix;
+   - a defence learned from another library's bug is marked `# Guard (source):`;
+   - keep tests orthogonal, and explain any overlap in a comment;
    - a rule that should hold for any input belongs in `tests/test_properties.py`, as a property test.
 4. Run the checks:
 

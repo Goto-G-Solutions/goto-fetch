@@ -30,7 +30,7 @@ def test_parse_path_refuses_what_it_cant_read(path):
 
 
 def test_a_quoted_key_may_hold_a_line_break():
-    # Regression, found by the property tests: quoted keys stopped at "\n".
+    # Regression: quoted keys stopped at "\n" (found by the property tests).
     assert parse_path('["line\nbreak"]') == ["line\nbreak"]
 
 

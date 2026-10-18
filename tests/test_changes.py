@@ -14,8 +14,6 @@ import pytest
 from api_explorer import (
     ApiError,
     Changes,
-    Incremental,
-    Tracker,
     logging_to,
     tracked_run,
 )
@@ -158,11 +156,6 @@ def test_the_state_survives_a_round_trip_through_json():
 
 
 # How it fits with the rest
-
-
-def test_both_trackers_fit_the_tracker_shape():
-    assert isinstance(Changes("id"), Tracker)
-    assert isinstance(Incremental("updated_at"), Tracker)
 
 
 def test_records_with_changes_fetch_everything_and_deliver_the_changes():

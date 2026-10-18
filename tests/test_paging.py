@@ -1,7 +1,11 @@
-"""Paging: the paginate loop, Client.records, NextLink, Offset, and progress logs.
+"""Paging: paginate, follow, the paging styles, read_page and the page events.
 
-records() is exercised through a mock client because it is where paging,
-results paths and counts meet; each test still checks one behaviour.
+NextLink, Offset, HeaderLink and Cursor are here, with request_key,
+with_query, empty and 204 pages, and the defences learned from other
+libraries' bug histories. Keyset is in test_incremental, beside the
+tracker it pairs with. records() is exercised through a mock client
+because it is where paging, results paths and counts meet; each test
+still checks one behaviour.
 """
 
 import json
@@ -356,6 +360,8 @@ def test_records_warn_once_when_the_count_is_missing(mock_client, caplog):
         }
     )
     list(mock_client(handler).records("/items/", count_key="count"))
+    # The text, and that it comes once in two pages; test_logs checks the
+    # event's data.
     assert caplog.messages == ["No count at 'count' in the response"]
 
 
@@ -394,6 +400,7 @@ def test_offset_without_a_count_ends_on_an_empty_page(mock_client, total, reques
 def test_offset_warns_when_records_run_out_before_the_count(mock_client, caplog):
     handler = offset_api(230, count=250)
     assert fetch_offset(mock_client, handler, "count", limit=100) == list(range(230))
+    # The text a person reads; test_logs checks the event's data.
     assert caplog.messages == ["Records ran out at 230 of the 250 the count promised"]
 
 
@@ -460,7 +467,7 @@ def endless_api(style_key: str, rows_until: int):
     ids=["next-link", "cursor"],
 )
 def test_an_empty_page_ends_the_run_even_if_more_is_promised(mock_client, paging, key):
-    # Regression (dlt #3358): an API that keeps sending a cursor or next link
+    # Guard (dlt #3358): an API that keeps sending a cursor or next link
     # after the data ends made the run page forever.
     api = FakeApi(endless_api(key, rows_until=2))
     assert list(mock_client(api).records("/e/", paging=paging, max_pages=50)) == [0, 1]
@@ -480,7 +487,7 @@ def test_stop_on_empty_false_keeps_paging_past_an_empty_page(mock_client):
 
 
 def test_a_next_path_missing_from_the_first_page_is_warned_about(mock_client, caplog):
-    # Regression (dlt #2505): an unquoted "@odata.nextLink" is read as a
+    # Guard (dlt #2505): an unquoted "@odata.nextLink" is read as a
     # nested path, so paging stopped after one page without a word.
     pages = {
         BASE: {"value": [1], "@odata.nextLink": f"{BASE}?p=2"},
@@ -498,7 +505,7 @@ def test_a_next_path_missing_from_the_first_page_is_warned_about(mock_client, ca
 
 
 def test_a_cursor_path_that_finds_several_values_is_refused(mock_client):
-    # Regression (dlt #3397): the cursor became the text of a list.
+    # Guard (dlt #3397): the cursor became the text of a list.
     page = {BASE: {"results": [{"c": "a"}, {"c": "b"}]}}
     with pytest.raises(
         ApiError, match=re.escape("'results[*].c' holds a list, not one cursor value")
@@ -520,7 +527,7 @@ def test_a_malformed_next_link_is_refused_even_on_an_empty_page(mock_client):
 
 
 def test_a_204_is_an_empty_page(mock_client):
-    # Regression (dlt #1849): an empty 204 failed as "did not return JSON".
+    # Guard (dlt #1849): an empty 204 failed as "did not return JSON".
     assert list(mock_client(replies(httpx2.Response(204))).records("/items/")) == []
 
 

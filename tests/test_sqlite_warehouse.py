@@ -93,7 +93,7 @@ def test_replacing_by_key_uses_an_index_that_survives_a_rebuild(shop):
 
 
 def test_a_sqlite_warehouse_keeps_state_in_the_same_file(shop):
-    check_state_store(shop)
+    check_state_store(lambda: shop)
     tables = raw(shop, "SELECT name FROM sqlite_master WHERE type = 'table'")
     assert ("api_explorer_state",) in tables
 

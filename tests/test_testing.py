@@ -1,11 +1,12 @@
-"""api_explorer.testing: the fake APIs' own promises.
+"""api_explorer.testing: the fake APIs' own promises, and three of the checks.
 
-offset_api, TokenServer, json_pages and replies are exercised throughout
-test_paging, test_auth, test_client and test_retry, which check their
-options as they test the client. This file covers the rest: FakeApi's
-record of calls, flaky, the builders the other tests don't use, and the
-helpers for testing pieces of your own (fetched and the two checks), on
-both sides: correct pieces pass, and each kind of broken piece is caught.
+The fakes are used throughout the other tests, which check their options
+as they test the package. This file covers what those don't: FakeApi's
+record of calls, flaky, each builder's own form, fetched, and
+check_retry_policy, check_paging and check_tracker, on both sides:
+correct pieces pass, and each kind of broken piece is caught.
+check_state_store is tested in test_state and check_warehouse in
+test_warehouses, beside the stores and warehouses they check.
 """
 
 import re

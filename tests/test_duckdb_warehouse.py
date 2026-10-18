@@ -131,7 +131,7 @@ def test_typed_records_are_stored_like_dicts(shop):
 
 
 def test_a_duckdb_warehouse_keeps_state_in_the_same_file(shop):
-    check_state_store(shop)
+    check_state_store(lambda: shop)
     with duckdb.connect(str(shop.path)) as connection:
         assert ("api_explorer_state",) in connection.sql("SHOW TABLES").fetchall()
 

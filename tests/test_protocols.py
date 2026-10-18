@@ -128,6 +128,14 @@ def test_built_in_pieces_fit_their_interfaces(tmp_path):
     del paging, policy, logins, check, decode, fingerprint, tables  # for pyright
 
 
+def test_the_scraping_fields_fit_their_interface():
+    pytest.importorskip("parsel")
+    from api_explorer.scrape import CSSField, FieldExtractor, XPathField
+
+    fields: list[FieldExtractor] = [CSSField("h2"), XPathField("//h2/text()")]
+    del fields  # for pyright
+
+
 def test_a_user_built_tracker_fits_the_interfaces():
     tracker: Tracker = NewIds()
     reports: ReportsDeletions = NewIds()
@@ -176,6 +184,8 @@ def test_a_user_built_tracker_s_deletions_reach_the_warehouse(tmp_path):
 
 
 def test_a_tracker_that_reports_nothing_yet_stops_the_write(tmp_path):
+    # check_warehouse checks this promise with a stand-in; here the tracker
+    # is one built as a user would, before its run is complete.
     with pytest.raises(ValueError, match="hasn't finished a run"):
         SqliteWarehouse(tmp_path / "shop.db").write(
             "items", [{"id": 1}], key="id", deleted_by=NewIds()

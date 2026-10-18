@@ -189,7 +189,7 @@ class SwallowsLater(MemoryWarehouse):
             return super().write(table, records, key=key, deleted_by=deleted_by)
         try:
             return super().write(table, records, key=key, deleted_by=deleted_by)
-        except Exception:  # noqa: BLE001 - the broken behaviour under test
+        except Exception:  # noqa: BLE001 (the broken behaviour under test)
             return 0
 
 

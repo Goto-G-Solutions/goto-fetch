@@ -1,11 +1,13 @@
 # api-explorer
 
-Pull data from paginated JSON APIs, and shape it for whichever dataframe library you use.
+Pull data from paginated JSON APIs safely, fetch only what changed, and store it for analysis.
 
-- **Paging:** follows next-page links in the body or the `Link` header, sends back cursors, or steps `limit` and `offset` itself, for GET or POST, and knows when it has reached the end.
-- **Reliability:** retries network errors, timeouts, 429 and 5xx responses, and renews short-lived access tokens.
+- **Paging:** follows next-page links in the body or the `Link` header, sends back cursors, steps `limit` and `offset` itself, or pages by a sorted field (keyset), for GET or POST, and knows when it has reached the end.
+- **Reliability:** retries network errors, timeouts, 429 and 5xx responses, renews short-lived access tokens, and catches errors an API reports inside a 200.
+- **Incremental:** fetches only what changed since the last run, by a field such as `updated_at` or by a hash of each record, and notices deleted records, without losing any when a run fails.
+- **Storage:** stores runs in DuckDB or SQLite, all or nothing, with the columns following the data and no value lost; or a database of your own.
 - **Output:** turns nested JSON into tidy rows, then into a polars, pandas or pyarrow frame.
-- **Explorer:** a marimo notebook to explore an unfamiliar API, then copy the fetch as a script.
+- **Explorer:** a marimo notebook to explore an unfamiliar API, then copy the fetch, or the whole stored and tracked run, as a script.
 
 ## Install
 
@@ -157,7 +159,9 @@ Every warehouse keeps the same promises, and these are what make tracked runs sa
 
 The two database warehouses first copy a run to temporary files, so a failed request never touches the database, then make one transaction of it. Columns follow the records: nested objects and lists become JSON columns (`customer->>'name'` in DuckDB's SQL), text stays text, timestamps included, new fields add columns, and a column whose values change type is widened (integers beside floats to floats, anything else to text, with a warning). Read the file with its own tools too, such as `duckdb.connect("shop.duckdb").sql("SELECT * FROM products").pl()`.
 
-Any object with `write` and `read` that keeps those promises is a `Warehouse`, and works with `FetchPlan.store(client, warehouse=...)`; `api_explorer.testing.check_warehouse` checks one, and `MemoryWarehouse` stands in for tests.
+Any object with `write` and `read` that keeps those promises is a `Warehouse`, and works with `FetchPlan.store(client, warehouse=...)`; `api_explorer.testing.check_warehouse` checks one, and `MemoryWarehouse` stands in for tests. For another SQL database, implement `SqlTables` (open a transaction, describe a table, alter it, load a file, delete keys) and call `write_run`, which keeps the promises; the DuckDB and SQLite warehouses are built that way.
+
+`FetchPlan` describes one fetch as data (the API, its auth, paging, tracking and where to store), which is what the explorer builds. `plan.records(client)` runs it, `plan.store(client)` runs it into its warehouse, and `plan.script()` writes a uv script that does the same, from the same description, with secrets read from environment variables.
 
 The interfaces are Protocols: your pieces match their shape and never inherit from ours, and a type checker confirms they fit. `Paging`, `RetryPolicy`, `Login`, `ResolvesUrls` (an auth with URLs of its own), `Tracker` (what a run delivers: `apply`, `track`, `state`), `ReportsDeletions` (a tracker that knows what is gone), `StateStore` and `Warehouse` are the main ones; one-function seams are plain function types (`Decoder`, `ResponseCheck`, `Fingerprint`). `check_paging`, `check_retry_policy`, `check_tracker`, `check_state_store` and `check_warehouse` check behaviour the types can't.
 
@@ -196,6 +200,21 @@ with Client("https://host/api", retry=Retry(attempts=5)) as client:
 
 # In whichever dataframe library this session already uses.
 df = to_frame(items)
+```
+
+## Scraping
+
+For pages without an API, `api_explorer.scrape` (the `scrape` extra) follows "next" links through HTML with the same paging loop and retries:
+
+```python
+from api_explorer.scrape import CSSField, ScraperConfig, scrape
+
+config = ScraperConfig(
+    item_selector="article.product",
+    fields={"name": CSSField("h2"), "price": CSSField(".price")},
+    next_page_selector="a.next",  # its href leads to the next page
+)
+rows = list(scrape(client, "/shop/", config))
 ```
 
 ## Logging
@@ -242,6 +261,8 @@ def test_my_pipeline_survives_a_capped_server_and_a_hiccup():
 | `offset_api` | Django Ninja: `?limit=&offset=`, with an optional server cap and count |
 | `cursor_api` | a cursor in the query string or a POST body |
 | `link_header_api` | GitHub: a bare list, with a `Link` header to the next page |
+| `changes_api` | filters by a field, `?updated_since=`, for testing `Incremental` |
+| `keyset_api` | sorted by a field, paged from a value with `?limit=`, for testing `Keyset` |
 | `TokenServer` | simplejwt: login, refresh, rotation and expiry |
 | `json_pages`, `replies` | fixed pages by URL, or fixed responses in turn |
 | `flaky(api, 503, ...)` | any of these, failing first as told |
@@ -291,7 +312,7 @@ def test_my_tracker():
 
 
 def test_my_state_store():
-    check_state_store(MyStore())  # get gives copies, put replaces, names apart
+    check_state_store(MyStore)  # get gives copies, put replaces, names apart
 
 
 def test_my_auth_signs_each_request():
@@ -326,7 +347,7 @@ The **Store** section saves the records in a DuckDB or SQLite file instead, and 
 
 ## How it is built
 
-The package is a set of layers, each built only on the ones before it: `errors` and `paths`, then `records`, `frames` and `paging`, then `auth` and `client`, then `scrape` and `plan`. See [AGENTS.md](AGENTS.md), section 12.
+The package is a set of layers, each built only on the ones before it: the primitives (`errors`, `paths`, `decode`, `models`, `calls`), then logging, records, retries and checks, then `ordering`, `frames` and `auth`, then `paging`, then the trackers (`incremental`), then `client`, `state` and the `warehouse` interface, then the built-in warehouses, `scrape` and `testing`, and last `plan`. See [AGENTS.md](AGENTS.md), section 12.
 
 ## Development
 

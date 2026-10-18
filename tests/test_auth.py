@@ -1,4 +1,10 @@
-"""Authentication: token_headers, jwt_expiry, PasswordLogin and TokenRefresh."""
+"""Authentication: token_headers, jwt_expiry, the Logins and TokenRefresh.
+
+PasswordLogin and ClientCredentials get tokens; TokenRefresh renews them
+safely across threads and resolves its URLs as the client does
+(ResolvesUrls). The defences learned from other libraries' bug histories
+are marked "Guard".
+"""
 
 import base64
 import json
@@ -300,7 +306,7 @@ def test_a_custom_auth_with_its_own_urls_opts_in_to_endpoint_rules():
 
 
 def test_a_temporary_failure_at_the_token_endpoint_is_retried():
-    # Regression (meltano #1038): a 503 from the token endpoint failed the run.
+    # Guard (meltano #1038): a 503 from the token endpoint failed the run.
     server = TokenServer()
     answer = server._answer
     failures = [httpx2.Response(503)]
@@ -349,13 +355,13 @@ def token_requests(expires_in, leeway=30.0, calls=3):
 
 @pytest.mark.parametrize("expires_in", ["3600", 0, -5, "soon", None])
 def test_an_expires_in_that_is_text_zero_or_odd_doesn_t_renew_every_request(expires_in):
-    # Regression (authlib #530, Airbyte #824): 0 or a negative value made
+    # Guard (authlib #530, Airbyte #824): 0 or a negative value made
     # every request fetch a new token. Digits as text count as seconds.
     assert token_requests(expires_in) == 1
 
 
 def test_the_leeway_is_capped_at_half_a_short_token_s_life():
-    # Regression (authlib #716): a 30s leeway on a 20s token made it look
+    # Guard (authlib #716): a 30s leeway on a 20s token made it look
     # expired on arrival, so every request fetched a new one.
     assert token_requests(20, leeway=30) == 1
 

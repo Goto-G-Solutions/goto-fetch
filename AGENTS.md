@@ -233,26 +233,41 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 
 ## 12. This project
 
-**Purpose.** `api_explorer` pulls data from paginated JSON APIs and shapes it for any dataframe library, with a marimo notebook for exploring an API and copying the fetch as a script.
+**Purpose.** `api_explorer` pulls data from paginated JSON APIs safely, keeps only what changed if asked, and stores it for analysis, with a marimo notebook for exploring an API and copying the fetch as a script.
 
-**Layers.** Each module imports only from modules listed before it. Dependencies point inward, as in section 2.
+**Layers.** Each module imports only from modules in the layers before it. Dependencies point inward, as in section 2.
 
-1. `errors`, `paths`, `decode`: the exception, reading values by path, and parsing JSON.
-2. `models`, `records`, `retry`: typed records, reshaping records, and the retry policy.
-3. `frames`, `paging`: dataframes, and the paging loop and styles.
-4. `auth`, `client`: authentication, and the HTTP client.
-5. `scrape`, `plan`: HTML scraping, and describing a fetch as a script.
+1. `errors`, `paths`, `decode`, `models`, `calls`: the exception and redaction, reading values by path, parsing JSON, typed records, and calls described once.
+2. `logs`, `records`, `retry`, `checks`: logging events, reshaping records, the retry policy, and response checks.
+3. `ordering`, `frames`, `auth`: comparing a field's values, dataframes, and authentication.
+4. `paging`: the paging loop, `follow`, and the paging styles (`Keyset` included).
+5. `incremental`: the trackers (`Incremental`, `Changes`).
+6. `client`, `state`, `warehouse`: the HTTP client, state stores and `tracked_run`, and the `Warehouse` interface with `write_run`.
+7. `duckdb_warehouse`, `sqlite_warehouse`, `scrape`, `testing`: the built-in warehouses, HTML scraping, and the fakes and checks for users' tests.
+8. `plan`: `FetchPlan`, describing one fetch to run, store or write as a script.
 
 **Dependencies.**
 
 - The core needs only `httpx2` and `narwhals`.
-- Anything else is an optional extra (`scrape`, `explorer`).
-- An optional package is imported only in the module that needs it, never in `__init__.py`, so the core runs without it.
-- **Extension points.** Each piece a user might replace sits behind a small interface, and the built-in version is one implementation of it: `decode` (JSON parsing), `check` (a `ResponseCheck`, built in: `error_at`), `model` (typed records), `backend` (the dataframe library), `RetryPolicy` (built in: `Retry`), `Paging` (built in: `NextLink`, `Offset`, `HeaderLink`, `Cursor`, `Keyset`), `Login` (built in: `PasswordLogin`, `ClientCredentials`), `ResolvesUrls`, `Tracker` (built in: `Incremental`, `Changes`), `ReportsDeletions` (built in: `Changes`), `Fingerprint` (built in: a hash of the record), `StateStore` (built in: `SqliteState`, `DuckDBWarehouse`, `SqliteWarehouse`), `Warehouse` (built in: `DuckDBWarehouse`, `SqliteWarehouse`), `httpx2.Auth`, and `http` (an httpx2 client of the user's own).
-- **Interfaces are Protocols.** A seam with more than one function is a `Protocol`, so users match its shape without inheriting, and pyright checks the fit. A seam that is one function is a plain function type (`Decoder`, `ResponseCheck`, `Fingerprint`). Don't type a seam as one concrete class: that is how `login` once refused anything but `PasswordLogin`, and `Warehouse.write(deleted_by=...)` anything but `Changes`. Each interface and its built-ins go in `tests/test_protocols.py`, which pyright checks, with a piece built as a user would where it helps; each interface with promises the types can't state gets a `check_*` in `api_explorer.testing`.
-- **Built from public parts.** `Client.records` is composed of public pieces (`paginate`, a `Paging`, `read_page`, `converter`), so a user's own loop can reuse them. Keep it that way.
-- **One place for each setting.** When two ways to set the same thing meet, such as `Client(timeout=...)` and the timeout of a client passed as `http`, refuse the pair with a clear error instead of picking one.
+- Anything else is an optional extra: `fast` (msgspec), `scrape` (parsel), `duckdb`, `explorer` (marimo).
+- An optional package, or a standard module some Python builds leave out (`sqlite3`), is imported only where it is used, never at import time, so the core runs without it, and its absence gives an error that names the fix.
 - An upgrade happens by itself only if it gives exactly the same results, such as msgspec for JSON. Anything that can change results is chosen by name, such as orjson, which turns integers beyond 64 bits into floats.
+
+**Interfaces.**
+
+- **Extension points.** Each piece a user might replace sits behind a small interface, and the built-in version is one implementation of it: `Decoder` (JSON parsing), `ResponseCheck` (built in: `error_at`), `model` (typed records), `backend` (the dataframe library), `RetryPolicy` (built in: `Retry`), `Paging` (built in: `NextLink`, `Offset`, `HeaderLink`, `Cursor`, `Keyset`), `Login` (built in: `PasswordLogin`, `ClientCredentials`), `ResolvesUrls`, `httpx2.Auth`, `http` (an httpx2 client of the user's own), `Tracker` (built in: `Incremental`, `Changes`), `ReportsDeletions` (built in: `Changes`), `Fingerprint` (built in: a hash of the record), `StateStore` (built in: `SqliteState`, `DuckDBWarehouse`, `SqliteWarehouse`), `Warehouse` (built in: `DuckDBWarehouse`, `SqliteWarehouse`), `SqlTables` (for a warehouse on another SQL database, with `write_run`), and `FieldExtractor` (built in: `CSSField`, `XPathField`).
+- **Protocols and function types.** A seam that takes an object is a `Protocol`, even with one method (`RetryPolicy`, `Paging`), so users match its shape without inheriting, and pyright checks the fit. A seam that takes a bare function is a function type (`Decoder`, `ResponseCheck`, `Fingerprint`). Never type a seam as one concrete class: it refuses every implementation but ours.
+- **Checked.** Each interface and its built-ins go in `tests/test_protocols.py`, which pyright checks, with a piece built as a user would where it helps. Each interface with promises the types can't state gets a `check_*` in `api_explorer.testing` that takes a factory where the piece holds state, and is tested on both sides: good pieces pass, each kind of broken one fails.
+- **Built from public parts.** `Client.records` is composed of public pieces (`paginate`, a `Paging` with `follow`, `read_page`, `converter`), and the warehouses of `write_run` and `SqlTables`, so a user's own loop or warehouse reuses them. Keep it that way.
+- **Described once.** `FetchPlan` describes each piece as a `Call` (`api_explorer.calls`), which both runs and is written into scripts. Never write a piece into a script by hand: the script would drift from what the plan runs.
+- **One place for each setting.** When two ways to set the same thing meet, such as `Client(timeout=...)` and the timeout of a client passed as `http`, or `Changes(ignore=..., fingerprint=...)`, refuse the pair with a clear error instead of picking one.
+
+**Invariants.** These keep data safe; tests guard each, and none may be weakened.
+
+- **Tracker state.** A tracker's state moves on only at the end of a complete run, and the package never saves it: the caller saves it after storing the records, or `tracked_run` saves it when the whole block worked. `records()` refuses `max_pages` with a tracker, since a run cut short looks complete. `Incremental` asks from the last value (>=) and passes over what it already saw there, so ties are safe. The property tests in `tests/test_properties.py` guard all of this through flaky connections and data that changes during a run.
+- **Warehouses.** The `Warehouse` promises live in the `api_explorer.warehouse` docstring and in `check_warehouse`, which every warehouse runs in `tests/test_warehouses.py`. `write_run` holds the order that keeps them: stage the run to disk before opening the transaction, change columns before any row (DuckDB keeps the old versions of rows a transaction replaced, so retyping a column after writing rows can fail on values no longer visible), then store rows, then remove deletions. Values go in as their column's kind (`to_kind`), because SQLite would otherwise convert them on its own.
+- **No value lost.** A column whose values change kind is widened, never truncated: integers beside floats become floats only when a float holds every one exactly, and anything else becomes text.
+- **Secrets.** A URL reaches a message only through `ApiError` or `log_event`, which both hide passwords in URLs and sensitive query values (`redact_url`). Never build a message or log line with a raw URL another way. Scripts read secrets from environment variables, through `Secret`, and redact the URLs in their docstring.
 
 **Commands.**
 
@@ -261,25 +276,24 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 - Types: `uv run pyright`. The package ships its type hints (`py.typed`), so they must be right.
 - The notebook: `uvx marimo check --strict notebooks/explorer.py`.
 - The notebook's formatting belongs to marimo, which formats it on save, so `ruff format` leaves it alone.
+- A chain of checks in a shell stops on the first failure only with `set -o pipefail`, when output goes through `tail`.
 
 **Tests.** These add to section 8.
 
 - **Orthogonal.** Each test checks one behaviour, and no two tests check the same thing. When two tests do overlap, a comment in the later one says why the overlap is worth having.
-- **Bugs.** Every bug fix comes with a regression test, marked with a comment that starts `# Regression:` and says what used to go wrong.
+- **Bugs.** Every bug fix comes with a regression test, marked with a comment that starts `# Regression:` and says what used to go wrong. Show the test fails without the fix before committing it.
+- **Guards.** A defence learned from another library's bug history is marked `# Guard (source):`, such as `# Guard (dlt #3358):`.
 - **Features.** Every new feature comes with tests at its interface.
 - **Reasonable.** Don't test what the language or a library already guarantees, such as a dataclass storing its fields.
-- **Dataframes.** Frame tests take the `backend` fixture, so they run once per installed library.
+- **Dataframes.** Frame tests take the `backend` fixture, so they run once per installed library. Warehouse tests take the `database` fixture, so they run on DuckDB and SQLite.
 - **Fakes.** Fake servers live in `api_explorer.testing`, which is public: users test their own code with the same fakes. A fake our tests need belongs there, unless it only makes sense for one test. Tests never touch the network.
-- **Properties.** `tests/test_properties.py` states rules that must hold for any input (any JSON, any page size, any server cap), and Hypothesis tries to break them. When it finds a failing input, fix the code and add the smallest failing input as a regression test with the example tests. Run a deeper search now and then: `uv run pytest tests/test_properties.py --hypothesis-profile=thorough`.
+- **Properties.** `tests/test_properties.py` states rules that must hold for any input (any JSON, any page size, any server cap, any failure), and Hypothesis tries to break them. When it finds a failing input, fix the code and add the smallest failing input as a regression test with the example tests. Check a new property test can fail, by breaking the code on purpose once. Run a deeper search now and then: `uv run pytest tests/test_properties.py --hypothesis-profile=thorough`.
 
 **Logging.**
 
 - The package prints nothing until the application asks (a `NullHandler` on the `api_explorer` logger). Never `print`, and never add a handler inside the package.
-- Log only through `log_event(logger, level, event, message, *args, data={...})`, under the module's logger (`logging.getLogger(__name__)`). Every record then carries `event` and plain-value `data`.
+- Log only through `log_event(logger, level, event, message, *args, data={...})`, under the module's logger (`logging.getLogger(__name__)`). Every record then carries `event` and plain-value `data`, and each event has one shape wherever it is logged.
 - The list of events lives in one place, the `api_explorer.logs` docstring. Add a new event there, with its level and data keys.
-- **Incremental state.** A tracker's state (`Incremental`, `Changes`, any `Tracker`) moves on only at the end of a complete run, and the package never saves it: the caller saves it after storing the records, or `tracked_run` saves it when the whole block worked. `sqlite3` is imported only when used, since some Python builds leave it out. Asking from the last value (>=) and passing over what was seen keeps ties safe. `test_incremental_runs_never_lose_or_repeat_a_version_of_a_record` guards both; don't weaken either.
-- **Warehouses.** The `Warehouse` promises live in the `api_explorer.warehouse` docstring and in `check_warehouse`; every warehouse runs it in `tests/test_warehouses.py`. The database warehouses stage a run to disk before opening their transaction, and change columns before any row: DuckDB keeps the old versions of rows a transaction replaced, so retyping a column after writing rows can fail on values no longer visible. SQLite converts values to a column's declared type on its own (type affinity), so values are converted to their column's kind before storing, and a column is widened (by rebuilding the table) before it takes a new kind. Keep these orders.
-- **Secrets.** A URL reaches a message only through `ApiError` or `log_event`, which both hide sensitive query values (`redact_url`). Never build a message or log line with a raw URL another way.
 - Levels: INFO for what a run is doing (a line per page, a summary), WARNING for what someone should know (a retry, data changed to fit, a count that doesn't add up), DEBUG for why a decision went the way it did (why paging stopped, why a token was renewed). Keep INFO short: about one line per page.
 
 **Writing.** Plain language, as at the top of this file. No em dashes, anywhere: code, comments, docs, commits, issues or pull requests.

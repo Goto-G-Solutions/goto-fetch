@@ -604,12 +604,14 @@ class MemoryState:
         self.saves += 1
 
 
-def check_state_store(store: StateStore) -> None:
+def check_state_store(make: Callable[[], StateStore]) -> None:
     """Check a state store keeps the promises every StateStore must keep.
 
-    Use names starting "check-state-store" in a store you don't mind it
-    writing to. Raises AssertionError naming the first promise broken.
+    `make()` gives a new, empty store (a fresh file, say), like the
+    factories check_tracker and check_warehouse take. Raises AssertionError
+    naming the first promise broken.
     """
+    store = make()
     a, b = "check-state-store-a", "check-state-store-b"
 
     def fresh() -> dict[str, Any]:
@@ -618,8 +620,7 @@ def check_state_store(store: StateStore) -> None:
     value = fresh()
     if store.get(a) is not None or store.get(b) is not None:
         raise AssertionError(
-            f"get must give None for a name never saved; {a!r} or {b!r} gave a "
-            "value (or the store was used by an earlier check)"
+            f"get must give None for a name never saved; {a!r} or {b!r} gave a value"
         )
     store.put(a, value)
     got = store.get(a)
@@ -887,7 +888,7 @@ def check_warehouse(make: Callable[[], Warehouse]) -> None:
     refused = False
     try:
         shop.write("orders", [{"id": 3}, {"v": "no key"}], key="id")
-    except Exception:  # noqa: BLE001 - any refusal will do
+    except Exception:  # noqa: BLE001 (any refusal will do)
         refused = True
     if not refused:
         raise AssertionError("a record without its key must be refused")
@@ -905,7 +906,7 @@ def check_warehouse(make: Callable[[], Warehouse]) -> None:
     refused = False
     try:
         shop.write("orders", [{"id": 5}], key="id", deleted_by=_Finished(None))
-    except Exception:  # noqa: BLE001 - any refusal will do
+    except Exception:  # noqa: BLE001 (any refusal will do)
         refused = True
     if not refused:
         raise AssertionError("a deleted_by whose run isn't complete must be refused")
