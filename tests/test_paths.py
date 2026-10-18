@@ -29,6 +29,14 @@ def test_parse_path_refuses_what_it_cant_read(path):
         parse_path(path)
 
 
+@pytest.mark.parametrize("path", ["", "a|", "|a", "a||b"])
+def test_an_empty_alternative_is_refused(path):
+    # Regression: an empty alternative walked no segments, so "a|" on a
+    # document without "a" gave back the whole document.
+    with pytest.raises(ValueError, match="an alternative is empty"):
+        get_path({"x": 1}, path)
+
+
 def test_a_quoted_key_may_hold_a_line_break():
     # Regression: quoted keys stopped at "\n" (found by the property tests).
     assert parse_path('["line\nbreak"]') == ["line\nbreak"]

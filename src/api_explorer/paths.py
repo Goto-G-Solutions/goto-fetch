@@ -46,6 +46,9 @@ def _alternatives(path: str) -> tuple[tuple[str, ...], ...]:
             alternatives[-1].append(segment)
     if position != len(path):
         raise ValueError(f"Can't read path {path!r}: unexpected {path[position:]!r}")
+    if not all(alternatives):
+        # An alternative with no segments would name the whole document.
+        raise ValueError(f"Can't read path {path!r}: an alternative is empty")
     return tuple(tuple(segments) for segments in alternatives)
 
 
