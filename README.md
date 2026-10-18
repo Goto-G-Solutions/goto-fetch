@@ -17,7 +17,7 @@ It is a fit for one team talking to a few APIs. For dozens of sources, a catalog
 
 ## Guides
 
-Guides for each piece ship with the package, for people and coding agents: `python -m goto_fetch.docs` lists them, and `python -m goto_fetch.docs paging` prints one. In the repository they are in [src/goto_fetch/docs](src/goto_fetch/docs/README.md), indexed in [llms.txt](llms.txt). To give a coding agent this package's skill in your own project:
+Guides for each piece ship with the package, for people and coding agents: `python -m goto_fetch.docs` lists them, and `python -m goto_fetch.docs paging` prints one. In the repository they are in [src/goto_fetch/docs](https://github.com/Goto-G-Solutions/goto-fetch/blob/main/src/goto_fetch/docs/README.md), indexed in [llms.txt](https://github.com/Goto-G-Solutions/goto-fetch/blob/main/llms.txt). To give a coding agent this package's skill in your own project:
 
 ```bash
 mkdir -p .claude/skills/goto-fetch
@@ -365,7 +365,7 @@ The **Store** section saves the records in a DuckDB or SQLite file instead, and 
 
 ## How it is built
 
-The package is a set of layers, each built only on the ones before it: the primitives (`errors`, `paths`, `decode`, `models`, `calls`, and `http`, the HTTP vocabulary), then logging, records, retries and checks, then `ordering`, `frames`, `auth`, the two transports and `limits`, then `paging`, then the trackers (`incremental`), then `client`, `state` and the `warehouse` interface, then the built-in warehouses, `scrape` and `testing`, and last `plan`. See [AGENTS.md](AGENTS.md), section 12.
+The package is a set of layers, each built only on the ones before it: the primitives (`errors`, `paths`, `decode`, `models`, `calls`, and `http`, the HTTP vocabulary), then logging, records, retries and checks, then `ordering`, `frames`, `auth`, the two transports and `limits`, then `paging`, then the trackers (`incremental`), then `client`, `state` and the `warehouse` interface, then the built-in warehouses, `scrape` and `testing`, and last `plan`. See [AGENTS.md](https://github.com/Goto-G-Solutions/goto-fetch/blob/main/AGENTS.md), section 12.
 
 ## Development
 
@@ -375,8 +375,8 @@ uv run pytest      # every test: this is the project's test command
 uvx ruff check && uvx ruff format --check
 ```
 
-Changes start as an issue. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Changes start as an issue. See [CONTRIBUTING.md](https://github.com/Goto-G-Solutions/goto-fetch/blob/main/CONTRIBUTING.md).
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/Goto-G-Solutions/goto-fetch/blob/main/LICENSE).
