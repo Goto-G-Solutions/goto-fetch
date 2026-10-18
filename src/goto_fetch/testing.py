@@ -29,7 +29,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Literal
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, urlsplit
 
 from . import http
 from .client import Client
@@ -1060,6 +1060,9 @@ def check_transport(make: Callable[[], http.Transport]) -> None:
     - what comes back is the server's: status, headers (by any case), body;
     - an error status (404, 503) is returned, never raised;
     - redirects are followed, and the response names the final URL, whole;
+    - a redirect to another host is followed without the headers that may
+      carry a credential (Authorization, Cookie, X-API-Key and the like,
+      see http.credential_headers), and with the rest;
     - a gzip body (Content-Encoding: gzip) comes back unpacked;
     - a short read limit stops a slow read with TimeoutError, and a short
       connect limit doesn't cut a slow read short;
@@ -1079,6 +1082,12 @@ def check_transport(make: Callable[[], http.Transport]) -> None:
         path = request.url.path
         if path == "/old":
             return http.Response(302, headers={"Location": "/new"})
+        if path == "/elsewhere":
+            # Another host, as far as a transport can tell: the same server.
+            port = urlsplit(str(request.url)).port
+            return http.Response(
+                302, headers={"Location": f"http://localhost:{port}/landed"}
+            )
         if path == "/zipped":
             return http.Response(
                 200,
@@ -1163,6 +1172,26 @@ def check_transport(make: Callable[[], http.Transport]) -> None:
             if zipped.content != b'{"zipped": true}':
                 raise AssertionError(
                     f"a gzip body came back packed: {zipped.content[:20]!r}"
+                )
+
+            carrying = {"Authorization": "Bearer s", "X-API-Key": "k", "X-Team": "data"}
+            transport.send(
+                http.Request("GET", f"{base}/elsewhere", headers=carrying), ample
+            )
+            landed = api.calls[-1]
+            if landed.url.path != "/landed" or landed.url.host != "localhost":
+                raise AssertionError(
+                    f"a redirect to another host wasn't followed: {landed.url}"
+                )
+            leaked = [n for n in ("Authorization", "X-API-Key") if n in landed.headers]
+            if leaked:
+                raise AssertionError(
+                    f"{leaked} followed a redirect to another host; headers that "
+                    "may carry a credential must be dropped on one"
+                )
+            if landed.headers.get("X-Team") != "data":
+                raise AssertionError(
+                    "a header without a credential was dropped on a redirect"
                 )
 
             expect(

@@ -7,6 +7,7 @@ import ssl
 from typing import TYPE_CHECKING
 
 from .http import (
+    MAX_REDIRECTS,
     ConnectError,
     ConnectionDropped,
     Request,
@@ -14,6 +15,8 @@ from .http import (
     Timeout,
     TimeoutError,
     TransportError,
+    credential_headers,
+    same_host,
 )
 
 if TYPE_CHECKING:
@@ -26,9 +29,11 @@ class Httpx2Transport:
     Pass a client of your own as `http` for what httpx2 offers: HTTP/2,
     proxies, certificates, event hooks, or an httpx2.Auth (set on that
     client). A client you pass stays open when this transport closes; it
-    is yours to close. Redirects are followed, whatever that client's own
-    setting, and the timeout is the Client's (Client(timeout=...)), which
-    replaces any set on the httpx2 client: one place for each setting.
+    is yours to close. Redirects are followed here, whatever that client's
+    own setting, up to MAX_REDIRECTS and without the credential headers
+    when they lead to another host (httpx2 drops only the standard ones);
+    the timeout is the Client's (Client(timeout=...)), which replaces any
+    set on the httpx2 client: one place for each setting.
     """
 
     def __init__(self, http: "httpx2.Client | None" = None) -> None:
@@ -45,13 +50,14 @@ class Httpx2Transport:
     def send(self, request: Request, timeout: Timeout) -> Response:
         """Send `request` and return the response."""
         httpx2 = self._httpx2
+        secrets = credential_headers(request.headers)
         try:
             answer = self.http.request(
                 request.method,
                 str(request.url),
                 content=request.content or None,
                 headers=request.headers.raw(),
-                follow_redirects=True,
+                follow_redirects=False,
                 # httpx2's write and pool limits follow the read and connect ones.
                 timeout=httpx2.Timeout(
                     connect=timeout.connect,
@@ -60,6 +66,16 @@ class Httpx2Transport:
                     pool=timeout.connect,
                 ),
             )
+            # Followed here, not by httpx2, which keeps a custom header such
+            # as X-API-Key on a redirect to another host.
+            for _ in range(MAX_REDIRECTS):
+                following = answer.next_request
+                if following is None:
+                    break
+                if not same_host(str(answer.url), str(following.url)):
+                    for name in secrets:
+                        following.headers.pop(name, None)
+                answer = self.http.send(following, follow_redirects=False)
         except httpx2.TimeoutException as exc:
             raise TimeoutError(str(exc)) from exc
         except (httpx2.RemoteProtocolError, httpx2.ReadError, httpx2.WriteError) as exc:

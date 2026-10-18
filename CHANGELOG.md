@@ -4,6 +4,10 @@ Each release lists what changed for people using the package. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A credential in a custom header, such as `X-API-Key`, followed a redirect to another host. Both transports now drop every header that may carry one (`Authorization`, `Cookie`, and names matching the same rule that hides query values) before following such a redirect, and `check_transport` holds any transport to it.
+
 ## [0.1.0] - 2026-10-18
 
 The first release.
