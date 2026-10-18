@@ -6,3 +6,6 @@ __marimo__/
 dist/
 .env*
 .hypothesis/
+
+# Working notes and throwaway files, never committed.
+scratch/
