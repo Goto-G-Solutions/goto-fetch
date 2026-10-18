@@ -6,7 +6,7 @@ import json
 import pytest
 
 from goto_fetch import ApiError, Client, http
-from goto_fetch.testing import replies, serve
+from goto_fetch.testing import FakeApi, replies, serve
 
 OK = http.Response(200, json={"ok": True})
 
@@ -103,6 +103,56 @@ def test_client_headers_and_a_call_s_headers_both_reach_the_request():
     client.request("GET", "/x/", headers={"X-Trace": "1"})
     headers = transport.sent[0][0].headers
     assert (headers["x-team"], headers["X-Trace"]) == ("data", "1")
+
+
+def test_a_client_s_headers_and_auth_stay_on_its_own_host():
+    # Regression: an absolute next link on another host carried the
+    # client's Authorization header, and its auth signed the request.
+    seen = []
+
+    def answer(request):
+        seen.append(
+            (
+                request.url.host,
+                request.headers.get("Authorization"),
+                request.headers.get("X-Signed"),
+            )
+        )
+        if request.url.host == "api.test":
+            return http.Response(
+                200, json={"results": [1], "next": "https://other.test/x"}
+            )
+        return http.Response(200, json={"results": [2], "next": None})
+
+    class Signs:
+        def auth_flow(self, request):
+            request.headers["X-Signed"] = "yes"
+            yield request
+
+    client = Client(
+        "http://api.test/api",
+        headers={"Authorization": "Bearer s"},
+        auth=Signs(),
+        transport=FakeApi(answer),
+    )
+    assert list(client.records("/items/")) == [1, 2]
+    assert seen == [("api.test", "Bearer s", "yes"), ("other.test", None, None)]
+
+
+def test_a_request_to_another_host_keeps_the_call_s_own_headers():
+    transport = Recording()
+    client = Client("http://h", headers={"Authorization": "A"}, transport=transport)
+    client.request("GET", "https://other/x", headers={"X-Trace": "1"})
+    sent = transport.sent[0][0].headers
+    assert "Authorization" not in sent and sent["X-Trace"] == "1"
+
+
+def test_a_client_without_a_base_url_sends_its_headers_everywhere():
+    transport = Recording()
+    Client(headers={"Authorization": "A"}, transport=transport).request(
+        "GET", "http://any/x"
+    )
+    assert transport.sent[0][0].headers["Authorization"] == "A"
 
 
 def test_closing_leaves_a_transport_you_pass_open_and_closes_its_own():

@@ -226,6 +226,29 @@ def same_host(url: str, other: str) -> bool:
     return (a.scheme, a.hostname, a.port) == (b.scheme, b.hostname, b.port)
 
 
+def keeps_credentials(base: str, url: str) -> bool:
+    """Whether a request to `url` may carry credentials meant for `base`.
+
+    It may when `url` names the same host name and port, and doesn't step
+    down from https to http, which would send them in the clear. Ports
+    left unwritten are the schemes' own, so a step up from http to https
+    keeps them.
+    """
+    a, b = urlsplit(base), urlsplit(url)
+    if a.hostname != b.hostname:
+        return False
+    if b.scheme != "https" and a.scheme != b.scheme:
+        return False
+    return _port(a) == _port(b) or (a.port is None and b.port is None)
+
+
+def _port(parts: Any) -> int | None:
+    """The port a split URL uses, the scheme's default when none is written."""
+    if parts.port is not None:
+        return parts.port
+    return {"http": 80, "https": 443}.get(parts.scheme)
+
+
 class Request:
     """One HTTP request: a method, a URL, headers, and a body of bytes.
 

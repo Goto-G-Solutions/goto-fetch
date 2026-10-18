@@ -19,6 +19,7 @@ without reading the text:
 | done        | INFO    | pages, records, seconds                           |
 | retry       | WARNING | method, url, attempt, wait, status                |
 | give-up     | DEBUG   | method, url, attempt, status                      |
+| withheld    | WARNING | method, url, base_url                             |
 | stop        | DEBUG   | reason                                            |
 | renew       | DEBUG   | how ("refresh" or "login"), why                   |
 | no-count    | WARNING | count_key                                         |

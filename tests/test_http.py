@@ -16,6 +16,7 @@ from goto_fetch.http import (
     Timeout,
     is_absolute,
     join_url,
+    keeps_credentials,
     set_param,
 )
 
@@ -156,6 +157,24 @@ def test_response_links_follow_rfc_8288():
     assert links["next"]["url"] == links["last"]["url"] == "http://h/2?a=1,2"
     assert links["next"]["title"] == "a;b, c"
     assert links["prev"]["url"] == "http://h/1"
+
+
+@pytest.mark.parametrize(
+    ("base", "url", "kept"),
+    [
+        ("https://api.test/v1", "https://api.test/v1/items?page=2", True),
+        ("https://api.test", "https://api.test:443/x", True),
+        ("http://api.test", "https://api.test/x", True),
+        ("https://api.test", "http://api.test/x", False),
+        ("https://api.test", "https://other.test/x", False),
+        ("https://api.test", "https://api.test:8443/x", False),
+    ],
+    ids=["same", "default-port", "upgrade", "downgrade", "other-host", "other-port"],
+)
+def test_credentials_are_kept_for_the_same_host_and_never_sent_down_to_http(
+    base, url, kept
+):
+    assert keeps_credentials(base, url) is kept
 
 
 def test_a_timeout_of_one_number_applies_to_both_stages():

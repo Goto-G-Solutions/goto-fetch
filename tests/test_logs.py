@@ -134,6 +134,21 @@ def run_and_collect(action, level="DEBUG"):
     return collect.events()
 
 
+def test_a_request_to_another_host_logs_that_credentials_were_withheld():
+    collect = Collect()
+    api = replies(http.Response(200, json={}))
+    with logging_to(collect, "WARNING"):
+        api.client(headers={"Authorization": "x"}).request(
+            "GET", "https://other.test/x"
+        )
+    [(_, data)] = [e for e in collect.events() if e[0] == "withheld"]
+    assert data == {
+        "method": "GET",
+        "url": "https://other.test/x",
+        "base_url": "http://api.test/api",
+    }
+
+
 def test_a_retry_and_a_give_up_are_events_with_their_details():
     events = run_and_collect(
         lambda: pytest.raises(ApiError, replies(503).client().request, "GET", "/x/")
