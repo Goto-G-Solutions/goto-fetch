@@ -11,8 +11,8 @@ from .checks import error_at
 from .client import Client
 from .duckdb_warehouse import DuckDBWarehouse
 from .errors import redact_url
-from .incremental import Changes, Incremental, Keyset, ReportsDeletions, Tracker
-from .paging import Cursor, HeaderLink, NextLink, Offset, Paging
+from .incremental import Changes, Incremental, ReportsDeletions, Tracker
+from .paging import Cursor, HeaderLink, Keyset, NextLink, Offset, Paging
 from .sqlite_warehouse import SqliteWarehouse
 from .state import StateStore, tracked_run
 from .warehouse import Warehouse

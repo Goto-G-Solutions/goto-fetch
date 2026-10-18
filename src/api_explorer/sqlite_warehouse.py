@@ -6,11 +6,11 @@
         shop.write("orders", client.records("/orders/", incremental=since),
                    key="id")
 
-Columns follow the records as in DuckDBWarehouse (see
-api_explorer.warehouse), declared as INTEGER, REAL, TEXT, BOOLEAN (stored
-as 1 and 0, read back as True and False) and JSON (stored as text, read
-back parsed). SQLite can't change a column's type, so widening one
-rebuilds the table, inside the same transaction.
+Columns follow the records (see api_explorer.warehouse), declared as
+INTEGER, REAL, TEXT, BOOLEAN (stored as 1 and 0, read back as True and
+False) and JSON (stored as text, read back parsed). SQLite can't change a
+column's type, so widening one rebuilds the table, inside the same
+transaction.
 
 A trap SQLite sets, and how it is avoided: a column's declared type only
 suggests one ("type affinity"), so a TEXT column turns 5 into "5", and an
@@ -20,28 +20,15 @@ change kind is widened first, so SQLite never converts anything itself.
 """
 
 import json
-import tempfile
 from collections.abc import Iterable, Iterator
 from contextlib import closing, contextmanager
+from itertools import islice
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .incremental import ReportsDeletions
 from .state import SqliteState
-from .warehouse import (
-    FLOAT_EXACT,
-    Kind,
-    Staged,
-    check_write,
-    deleted_keys,
-    keys_of_kind,
-    log_stored,
-    matching,
-    plan_columns,
-    quote,
-    stage,
-    to_kind,
-)
+from .warehouse import Kind, matching, quote, read_part, to_kind, write_run
 
 if TYPE_CHECKING:
     # Imported when used: some Python builds leave sqlite3 out, and the
@@ -56,6 +43,9 @@ TYPES: dict[Kind, str] = {
     "json": "JSON",
 }
 KINDS: dict[str, Kind] = {name: kind for kind, name in TYPES.items()}
+
+REBUILD_BATCH = 10_000
+"""Rows copied at a time when a table is rebuilt, so memory doesn't grow with it."""
 
 
 def _read_back(value: Any, kind: Kind) -> Any:
@@ -86,8 +76,8 @@ class SqliteWarehouse:
                 "api_explorer.testing.MemoryWarehouse"
             )
         self._state = SqliteState(path, timeout=timeout)
+        self._tables = _SqliteTables(self._state.path, timeout)
         self.path = self._state.path
-        self.timeout = timeout
 
     def __repr__(self) -> str:
         return f"SqliteWarehouse({str(self.path)!r})"
@@ -103,32 +93,23 @@ class SqliteWarehouse:
     ) -> int:
         """Store `records` in `table`, all or nothing; return how many were stored.
 
-        See Warehouse for `key` and `deleted_by`, and DuckDBWarehouse.write
-        for `batch_size` and the temporary files.
+        See Warehouse for `key` and `deleted_by`, and write_run for the
+        order of steps and `batch_size`, the records held in memory at a
+        time.
         """
-        check_write(key, deleted_by, batch_size)
-        with tempfile.TemporaryDirectory() as folder:
-            run = stage(records, Path(folder), key, batch_size)
-            gone = deleted_keys(deleted_by)
-            with self._transaction() as connection:
-                columns = self._fit_columns(connection, table, run)
-                if key is not None and columns:
-                    _index(connection, table, matching(columns, key))
-                for part in run.parts:
-                    self._load(connection, table, run.rows(part), columns, key)
-                if gone and columns:
-                    column = matching(columns, key or "")
-                    connection.executemany(
-                        f"DELETE FROM {quote(table)} WHERE {quote(column)} = ?",
-                        [(k,) for k in keys_of_kind(gone, columns[column])],
-                    )
-        log_stored(table, run.count)
-        return run.count
+        return write_run(
+            self._tables,
+            table,
+            records,
+            key=key,
+            deleted_by=deleted_by,
+            batch_size=batch_size,
+        )
 
     def read(self, table: str, limit: int | None = None) -> list[dict[str, Any]]:
-        """`table`'s rows as dicts, at most `limit`, as SqliteWarehouse stored them."""
-        with closing(self._connect()) as connection:
-            columns = _columns(connection, table)
+        """`table`'s rows as dicts, at most `limit`; booleans and JSON come back whole."""
+        with closing(self._tables.connect()) as connection:
+            columns = self._tables.columns(connection, table)
             if not columns:
                 return []
             query = f"SELECT * FROM {quote(table)}"
@@ -153,7 +134,15 @@ class SqliteWarehouse:
         """Save `value` under `name`, replacing what was there."""
         self._state.put(name, value)
 
-    def _connect(self) -> "sqlite3.Connection":
+
+class _SqliteTables:
+    """SqlTables for an SQLite file: how write_run's steps are done in SQLite."""
+
+    def __init__(self, path: Path, timeout: float) -> None:
+        self.path = path
+        self.timeout = timeout
+
+    def connect(self) -> "sqlite3.Connection":
         try:
             import sqlite3
         except ImportError as exc:
@@ -161,14 +150,14 @@ class SqliteWarehouse:
                 "SqliteWarehouse needs Python's sqlite3 module, which this "
                 "Python was built without; use DuckDBWarehouse"
             ) from exc
-        # isolation_level=None leaves transactions to _transaction, so a
+        # isolation_level=None leaves transactions to transaction(), so a
         # table rebuild and the rows that follow are one transaction.
         return sqlite3.connect(self.path, timeout=self.timeout, isolation_level=None)
 
     @contextmanager
-    def _transaction(self) -> Iterator["sqlite3.Connection"]:
+    def transaction(self) -> Iterator["sqlite3.Connection"]:
         """Open the file for one transaction: commit on success, roll back on error."""
-        with closing(self._connect()) as connection:
+        with closing(self.connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 yield connection
@@ -177,90 +166,79 @@ class SqliteWarehouse:
                 raise
             connection.execute("COMMIT")
 
-    @staticmethod
-    def _fit_columns(
+    def columns(self, connection: "sqlite3.Connection", table: str) -> dict[str, Kind]:
+        """`table`'s columns and their kinds; a type this package doesn't make is text."""
+        rows = connection.execute(
+            "SELECT name, type FROM pragma_table_info(?) ORDER BY cid", (table,)
+        ).fetchall()
+        return {name: KINDS.get(str(kind).upper(), "text") for name, kind in rows}
+
+    def alter(
+        self,
         connection: "sqlite3.Connection",
         table: str,
-        run: Staged,
-    ) -> dict[str, Kind]:
-        """Make `table`'s columns take the run, and return every column's kind."""
-        stored = _columns(connection, table)
-
-        def only_nulls(column: str) -> bool:
-            found = connection.execute(
-                f"SELECT count({quote(column)}) FROM {quote(table)}"
-            ).fetchone()
-            return found is not None and found[0] == 0
-
-        def holds_inexact(column: str) -> bool:
-            found = connection.execute(
-                f"SELECT count(*) FROM {quote(table)} "
-                f"WHERE abs({quote(column)}) > {FLOAT_EXACT}"
-            ).fetchone()
-            return found is not None and found[0] > 0
-
-        added, changed, after = plan_columns(
-            stored, run, only_nulls, holds_inexact, table
-        )
+        stored: dict[str, Kind],
+        added: dict[str, Kind],
+        changed: dict[str, Kind],
+        after: dict[str, Kind],
+    ) -> None:
+        """Create, extend or (to change a kind) rebuild `table`."""
         if not stored:
-            if after:
-                _create(connection, table, after)
-            return after
-        if changed:
+            _create(connection, table, after)
+        elif changed:
             _rebuild(connection, table, stored, after)
-            return after
-        for name, kind in added.items():
-            connection.execute(
-                f"ALTER TABLE {quote(table)} ADD COLUMN {quote(name)} {TYPES[kind]}"
-            )
-        return after
+        else:
+            for name, kind in added.items():
+                connection.execute(
+                    f"ALTER TABLE {quote(table)} ADD COLUMN {quote(name)} {TYPES[kind]}"
+                )
 
-    @staticmethod
-    def _load(
+    def load(
+        self,
         connection: "sqlite3.Connection",
         table: str,
-        rows: Iterable[dict[str, Any]],
+        part: Path,
+        fields: list[str],
         columns: dict[str, Kind],
         key: str | None,
     ) -> None:
-        """Store staged rows in `table`, replacing rows by `key` if given."""
-        batch = list(rows)
-        if not batch:
-            return
-        names = list(dict.fromkeys(n for row in batch for n in row))
-        targets = [matching(columns, n) for n in names]
+        """Store one staged file, replacing rows by `key`, each value in its column's kind."""
+        rows = list(read_part(part))
+        targets = [matching(columns, name) for name in fields]
         if key is not None:
-            column = quote(matching(columns, key))
-            connection.executemany(
-                f"DELETE FROM {quote(table)} WHERE {column} = ?",
-                [
-                    (to_kind(row[key], columns[matching(columns, key)]),)
-                    for row in batch
-                ],
+            column = matching(columns, key)
+            # An index, so replacing rows by key doesn't scan the table;
+            # made here too, since a rebuild drops it.
+            connection.execute(
+                f"CREATE INDEX IF NOT EXISTS {quote(f'{table}__{column}')} "
+                f"ON {quote(table)} ({quote(column)})"
             )
-        placeholders = ", ".join("?" for _ in names)
+            self.delete(
+                connection,
+                table,
+                column,
+                [to_kind(row[key], columns[column]) for row in rows],
+            )
         connection.executemany(
             f"INSERT INTO {quote(table)} ({', '.join(quote(t) for t in targets)}) "
-            f"VALUES ({placeholders})",
+            f"VALUES ({', '.join('?' for _ in targets)})",
             [
                 tuple(
-                    to_kind(row.get(n), columns[t])
-                    for n, t in zip(names, targets, strict=True)
+                    to_kind(row.get(name), columns[target])
+                    for name, target in zip(fields, targets, strict=True)
                 )
-                for row in batch
+                for row in rows
             ],
         )
 
-
-def _columns(connection: "sqlite3.Connection", table: str) -> dict[str, Kind]:
-    """`table`'s columns and their kinds, in order, or {} if there is no such table.
-
-    A declared type this package doesn't make counts as text.
-    """
-    rows = connection.execute(
-        "SELECT name, type FROM pragma_table_info(?) ORDER BY cid", (table,)
-    ).fetchall()
-    return {name: KINDS.get(str(kind).upper(), "text") for name, kind in rows}
+    def delete(
+        self, connection: "sqlite3.Connection", table: str, column: str, keys: list[Any]
+    ) -> None:
+        """Remove the rows whose `column` holds one of `keys`."""
+        connection.executemany(
+            f"DELETE FROM {quote(table)} WHERE {quote(column)} = ?",
+            [(key,) for key in keys],
+        )
 
 
 def _create(
@@ -268,14 +246,6 @@ def _create(
 ) -> None:
     spec = ", ".join(f"{quote(n)} {TYPES[k]}" for n, k in columns.items())
     connection.execute(f"CREATE TABLE {quote(table)} ({spec})")
-
-
-def _index(connection: "sqlite3.Connection", table: str, column: str) -> None:
-    """Index `column`, so replacing rows by key doesn't scan the whole table."""
-    connection.execute(
-        f"CREATE INDEX IF NOT EXISTS {quote(f'{table}__{column}')} "
-        f"ON {quote(table)} ({quote(column)})"
-    )
 
 
 def _rebuild(
@@ -287,26 +257,30 @@ def _rebuild(
     """Remake `table` with the kinds in `after`, converting the values it holds.
 
     SQLite can't change a column's type in place. Each value is read back
-    in its old kind and stored in its new one, so a widened column holds
-    the same JSON text DuckDBWarehouse gives ("1", "true", '{"a":1}').
-    Indexes are made again by write().
+    in its old kind and stored in its new one, as the Warehouse promise
+    says (see api_explorer.warehouse), REBUILD_BATCH rows at a time.
     """
     names = list(before)
-    old = connection.execute(
-        f"SELECT {', '.join(quote(n) for n in names)} FROM {quote(table)}"
-    ).fetchall()
     temporary = f"{table}__rebuilding"
     _create(connection, temporary, after)
-    connection.executemany(
+    insert = (
         f"INSERT INTO {quote(temporary)} ({', '.join(quote(n) for n in names)}) "
-        f"VALUES ({', '.join('?' for _ in names)})",
-        [
-            tuple(
-                to_kind(_read_back(value, before[name]), after[name])
-                for name, value in zip(names, row, strict=True)
-            )
-            for row in old
-        ],
+        f"VALUES ({', '.join('?' for _ in names)})"
     )
+    old = connection.execute(
+        f"SELECT {', '.join(quote(n) for n in names)} FROM {quote(table)}"
+    )
+    while batch := list(islice(old, REBUILD_BATCH)):
+        # A second cursor for the inserts, so reading the old table goes on.
+        connection.cursor().executemany(
+            insert,
+            [
+                tuple(
+                    to_kind(_read_back(value, before[name]), after[name])
+                    for name, value in zip(names, row, strict=True)
+                )
+                for row in batch
+            ],
+        )
     connection.execute(f"DROP TABLE {quote(table)}")
     connection.execute(f"ALTER TABLE {quote(temporary)} RENAME TO {quote(table)}")

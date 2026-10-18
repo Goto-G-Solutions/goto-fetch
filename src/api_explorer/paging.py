@@ -12,6 +12,7 @@ import httpx2
 
 from .errors import ApiError
 from .logs import log_event
+from .ordering import greater, same, send_form
 from .paths import MISSING, get_path
 
 logger = logging.getLogger(__name__)
@@ -494,3 +495,125 @@ class Cursor:
             return with_param(request, self.param, cursor, self.send_in)
 
         return first, next_link
+
+
+@dataclass(frozen=True)
+class Keyset:
+    """Page by the records' own field: each page asks from the last value of the one before.
+
+    For an API that sorts by a field that only grows, such as updated_at
+    (often with a parameter like ordering=updated_at), and filters by it
+    from a value on (`param`, such as updated_since). Page numbers and
+    offsets skip a record when the data changes during a run; keyset pages
+    don't, because each page starts from a value, not a position.
+
+    Pages overlap: each starts at the last value of the one before, so the
+    records at that value come again. Pair Keyset with Incremental or
+    Changes, which pass the repeats over; on its own it yields them again.
+
+    - `field`: path to the sorted value in each record.
+    - `param`: the filter parameter, "from this value on" (>=). One that
+      means "after this value" (>) would skip records that share a value.
+    - `limit`, `limit_param`: the page size it asks for, and its name.
+      Keyset needs it to tell the last page from a page full of one value.
+      At least 2, since each page repeats the last record of the one before.
+    - `send_in`, `send_as`: where the parameters go, and the form of the
+      value, as for Incremental. A coarser form, such as the date of a
+      time, widens the overlap to every record since that date: they come
+      again (store with a key, so they replace their rows), and a page
+      can't move past a date holding more records than `limit`.
+
+    Raises ApiError when a page isn't sorted by `field`, or when more
+    records share one value than fit on a page, since it can't move past
+    them (raise `limit`), or when the API ignores `param`. A server that
+    caps the page size below `limit` is noticed once a short page turns
+    out not to be the last; until then, a short page that moves nowhere
+    counts as the end, so set `limit` no higher than the server allows.
+    """
+
+    field: str
+    param: str
+    limit: int = 100
+    limit_param: str = "limit"
+    send_in: Literal["query", "body"] = "query"
+    send_as: Callable[[Any], Any] = send_form
+
+    def __post_init__(self) -> None:
+        check_send_in(self.send_in)
+        if self.limit < 2:
+            # Each page after the first starts with the last record of the
+            # one before, so a page of one could never move on.
+            raise ValueError(
+                f"limit must be at least 2 for keyset paging, got {self.limit}"
+            )
+
+    def begin(
+        self, first: PageRequest, read: Callable[[Fetched], Page]
+    ) -> tuple[PageRequest, NextLinkFunction]:
+        """Start a run: the first request gets the page size, and keeps any filter."""
+        current: Any = None  # the value the last request asked from
+        page_size = self.limit  # what the server really gives, if it caps
+        previous = 0  # the last page's length
+
+        def next_link(fetched: Fetched, request: PageRequest) -> PageRequest | None:
+            nonlocal current, page_size, previous
+            items = read(fetched).items
+            if not items:
+                return None
+            bottom, top = self._value_range(items, request)
+            # The request asked from send_as(current), which may be coarser
+            # (a date for a time), so earlier records from it are fine.
+            asked = None if current is None else self.send_as(current)
+            if asked is not None and greater(asked, bottom, self.field):
+                raise ApiError(
+                    f"The page starts at {self.field}={bottom!r}, before the "
+                    f"{asked!r} it asked from: the API ignores {self.param!r}",
+                    url=request.url,
+                )
+            following = with_param(request, self.param, self.send_as(top), self.send_in)
+            # Asking again from where this page started moves nowhere. The
+            # first request may already ask from a value (an Incremental's
+            # last), which `current` doesn't know, hence the second test.
+            stuck = following == request
+            if stuck or (current is not None and same(top, current, self.field)):
+                # Only records at the value asked from: the repeats at the
+                # end, unless the page is full, when more may follow.
+                if len(items) < page_size:
+                    return None
+                raise ApiError(
+                    f"{len(items)} or more records share {self.field}={top!r}, "
+                    f"more than a page holds, so Keyset can't page past them; "
+                    f"raise limit",
+                    url=request.url,
+                )
+            if current is not None and previous < page_size:
+                # The last page was short, yet this one found more: the
+                # server caps the page size at what it gave.
+                page_size = previous
+            current, previous = top, len(items)
+            return following
+
+        return with_param(first, self.limit_param, self.limit, self.send_in), next_link
+
+    def _value_range(self, items: list[Any], request: PageRequest) -> tuple[Any, Any]:
+        """The page's first and last values of `field`, checking it is sorted by it."""
+        first: Any = MISSING
+        last: Any = MISSING
+        for item in items:
+            value = get_path(item, self.field, MISSING)
+            if value is MISSING or value is None:
+                raise ApiError(
+                    f"A record has no {self.field!r}, so Keyset can't page past it",
+                    url=request.url,
+                )
+            if last is not MISSING and greater(last, value, self.field):
+                raise ApiError(
+                    f"The page isn't sorted by {self.field!r} ({last!r} comes "
+                    f"before {value!r}); Keyset needs ascending order, often "
+                    f"asked for with a parameter like ordering={self.field}",
+                    url=request.url,
+                )
+            if first is MISSING:
+                first = value
+            last = value
+        return first, last

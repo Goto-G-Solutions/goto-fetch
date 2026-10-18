@@ -17,15 +17,23 @@ them):
 
 How tables and columns are made is up to each warehouse. The ones here
 are DuckDBWarehouse (the "duckdb" extra), SqliteWarehouse (Python's own
-sqlite3) and, for tests, testing.MemoryWarehouse. The database ones share
-the rules below: they read a whole run into temporary files first, so a
-failed request never touches the database, and give each column one of a
-few kinds, widening it when its values change kind.
+sqlite3) and, for tests, testing.MemoryWarehouse.
+
+The SQL ones are built on write_run, which keeps the promises for any
+SQL database that implements SqlTables: it reads a whole run into
+temporary files first, so a failed request never touches the database,
+gives each column one of a few kinds (Kind), widening it when its values
+change kind, and changes columns before any row. A warehouse for another
+database implements SqlTables and calls write_run; the helpers here
+(kind_of, widen, to_kind, as_text, quote, matching, read_part and the
+checks) are its building blocks.
 """
 
 import json
 import logging
-from collections.abc import Callable, Iterable
+import tempfile
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from itertools import islice
 from pathlib import Path
@@ -43,7 +51,8 @@ logger = logging.getLogger(__name__)
 class Warehouse(Protocol):
     """Tables of records: write a run into one, all or nothing, and read it back.
 
-    See the module docstring for the promises every warehouse keeps.
+    See the module docstring for the promises every warehouse keeps. `key`
+    is a top-level field of the records, such as "id" (not a path).
     """
 
     def write(
@@ -176,14 +185,10 @@ def keys_of_kind(keys: Iterable[Any], kind: Kind) -> list[Any]:
     return [key for key in converted if key is not None]
 
 
-def check_write(
-    key: str | None, deleted_by: ReportsDeletions | None, batch_size: int
-) -> None:
+def check_write(key: str | None, deleted_by: ReportsDeletions | None) -> None:
     """Refuse write() arguments that can't work, before reading any record."""
     if deleted_by is not None and key is None:
         raise ValueError("deleted_by needs a key, to know which rows to remove")
-    if batch_size < 1:
-        raise ValueError(f"batch_size must be at least 1, got {batch_size}")
 
 
 def deleted_keys(deleted_by: ReportsDeletions | None) -> list[Any]:
@@ -192,7 +197,8 @@ def deleted_keys(deleted_by: ReportsDeletions | None) -> list[Any]:
         return []
     gone = deleted_by.deleted
     if gone is None:
-        raise ApiError(
+        # A caller's mistake, like check_write's, so a ValueError.
+        raise ValueError(
             "deleted_by hasn't finished a run: pass the tracker whose run gave "
             "these records"
         )
@@ -229,7 +235,7 @@ def refuse_case_clashes(names: Iterable[str]) -> None:
 
 
 @dataclass
-class Staged:
+class _Staged:
     """A run's records in temporary files, and the kind each field needs."""
 
     parts: list[Path] = field(default_factory=list)
@@ -237,23 +243,17 @@ class Staged:
     inexact: set[str] = field(default_factory=set)
     count: int = 0
 
-    def rows(self, part: Path) -> Iterable[dict[str, Any]]:
-        """The records of one staged file."""
-        with part.open(encoding="utf-8") as file:
-            for line in file:
-                yield json.loads(line)
 
-
-def stage(
+def _stage(
     records: Iterable[Any], folder: Path, key: str | None, batch_size: int
-) -> Staged:
+) -> _Staged:
     """Write `records` to files in `folder`, `batch_size` at a time, giving each field a kind.
 
     A field's kind covers every value it had in the run (None while it has
     been null throughout). With a key, each file holds one record per key,
     the last; loading the files in order lets later ones replace earlier.
     """
-    run = Staged()
+    run = _Staged()
     stream = iter(records)
     while batch := list(islice(stream, batch_size)):
         rows = [as_dict(record) for record in batch]
@@ -280,9 +280,9 @@ def stage(
     return run
 
 
-def plan_columns(
+def _plan_columns(
     stored: dict[str, Kind],
-    run: Staged,
+    run: _Staged,
     only_nulls: Callable[[str], bool],
     holds_inexact: Callable[[str], bool],
     table: str,
@@ -334,7 +334,7 @@ def plan_columns(
     return added, changed, after
 
 
-def log_stored(table: str, count: int) -> None:
+def _log_stored(table: str, count: int) -> None:
     """Log the "stored" event a write ends with."""
     log_event(
         logger,
@@ -345,3 +345,128 @@ def log_stored(table: str, count: int) -> None:
         table,
         data={"table": table, "records": count},
     )
+
+
+def read_part(part: Path) -> Iterator[dict[str, Any]]:
+    """The records of one staged file, as write_run hands them to SqlTables.load."""
+    with part.open(encoding="utf-8") as file:
+        for line in file:
+            yield json.loads(line)
+
+
+class SqlTables(Protocol):
+    """What write_run needs from an SQL database: the steps that differ between them.
+
+    write_run owns the order and the decisions; these only carry them out,
+    inside the connection transaction() gives, which must be a DB-API
+    connection (execute(sql).fetchone() works on it).
+    """
+
+    def transaction(self) -> AbstractContextManager[Any]:
+        """Open one transaction: commit when the block ends, roll back on an error."""
+        ...
+
+    def columns(self, connection: Any, table: str) -> dict[str, Kind]:
+        """`table`'s columns and their kinds, in order; {} if there is no such table."""
+        ...
+
+    def alter(
+        self,
+        connection: Any,
+        table: str,
+        stored: dict[str, Kind],
+        added: dict[str, Kind],
+        changed: dict[str, Kind],
+        after: dict[str, Kind],
+    ) -> None:
+        """Make `table` hold the columns in `after`: create it if `stored` is empty,
+        else add the `added` columns and change the kind of the `changed` ones,
+        converting their values (see to_kind)."""
+        ...
+
+    def load(
+        self,
+        connection: Any,
+        table: str,
+        part: Path,
+        fields: list[str],
+        columns: dict[str, Kind],
+        key: str | None,
+    ) -> None:
+        """Store one staged file (read_part reads it) in `table`.
+
+        With a key, first remove the rows whose key the file holds. Each
+        field goes in the column matching it (see matching), as that
+        column's kind holds it (see to_kind).
+        """
+        ...
+
+    def delete(self, connection: Any, table: str, column: str, keys: list[Any]) -> None:
+        """Remove the rows whose `column` holds one of `keys` (already in its kind)."""
+        ...
+
+
+def write_run(
+    tables: SqlTables,
+    table: str,
+    records: Iterable[Any],
+    *,
+    key: str | None = None,
+    deleted_by: ReportsDeletions | None = None,
+    batch_size: int = 10_000,
+) -> int:
+    """Store `records` in `table`, keeping every Warehouse promise; return how many.
+
+    The order is what keeps them, so it lives here once:
+
+    1. Read the whole run into temporary files, `batch_size` records at a
+       time, working out each field's kind. A failure here (a failed
+       request) never opens the database.
+    2. In one transaction, change the columns first: DuckDB keeps the old
+       versions of rows a transaction replaced, so retyping a column after
+       writing rows can fail on values no longer visible.
+    3. Store each file in order, so later records replace earlier ones.
+    4. Remove deleted_by's keys, now that the records are stored.
+
+    The temporary files need about as much disk as the run's records as
+    JSON.
+    """
+    check_write(key, deleted_by)
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be at least 1, got {batch_size}")
+    with tempfile.TemporaryDirectory() as folder:
+        run = _stage(records, Path(folder), key, batch_size)
+        gone = deleted_keys(deleted_by)
+        with tables.transaction() as connection:
+
+            def count(sql: str) -> int:
+                found = connection.execute(sql).fetchone()
+                return 0 if found is None else int(found[0])
+
+            stored = tables.columns(connection, table)
+            added, changed, after = _plan_columns(
+                stored,
+                run,
+                lambda column: (
+                    count(f"SELECT count({quote(column)}) FROM {quote(table)}") == 0
+                ),
+                lambda column: (
+                    count(
+                        f"SELECT count(*) FROM {quote(table)} "
+                        f"WHERE abs({quote(column)}) > {FLOAT_EXACT}"
+                    )
+                    > 0
+                ),
+                table,
+            )
+            if after:
+                tables.alter(connection, table, stored, added, changed, after)
+                fields = list(run.kinds)
+                for part in run.parts:
+                    tables.load(connection, table, part, fields, after, key)
+                if gone:
+                    column = matching(after, key or "")
+                    if keys := keys_of_kind(gone, after[column]):
+                        tables.delete(connection, table, column, keys)
+    _log_stored(table, run.count)
+    return run.count

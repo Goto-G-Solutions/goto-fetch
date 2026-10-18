@@ -41,7 +41,6 @@ from .incremental import (
     Changes,
     Fingerprint,
     Incremental,
-    Keyset,
     ReportsDeletions,
     Tracker,
 )
@@ -58,6 +57,7 @@ from .paging import (
     Cursor,
     Fetched,
     HeaderLink,
+    Keyset,
     NextLink,
     Offset,
     Page,
@@ -77,7 +77,7 @@ from .records import explode, flatten, parse_datetime, select
 from .retry import Failure, Retry, RetryPolicy, backoff_delay, retry_after_seconds
 from .sqlite_warehouse import SqliteWarehouse
 from .state import SqliteState, StateStore, tracked_run
-from .warehouse import Warehouse
+from .warehouse import SqlTables, Warehouse, write_run
 
 __all__ = [
     "ApiError",
@@ -110,6 +110,7 @@ __all__ = [
     "ResponseCheck",
     "Retry",
     "RetryPolicy",
+    "SqlTables",
     "SqliteState",
     "SqliteWarehouse",
     "StateStore",
@@ -146,4 +147,5 @@ __all__ = [
     "tracked_run",
     "with_param",
     "with_query",
+    "write_run",
 ]

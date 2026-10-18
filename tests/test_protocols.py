@@ -13,7 +13,6 @@ from typing import Any
 import pytest
 
 from api_explorer import (
-    ApiError,
     Changes,
     ClientCredentials,
     Cursor,
@@ -36,6 +35,7 @@ from api_explorer import (
     RetryPolicy,
     SqliteState,
     SqliteWarehouse,
+    SqlTables,
     StateStore,
     TokenRefresh,
     Tracker,
@@ -111,6 +111,10 @@ def test_built_in_pieces_fit_their_interfaces(tmp_path):
     ]
     stores += [w for w in warehouses if isinstance(w, StateStore)]
     reports: ReportsDeletions = Changes("id")
+    tables: list[SqlTables] = [
+        DuckDBWarehouse(tmp_path / "t.duckdb")._tables,
+        SqliteWarehouse(tmp_path / "t.db")._tables,
+    ]
     check: ResponseCheck = error_at()
     decode: Decoder = json_decoder()
     fingerprint: Fingerprint = repr
@@ -121,7 +125,7 @@ def test_built_in_pieces_fit_their_interfaces(tmp_path):
     assert all(isinstance(w, StateStore) for w in warehouses)
     assert isinstance(reports, ReportsDeletions)
     assert isinstance(resolves, ResolvesUrls)
-    del paging, policy, logins, check, decode, fingerprint  # for pyright only
+    del paging, policy, logins, check, decode, fingerprint, tables  # for pyright
 
 
 def test_a_user_built_tracker_fits_the_interfaces():
@@ -172,7 +176,7 @@ def test_a_user_built_tracker_s_deletions_reach_the_warehouse(tmp_path):
 
 
 def test_a_tracker_that_reports_nothing_yet_stops_the_write(tmp_path):
-    with pytest.raises(ApiError, match="hasn't finished a run"):
+    with pytest.raises(ValueError, match="hasn't finished a run"):
         SqliteWarehouse(tmp_path / "shop.db").write(
             "items", [{"id": 1}], key="id", deleted_by=NewIds()
         )

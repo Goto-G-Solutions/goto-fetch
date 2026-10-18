@@ -748,7 +748,7 @@ class MemoryWarehouse:
         deleted_by: ReportsDeletions | None = None,
     ) -> int:
         """Store `records` in `table`, all or nothing; return how many were stored."""
-        check_write(key, deleted_by, 1)
+        check_write(key, deleted_by)
         rows = [json.loads(json.dumps(as_dict(r), default=str)) for r in records]
         if key is not None:
             rows = last_per_key(rows, key)

@@ -1,4 +1,4 @@
-"""Keep an Incremental's state between runs: a small store of named JSON values.
+"""Keep a tracker's state between runs: a small store of named JSON values.
 
 A StateStore holds one JSON value per name, such as "orders". SqliteState
 keeps them in an SQLite file, using Python's own sqlite3 module, so it
@@ -24,7 +24,7 @@ T = TypeVar("T", bound=Tracker)
 
 @runtime_checkable
 class StateStore(Protocol):
-    """Where an incremental run's state lives between runs.
+    """Where a tracked run's state lives between runs.
 
     The promises (testing.check_state_store checks them): get gives None
     for a name never saved, and after put, get gives back an equal value
@@ -42,7 +42,12 @@ class StateStore(Protocol):
         ...
 
 
-def _check_name(name: str) -> None:
+STATE_TABLE = "api_explorer_state"
+"""The table the built-in stores keep state in, in a database of their own or a warehouse's."""
+
+
+def check_state_name(name: str) -> None:
+    """Refuse a state name that isn't non-empty text."""
     if not isinstance(name, str) or not name.strip():
         raise ValueError(f"A state name must be non-empty text, got {name!r}")
 
@@ -61,7 +66,7 @@ class SqliteState:
     some records again. It never skips any.
     """
 
-    TABLE = "api_explorer_state"
+    TABLE = STATE_TABLE
 
     def __init__(self, path: str | Path, *, timeout: float = 30.0) -> None:
         if str(path) == ":memory:" or str(path).startswith("file::memory:"):
@@ -79,7 +84,7 @@ class SqliteState:
 
     def get(self, name: str) -> Any:
         """The value last saved under `name`, or None."""
-        _check_name(name)
+        check_state_name(name)
         with self._connect() as connection:
             row = connection.execute(
                 f"SELECT value FROM {self.TABLE} WHERE name = ?",
@@ -93,7 +98,7 @@ class SqliteState:
         Raises TypeError for a value that isn't plain JSON, before
         touching the file.
         """
-        _check_name(name)
+        check_state_name(name)
         text = json.dumps(value, allow_nan=False)
         saved_at = datetime.now(UTC).isoformat()
         with self._connect() as connection:
@@ -149,7 +154,7 @@ def tracked_run(
                          "updated_since") as since:
             save(client.records("/orders/", incremental=since))
     """
-    _check_name(name)
+    check_state_name(name)
     made = tracker(*args, state=store.get(name), **options)
     yield made
     store.put(name, made.state)

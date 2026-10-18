@@ -17,6 +17,7 @@ from api_explorer import (
     Warehouse,
 )
 from api_explorer.testing import MemoryWarehouse, check_warehouse
+from api_explorer.warehouse import write_run
 
 
 @pytest.fixture(params=["duckdb", "sqlite"])
@@ -115,23 +116,31 @@ def test_a_run_that_fails_after_several_batches_leaves_the_table_as_it_was(datab
     assert shop.read("orders") == [{"id": 1, "total": 5}]
 
 
-def test_a_failure_while_storing_leaves_the_table_as_it_was(database, monkeypatch):
+def test_a_failure_while_storing_leaves_the_table_as_it_was(database):
     # The failures above stop before the transaction; this one comes inside
-    # it, after the columns changed and the first batch was stored.
+    # it, after the columns changed and the first batch was stored. The
+    # warehouse's own SqlTables are wrapped so the second load fails.
     shop = database()
     shop.write("orders", [{"id": 1, "total": 5}], key="id")
-    real_load = type(shop)._load
-    loaded = []
 
-    def load_then_fail(*args):
-        if loaded:
-            raise OSError("disk full")
-        loaded.append(real_load(*args))
+    class FailsOnSecondLoad:
+        def __init__(self, tables):
+            self.tables, self.loads = tables, 0
 
-    monkeypatch.setattr(type(shop), "_load", staticmethod(load_then_fail))
+        def __getattr__(self, name):
+            return getattr(self.tables, name)
+
+        def load(self, *args):
+            self.loads += 1
+            if self.loads == 2:
+                raise OSError("disk full")
+            self.tables.load(*args)
+
     batch = [{"id": 1, "total": 9}, {"id": 2, "total": 6, "new": "x"}]
     with pytest.raises(OSError, match="disk full"):
-        shop.write("orders", batch, key="id", batch_size=1)
+        write_run(
+            FailsOnSecondLoad(shop._tables), "orders", batch, key="id", batch_size=1
+        )
     assert shop.read("orders") == [{"id": 1, "total": 5}]
 
 
