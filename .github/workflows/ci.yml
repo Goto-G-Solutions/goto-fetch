@@ -11,11 +11,12 @@ permissions:
 jobs:
   test:
     name: Tests on Python ${{ matrix.python }}, with everything the tests use
-    # The oldest and newest Python supported: behaviour can differ between
-    # them (3.14 delays evaluating annotations, 3.11 doesn't).
+    # Every Python the package is classified for. The ends catch most
+    # differences (3.14 delays evaluating annotations, 3.11 doesn't); the
+    # ones between catch a dependency without a wheel for that version.
     strategy:
       matrix:
-        python: ["3.11", "3.14"]
+        python: ["3.11", "3.12", "3.13", "3.14"]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
