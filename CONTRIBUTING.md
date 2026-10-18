@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for helping. This page says how a change gets from an idea to a merge. How we write code, tests, comments and commits is in [AGENTS.md](AGENTS.md); please read it first, because reviews follow it.
+Thank you for helping. This page says how a change gets from an idea to a merge. How we write code, tests, comments and commits is in [AGENTS.md](AGENTS.md); please read it first, because reviews follow it. A security problem is the one thing not to put in an issue: see [SECURITY.md](SECURITY.md).
 
 ## 1. Open an issue first
 
