@@ -24,6 +24,14 @@ Closes #
 - [ ] A bug fix has a regression test, marked `# Regression:`.
 - [ ] The tests are orthogonal, and any overlap is explained in a comment.
 
+## Guides
+
+<!-- Which guides in src/api_explorer/docs/ this changes, or "none: nothing a user sees changed". -->
+
+- [ ] Every guide this change makes untrue is updated, with examples that run (`tests/test_docs.py`).
+- [ ] A new piece or guide is in the index, `llms.txt` and, if agents need it, `SKILL.md`.
+- [ ] `README.md` and `CHANGELOG.md` ("Unreleased") say what changed for users.
+
 ## Before you send it
 
 - [ ] The issue above was opened first, and this pull request does what it describes.

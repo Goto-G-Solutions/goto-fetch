@@ -246,6 +246,8 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 7. `duckdb_warehouse`, `sqlite_warehouse`, `scrape`, `testing`: the built-in warehouses, HTML scraping, and the fakes and checks for users' tests.
 8. `plan`: `FetchPlan`, describing one fetch to run, store or write as a script.
 
+`api_explorer.docs` stands apart: it only reads the guide pages shipped beside it, and imports nothing from the package.
+
 **Dependencies.**
 
 - The core needs only `httpx2` and `narwhals`.
@@ -268,6 +270,14 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 - **Warehouses.** The `Warehouse` promises live in the `api_explorer.warehouse` docstring and in `check_warehouse`, which every warehouse runs in `tests/test_warehouses.py`. `write_run` holds the order that keeps them: stage the run to disk before opening the transaction, change columns before any row (DuckDB keeps the old versions of rows a transaction replaced, so retyping a column after writing rows can fail on values no longer visible), then store rows, then remove deletions. Values go in as their column's kind (`to_kind`), because SQLite would otherwise convert them on its own.
 - **No value lost.** A column whose values change kind is widened, never truncated: integers beside floats become floats only when a float holds every one exactly, and anything else becomes text.
 - **Secrets.** A URL reaches a message only through `ApiError` or `log_event`, which both hide passwords in URLs and sensitive query values (`redact_url`). Never build a message or log line with a raw URL another way. Scripts read secrets from environment variables, through `Secret`, and redact the URLs in their docstring.
+
+**Guides.**
+
+- The user guides live in `src/api_explorer/docs/`, one page per piece, and ship with the package: `python -m api_explorer.docs <page>` prints one, so an agent in a user's project reads the version installed. `llms.txt` indexes them, and `SKILL.md` is the Agent Skill.
+- They are part of the code: a valid issue or pull request updates every guide it makes untrue, in the same change. A new piece or interface gets its section (and its `build-your-own.md` entry), and is added to the index, `llms.txt` and, if an agent needs it, `SKILL.md`.
+- Each page says what a piece is for, what the package already handles, runnable examples, and its traps. Examples use the fakes from `api_explorer.testing`, so they run offline; one that needs a real API is fenced `python skip`, and a page needing an optional package names it on its first line (`<!-- needs: duckdb -->`).
+- `tests/test_docs.py` runs every example and checks every page is indexed, so a stale guide fails the tests.
+- These differ from section 10's `docs/guide/`, which holds working notes for developing the package.
 
 **Commands.**
 

@@ -32,6 +32,21 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv run --isolated --no-dev --with pytest pytest
 
+  package:
+    name: The built package ships its guides
+    # The guides are data files beside the code; a packaging change could
+    # drop them without any test noticing. This installs the built wheel
+    # alone and reads a guide and the skill from it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build --wheel --out-dir dist
+      - run: |
+          cd /tmp
+          uv run --isolated --with "$GITHUB_WORKSPACE"/dist/*.whl python -m api_explorer.docs paging | head -1 | grep -qx "# Paging"
+          uv run --isolated --with "$GITHUB_WORKSPACE"/dist/*.whl python -m api_explorer.docs skill | grep -q "name: api-explorer"
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

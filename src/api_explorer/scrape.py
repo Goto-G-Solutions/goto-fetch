@@ -18,6 +18,14 @@ except ImportError as exc:
 from .client import Client
 from .paging import paginate
 
+__all__ = [
+    "CSSField",
+    "FieldExtractor",
+    "ScraperConfig",
+    "XPathField",
+    "scrape",
+]
+
 
 class FieldExtractor(Protocol):
     """Anything that pulls one value out of an item element, such as CSSField."""

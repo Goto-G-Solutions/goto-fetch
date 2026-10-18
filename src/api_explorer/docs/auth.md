@@ -1,0 +1,67 @@
+# Auth
+
+Three kinds of authentication are built in, and any `httpx2.Auth` works too.
+
+## Choosing
+
+| The API wants... | Use |
+|------------------|-----|
+| a fixed token in a header | `Client(headers=token_headers(token, scheme, header))` |
+| a short-lived access token, renewed with a refresh token | `Client(auth=TokenRefresh(refresh_url, refresh=...))` |
+| a login (username and password) for tokens | `TokenRefresh(login=PasswordLogin(token_url, username, password))` |
+| OAuth2 client credentials (one service to another) | `TokenRefresh(login=ClientCredentials(token_url, client_id, client_secret))` |
+| something else (signing, AWS, ...) | any `httpx2.Auth`, as `Client(auth=...)` |
+
+## What it handles for you
+
+`TokenRefresh`:
+
+- renews the access token before it expires (by the reply's `expires_in`, or the token's own JWT expiry), and once more after a 401;
+- keeps a refresh token that rotates, and renews one request at a time across threads, so a rotated refresh token is never spent twice;
+- falls back to its `login` when refreshing fails, and retries a token endpoint's temporary failures through the retry policy;
+- resolves its URLs the way the client resolves endpoints;
+- keeps tokens in memory only, out of `repr`.
+
+It works with sync clients only: an async client gets a clear `TypeError`.
+
+## Examples
+
+```python
+from api_explorer import Client, PasswordLogin, TokenRefresh, token_headers
+from api_explorer.testing import TokenServer
+import httpx2
+
+# a header of the API's own, with the bare token
+assert token_headers("k-123", None, "X-API-Key") == {"X-API-Key": "k-123"}
+assert token_headers("abc", "Bearer") == {"Authorization": "Bearer abc"}
+
+# log in, then renew as needed
+server = TokenServer()  # a simplejwt-style API: /api/token/ and /api/token/refresh/
+auth = TokenRefresh("/token/refresh/", login=PasswordLogin("/token/", "me", "pw"))
+client = Client(
+    "http://api.test/api", auth=auth, transport=httpx2.MockTransport(server)
+)
+assert list(client.records("/items/")) == [{"id": 1}]
+assert server.paths == ["/api/token/", "/api/items/"]
+```
+
+```python skip
+import os
+from api_explorer import ClientCredentials
+
+auth = TokenRefresh(
+    login=ClientCredentials(
+        "https://auth.example.com/oauth/token",
+        "my-client-id",
+        os.environ["API_CLIENT_SECRET"],
+        scope="read",
+    )
+)
+```
+
+Reply fields are paths: the defaults read simplejwt's names and OAuth's (`"access|access_token"`, `"refresh|refresh_token"`, `"expires_in"`). Change them with `access_key=`, `refresh_key=` and `expires_key=`, and the header with `scheme=` and `header=`.
+
+## Traps
+
+- Keep secrets in environment variables, not in code or URLs. Generated scripts read them from `$API_TOKEN`, `$API_REFRESH_TOKEN`, `$API_USERNAME`, `$API_PASSWORD` and `$API_CLIENT_SECRET`.
+- A login of your own is any object with `token_url` and `build_request(url)`; see [build-your-own](build-your-own.md).

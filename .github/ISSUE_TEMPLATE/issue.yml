@@ -44,7 +44,7 @@ body:
     attributes:
       label: What the fix would touch
       description: |
-        In this project: the modules, functions and behaviour it changes.
+        In this project: the modules, functions and behaviour it changes, and the guides in src/api_explorer/docs/ that would need updating.
         Beyond it: who or what depends on that behaviour, such as notebooks, scripts or other code.
     validations:
       required: true

@@ -10,7 +10,7 @@ Every change starts as an issue, even a small one. Use the issue form, and fill 
 - what you expected instead;
 - why you think it happens;
 - the fix you suggest, if you have one;
-- what the fix would touch, in this project and beyond it.
+- what the fix would touch, in this project and beyond it, guides included.
 
 Writing these down is how we make sure the problem is understood before anyone writes code. If you aren't sure about the cause or the fix yet, say so. That is fine, and the issue is the place to work it out together.
 
@@ -24,7 +24,12 @@ Writing these down is how we make sure the problem is understood before anyone w
    - a defence learned from another library's bug is marked `# Guard (source):`;
    - keep tests orthogonal, and explain any overlap in a comment;
    - a rule that should hold for any input belongs in `tests/test_properties.py`, as a property test.
-4. Run the checks:
+4. Update the guides. The guides in `src/api_explorer/docs/` ship with the package, and people and coding agents rely on them, so a valid change keeps them true:
+   - a change to what a piece does, or to its public interface, updates that piece's guide, and `build-your-own.md` if it changes an interface;
+   - a new piece or guide is added to the index (`docs/README.md`), to `llms.txt`, and to `SKILL.md` if an agent needs to know of it;
+   - every example in a guide runs as part of `uv run pytest` (`tests/test_docs.py`), so a stale example fails the tests;
+   - update `README.md` and `CHANGELOG.md` the same way, under "Unreleased".
+5. Run the checks:
 
    ```bash
    uv run pytest
@@ -37,7 +42,7 @@ Writing these down is how we make sure the problem is understood before anyone w
 ## 3. Open a pull request
 
 - Link the issue in the description with `Closes #123`. A check fails any pull request that doesn't link an open issue.
-- Fill in the pull request template: what changed and why, what it touches, and which tests you ran and added.
+- Fill in the pull request template: what changed and why, what it touches, which tests you ran and added, and which guides you updated.
 - Write it in plain language, without em dashes. Someone who hasn't read the code should follow it.
 
 ## Releasing

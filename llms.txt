@@ -1,0 +1,28 @@
+# api-explorer
+
+> A Python library to pull data from paginated JSON APIs safely, fetch only what changed since the last run, and store it in DuckDB or SQLite for analysis. Built on httpx2 and narwhals; everything else is optional.
+
+The guides below ship inside the package (`python -m api_explorer.docs <page>` prints one), so they match the installed version. Each covers what a piece is for, what the package already handles, runnable examples, and traps. `build-your-own` covers implementing each interface, with the check that tests it.
+
+## Guides
+
+- [Index](src/api_explorer/docs/README.md): the pieces, and where to start
+- [Client](src/api_explorer/docs/client.md): requests, records, errors, response checks
+- [Paging](src/api_explorer/docs/paging.md): choosing a paging style, and loops of your own
+- [Auth](src/api_explorer/docs/auth.md): token headers, renewing access tokens, logins
+- [Retries](src/api_explorer/docs/retries.md): what is retried, and policies of your own
+- [Incremental](src/api_explorer/docs/incremental.md): Incremental, Changes, Keyset and tracked_run
+- [Storage](src/api_explorer/docs/storage.md): DuckDB and SQLite warehouses, state stores
+- [Records and frames](src/api_explorer/docs/records-and-frames.md): reshaping nested JSON, dataframes
+- [FetchPlan](src/api_explorer/docs/fetch-plan.md): fetches as data, generated scripts, the explorer
+- [Logging](src/api_explorer/docs/logging.md): events, and watching a run
+- [Testing](src/api_explorer/docs/testing.md): fake APIs for tests
+- [Scraping](src/api_explorer/docs/scraping.md): HTML pages with no API
+- [Build your own](src/api_explorer/docs/build-your-own.md): a piece of your own on each interface
+
+## Optional
+
+- [Agent Skill](src/api_explorer/docs/SKILL.md): when and how a coding agent should use the package
+- [README](README.md): install, overview and examples
+- [AGENTS.md](AGENTS.md): design rules and invariants, for working on the package itself
+- [CHANGELOG](CHANGELOG.md): what each release changed

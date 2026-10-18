@@ -9,6 +9,15 @@ Pull data from paginated JSON APIs safely, fetch only what changed, and store it
 - **Output:** turns nested JSON into tidy rows, then into a polars, pandas or pyarrow frame.
 - **Explorer:** a marimo notebook to explore an unfamiliar API, then copy the fetch, or the whole stored and tracked run, as a script.
 
+## Guides
+
+Guides for each piece ship with the package, for people and coding agents: `python -m api_explorer.docs` lists them, and `python -m api_explorer.docs paging` prints one. In the repository they are in [src/api_explorer/docs](src/api_explorer/docs/README.md), indexed in [llms.txt](llms.txt). To give a coding agent this package's skill in your own project:
+
+```bash
+mkdir -p .claude/skills/api-explorer
+python -m api_explorer.docs skill > .claude/skills/api-explorer/SKILL.md
+```
+
 ## Install
 
 ```bash

@@ -26,6 +26,9 @@ Records are kept in a Warehouse: SqliteWarehouse needs nothing more, and
 DuckDBWarehouse needs the "duckdb" extra. Fake APIs and checks for
 testing your own code live in api_explorer.testing.
 
+Guides for each piece ship in api_explorer.docs: python -m api_explorer.docs
+prints the index.
+
 The package logs nothing until asked: enable_logging() switches it on.
 """
 
