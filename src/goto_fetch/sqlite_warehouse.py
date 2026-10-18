@@ -31,6 +31,7 @@ from .state import SqliteState
 from .warehouse import (
     Kind,
     check_limit,
+    check_table,
     matching,
     quote,
     read_part,
@@ -117,6 +118,7 @@ class SqliteWarehouse:
     def read(self, table: str, limit: int | None = None) -> list[dict[str, Any]]:
         """`table`'s rows as dicts, at most `limit`; booleans and JSON come back whole."""
         check_limit(limit)
+        check_table(table)
         with closing(self._tables.connect()) as connection:
             columns = self._tables.columns(connection, table)
             if not columns:

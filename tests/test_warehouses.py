@@ -202,6 +202,18 @@ def test_a_negative_limit_is_refused_the_same_way_everywhere(database):
             shop.read("t", limit=-1)
         assert shop.read("t", limit=0) == []
 
+@pytest.mark.parametrize("name", ["goto_fetch_state", "GOTO_FETCH_STATE"])
+def test_the_state_table_s_name_is_refused_for_records(database, name):
+    # Regression: records written to a table of that name replaced the
+    # tracked runs' state kept in it.
+    shop = database()
+    shop.put("orders", {"last": "2026-01-01", "seen": []})
+    with pytest.raises(ValueError, match="tracked runs' state lives in"):
+        shop.write(name, [{"name": "orders", "value": "{}"}], key="name")
+    with pytest.raises(ValueError, match="tracked runs' state lives in"):
+        shop.read(name)
+    assert shop.get("orders") == {"last": "2026-01-01", "seen": []}
+
 
 def test_read_takes_a_limit(database):
     shop = database()
