@@ -24,6 +24,10 @@ dependencies = [
     "urllib3>=2.5",
 ]
 
+[project.scripts]
+# gtfetch explore opens the explorer; gtfetch docs prints a guide (goto_fetch.cli)
+gtfetch = "goto_fetch.cli:main"
+
 [project.urls]
 Repository = "https://github.com/Goto-G-Solutions/goto-fetch"
 Issues = "https://github.com/Goto-G-Solutions/goto-fetch/issues"
@@ -53,6 +57,7 @@ dev = [
     "duckdb>=1.5",
     "httpx2>=2.13.1",
     "hypothesis>=6.150",
+    "marimo>=0.25.1",
     "msgspec>=0.22",
     "orjson>=3.11",
     "pandas>=2.2",
@@ -71,6 +76,8 @@ build-backend = "uv_build"
 # tests/test_protocols.py proves each piece fits its interface, so it is
 # type checked too; the other tests are not.
 include = ["src", "tests/test_protocols.py"]
+# The explorer notebook is marimo's: marimo check --strict reads it.
+exclude = ["src/goto_fetch/explorer/notebook.py"]
 pythonVersion = "3.11"
 
 [tool.pytest.ini_options]
@@ -80,8 +87,8 @@ testpaths = ["tests"]
 target-version = "py311"
 
 [tool.ruff.format]
-# marimo formats the notebooks on save, in a way ruff can't reproduce.
-exclude = ["notebooks/*"]
+# marimo formats the notebook on save, in a way ruff can't reproduce.
+exclude = ["src/goto_fetch/explorer/notebook.py"]
 
 [tool.ruff.lint]
 # marimo ends every notebook cell with a bare return; let it.

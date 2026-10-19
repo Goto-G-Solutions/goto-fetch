@@ -246,7 +246,7 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 7. `duckdb_warehouse`, `sqlite_warehouse`, `scrape`, `testing`: the built-in warehouses, HTML scraping, and the fakes and checks for users' tests.
 8. `plan`: `FetchPlan`, describing one fetch to run, store or write as a script.
 
-`goto_fetch.docs` stands apart: it only reads the guide pages shipped beside it, and imports nothing from the package.
+`goto_fetch.docs`, `goto_fetch.explorer` and `goto_fetch.cli` stand apart: the first reads the guide pages shipped beside it, the second holds the explorer notebook and opens a copy of it, and neither imports anything from the package; `cli` (the `gtfetch` command) imports only those two.
 
 **Dependencies.**
 
@@ -285,7 +285,7 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 - Tests: `uv run pytest`. This is the one command that runs every test.
 - Lint: `uvx ruff check` and `uvx ruff format --check`.
 - Types: `uv run pyright`. The package ships its type hints (`py.typed`), so they must be right.
-- The notebook: `uvx marimo check --strict notebooks/explorer.py`.
+- The notebook: `uvx marimo check --strict src/goto_fetch/explorer/notebook.py`.
 - The notebook's formatting belongs to marimo, which formats it on save, so `ruff format` leaves it alone.
 - A chain of checks in a shell stops on the first failure only with `set -o pipefail`, when output goes through `tail`.
 

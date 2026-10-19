@@ -1,6 +1,6 @@
 # goto-fetch guides
 
-`goto_fetch` pulls data from paginated JSON APIs safely, can fetch only what changed since the last run, and stores it for analysis. It is a library to embed, not a platform to adopt: a fast start for a pipeline of your own, with each piece behind a small interface, so you bring your own for the parts you care about. These guides ship with the package, so they match the version you have. Read one from a shell with `python -m goto_fetch.docs <page>`.
+`goto_fetch` pulls data from paginated JSON APIs safely, can fetch only what changed since the last run, and stores it for analysis. It is a library to embed, not a platform to adopt: a fast start for a pipeline of your own, with each piece behind a small interface, so you bring your own for the parts you care about. These guides ship with the package, so they match the version you have. Read one from a shell with `gtfetch docs <page>`, or `python -m goto_fetch.docs <page>` where the command isn't on the path.
 
 ## Start here
 

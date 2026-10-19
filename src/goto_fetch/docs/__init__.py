@@ -9,7 +9,8 @@ a piece of your own on each interface. From a shell:
     python -m goto_fetch.docs --path       # where the pages are
     python -m goto_fetch.docs skill        # an Agent Skill for this package
 
-The pages match the installed version, and need no network.
+`gtfetch docs ...` does the same, where the command is on the path. The
+pages match the installed version, and need no network.
 """
 
 from importlib.resources import files
