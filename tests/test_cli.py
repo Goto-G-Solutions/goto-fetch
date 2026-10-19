@@ -24,7 +24,17 @@ def test_docs_refuses_a_page_it_doesnt_have(capsys):
 
 @pytest.fixture
 def ran(monkeypatch):
-    """The commands the explorer would have run, instead of running marimo."""
+    """The commands the explorer would have run, instead of running marimo.
+
+    marimo counts as installed, whether it is or not: the core-only test
+    run doesn't have it, and these tests are about the command, not marimo.
+    """
+    real = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name: True if name == "marimo" else real(name),
+    )
     commands = []
     monkeypatch.setattr(
         explorer.subprocess, "call", lambda cmd: commands.append(cmd) or 0
