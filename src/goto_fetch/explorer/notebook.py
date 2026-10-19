@@ -44,6 +44,11 @@ def _():
     Secrets live only in this session, never in the file, and the script
     the **Code** tab writes reads them from the same variables.
 
+    The defaults fit most APIs: the endpoint is sent as written (tick
+    **Trailing slash** for Django REST Framework), and the **Results path**
+    tries `results`, `items` and `data`, or takes a page that is a bare
+    list; name one key to be strict about it.
+
     The panel is built on the `goto_fetch` package; the examples below
     show the same calls in your own code, and the README shows storing and
     incremental fetching.
@@ -927,9 +932,9 @@ def _():
     `TokenRefresh("/token/refresh/", refresh=os.environ["API_REFRESH_TOKEN"])`.
 
     Login and refresh URLs follow the same rules as endpoints, trailing
-    slash included: for Django REST Framework, turn it on, and `/token/`
-    becomes `/token/`; for django-ninja-jwt they are usually `/token/pair`
-    and `/token/refresh`, as written.
+    slash included: for Django REST Framework, turn it on, and `/token`
+    is sent as `/token/`; for django-ninja-jwt they are usually
+    `/token/pair` and `/token/refresh`, sent as written.
     """)
     return
 
