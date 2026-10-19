@@ -4,10 +4,6 @@
 #     "goto-fetch[duckdb]",
 #     "marimo>=0.25.1",
 # ]
-#
-# # The package from this repo, installed editable so changes show at once.
-# [tool.uv.sources]
-# goto-fetch = { path = "..", editable = true }
 # ///
 
 import marimo

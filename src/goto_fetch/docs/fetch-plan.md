@@ -51,8 +51,10 @@ print(plan.script(requirement=package_requirement()))
 ## The explorer
 
 ```bash
-uvx marimo edit --sandbox notebooks/explorer.py
+uvx --from "goto-fetch[explorer,duckdb]" gtfetch explore   # copies explorer.py here, if absent, and opens it
 ```
+
+In a project with the package installed, `uv run gtfetch explore`; without installing anything, `uvx marimo edit --sandbox https://raw.githubusercontent.com/Goto-G-Solutions/goto-fetch/main/src/goto_fetch/explorer/notebook.py`.
 
 Its fields fill from `$API_BASE_URL`, `$API_CLIENT_ID` and the secret variables above. The **Store** section picks a DuckDB or SQLite file, a table, a key, and what each run fetches; a tracked fetch reads every page, so set **Pages** to 0.
 

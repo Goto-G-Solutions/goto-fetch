@@ -54,10 +54,10 @@ jobs:
           --with-editable . --with "pytest>=8.4" pytest
 
   package:
-    name: The built package ships its guides
-    # The guides are data files beside the code; a packaging change could
-    # drop them without any test noticing. This installs the built wheel
-    # alone and reads a guide and the skill from it.
+    name: The built package ships its guides and the explorer
+    # The guides and the notebook are data files beside the code; a
+    # packaging change could drop them without any test noticing. This
+    # installs the built wheel alone and reads them from it.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -69,6 +69,8 @@ jobs:
           cd /tmp
           uv run --isolated --with "$GITHUB_WORKSPACE"/dist/*.whl python -m goto_fetch.docs paging | head -1 | grep -qx "# Paging"
           uv run --isolated --with "$GITHUB_WORKSPACE"/dist/*.whl python -m goto_fetch.docs skill | grep -q "name: goto-fetch"
+          uv run --isolated --with "$GITHUB_WORKSPACE"/dist/*.whl gtfetch docs paging | head -1 | grep -qx "# Paging"
+          uv run --isolated --with "$GITHUB_WORKSPACE"/dist/*.whl python -c "from goto_fetch.explorer import NOTEBOOK; assert NOTEBOOK.read_text().startswith('# /// script')"
 
   lint:
     name: Lint
@@ -81,7 +83,7 @@ jobs:
       - run: uvx ruff check
       - run: uvx ruff format --check
       - run: uvx zizmor .github/workflows
-      - run: uvx --with pytest marimo check --strict notebooks/explorer.py
+      - run: uvx --with pytest marimo check --strict src/goto_fetch/explorer/notebook.py
 
   types:
     name: Type check
@@ -105,4 +107,4 @@ jobs:
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - run: >-
           uv run --python 3.11 --with marimo --with-editable .
-          marimo export html notebooks/explorer.py -o explorer.html
+          marimo export html src/goto_fetch/explorer/notebook.py -o explorer.html

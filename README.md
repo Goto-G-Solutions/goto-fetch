@@ -17,7 +17,7 @@ It is a fit for one team talking to a few APIs. For dozens of sources, a catalog
 
 ## Guides
 
-Guides for each piece ship with the package, for people and coding agents: `python -m goto_fetch.docs` lists them, and `python -m goto_fetch.docs paging` prints one. In the repository they are in [src/goto_fetch/docs](https://github.com/Goto-G-Solutions/goto-fetch/blob/main/src/goto_fetch/docs/README.md), indexed in [llms.txt](https://github.com/Goto-G-Solutions/goto-fetch/blob/main/llms.txt). To give a coding agent this package's skill in your own project:
+Guides for each piece ship with the package, for people and coding agents: `gtfetch docs` lists them, and `gtfetch docs paging` prints one (`python -m goto_fetch.docs paging` does the same, for a shell without the command on its path). In the repository they are in [src/goto_fetch/docs](https://github.com/Goto-G-Solutions/goto-fetch/blob/main/src/goto_fetch/docs/README.md), indexed in [llms.txt](https://github.com/Goto-G-Solutions/goto-fetch/blob/main/llms.txt). To give a coding agent this package's skill in your own project:
 
 ```bash
 mkdir -p .claude/skills/goto-fetch
@@ -354,10 +354,14 @@ def read(page):
 ## The explorer
 
 ```bash
-uvx marimo edit --sandbox notebooks/explorer.py
+uvx --from "goto-fetch[explorer,duckdb]" gtfetch explore
 ```
 
-The notebook's header installs the package from this repo. To use the notebook on its own, outside a clone of the repo, delete its `[tool.uv.sources]` lines, and it installs `goto-fetch` from PyPI instead.
+That copies the notebook to `explorer.py` in the current folder, if there isn't one, and opens it in marimo; your edits stay in your copy. In a project, `uv add "goto-fetch[explorer,duckdb]"` then `uv run gtfetch explore`. To try it without installing anything, marimo can open the file straight from the repository, in an environment of its own:
+
+```bash
+uvx marimo edit --sandbox https://raw.githubusercontent.com/Goto-G-Solutions/goto-fetch/main/src/goto_fetch/explorer/notebook.py
+```
 
 Fill in the API, press **Fetch**, and pick the columns you want. The **Code** tab then shows a script that repeats the fetch; `uv run` installs what it needs. Secrets come from `$API_TOKEN`, `$API_REFRESH_TOKEN`, `$API_ACCESS_TOKEN`, `$API_USERNAME`, `$API_PASSWORD` and `$API_CLIENT_SECRET`, and never appear in the script.
 
