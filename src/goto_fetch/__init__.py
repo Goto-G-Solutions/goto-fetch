@@ -65,6 +65,7 @@ from .logs import (
     logging_to,
 )
 from .paging import (
+    RESULTS,
     Cursor,
     Fetched,
     HeaderLink,
@@ -90,6 +91,7 @@ from .urllib3_transport import Urllib3Transport
 from .warehouse import SqlTables, Warehouse, write_run
 
 __all__ = [
+    "RESULTS",
     "ApiError",
     "Auth",
     "Changes",

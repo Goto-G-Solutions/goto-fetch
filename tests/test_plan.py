@@ -93,7 +93,6 @@ def run_script(monkeypatch, capsys):
 KEYED = FetchPlan(
     "http://api.test/api",
     "/items",
-    trailing_slash=False,
     auth="header",
     token="k-123",
     scheme=None,
@@ -536,3 +535,12 @@ def test_an_incremental_plan_without_a_filter_is_written_without_one():
     # The script read Incremental('updated_at', None), a None with no meaning.
     plan = FetchPlan("http://api.test/api", "/x/", track="incremental", table="t")
     assert plan.tracker_call().code() == "Incremental('updated_at')"
+
+
+def test_a_script_writes_only_the_settings_that_differ_from_the_defaults():
+    plain = FetchPlan("http://h/api", "/a").script()
+    assert "results_key" not in plain and "trailing_slash" not in plain
+    strict = FetchPlan(
+        "http://h/api", "/a/", trailing_slash=True, results_key="rows"
+    ).script()
+    assert "trailing_slash=True" in strict and "results_key='rows'" in strict

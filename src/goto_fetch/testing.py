@@ -36,7 +36,7 @@ from .client import Client
 from .errors import ApiError, Problem
 from .incremental import ReportsDeletions, Tracker
 from .models import as_dict
-from .paging import Fetched, PageRequest, PaginationLoop, Paging
+from .paging import RESULTS, Fetched, PageRequest, PaginationLoop, Paging
 from .retry import Failure, Retry, RetryPolicy
 from .state import StateStore
 from .warehouse import (
@@ -570,7 +570,7 @@ def check_paging(
     expected: Sequence[Any],
     *,
     endpoint: str = "/items/",
-    results_key: str | None = "results",
+    results_key: str | None = RESULTS,
     count_key: str | None = None,
     method: str = "GET",
     json: Any = None,

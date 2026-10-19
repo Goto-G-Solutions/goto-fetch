@@ -4,6 +4,10 @@ Each release lists what changed for people using the package. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Two defaults were Django REST Framework's; now the simplest shape is the default and DRF's conventions opt in. `Client(trailing_slash=...)` defaults to `False`: an endpoint is sent as written, and `trailing_slash=True` adds the "/" DRF wants. `results_key` defaults to `RESULTS` (`"results|items|data"`), which also takes a body that is a bare list; name one key to be strict, since a key you name and the page lacks is still an error. `FetchPlan` and the explorer follow.
+
 ### Added
 
 - The `gtfetch` command: `gtfetch explore` copies the explorer notebook next to you, if there isn't one, and opens it in marimo; `gtfetch docs [page]` prints a guide. The notebook now ships inside the package (`goto_fetch/explorer/notebook.py`), so it matches the installed version, and its header no longer pins a local checkout, so `uvx marimo edit --sandbox <raw url>` works on the file alone. `uvx --from "goto-fetch[explorer,duckdb]" gtfetch explore` runs it with nothing installed.

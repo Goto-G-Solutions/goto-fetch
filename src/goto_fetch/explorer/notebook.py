@@ -64,7 +64,7 @@ def _():
     endpoint = mo.ui.text(
         placeholder="/products/", label="Endpoint", full_width=True
     )
-    trailing_slash = mo.ui.checkbox(value=True, label="Trailing slash")
+    trailing_slash = mo.ui.checkbox(value=False, label="Trailing slash")
     method = mo.ui.dropdown(["GET", "POST"], value="GET", label="Method")
     body = mo.ui.text_area(
         placeholder='{"query": "late orders"}',
@@ -129,7 +129,7 @@ def _():
         ["header", "body"], value="header", label="Send the ID and secret in the"
     )
 
-    results_key = mo.ui.text(value="results", label="Results path")
+    results_key = mo.ui.text(value="results|items|data", label="Results path")
     count_key = mo.ui.text(placeholder="count", label="Count path")
     error_path = mo.ui.text(placeholder="error|errors", label="Error path")
     paging = mo.ui.dropdown(
@@ -862,14 +862,9 @@ def _():
     stops exactly at the end; without it, a short or empty page ends it.
 
     ```python
-    with Client(BASE_URL, headers=HEADERS, trailing_slash=False) as client:
+    with Client(BASE_URL, headers=HEADERS) as client:
         items = list(
-            client.records(
-                "/items",
-                results_key="items",
-                count_key="count",
-                paging=Offset(limit=100),
-            )
+            client.records("/items", count_key="count", paging=Offset(limit=100))
         )
     ```
     """)
@@ -932,8 +927,9 @@ def _():
     `TokenRefresh("/token/refresh/", refresh=os.environ["API_REFRESH_TOKEN"])`.
 
     Login and refresh URLs follow the same rules as endpoints, trailing
-    slash included. For django-ninja-jwt they are usually `/token/pair` and
-    `/token/refresh`, with the trailing slash turned off.
+    slash included: for Django REST Framework, turn it on, and `/token/`
+    becomes `/token/`; for django-ninja-jwt they are usually `/token/pair`
+    and `/token/refresh`, as written.
     """)
     return
 
