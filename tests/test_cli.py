@@ -49,7 +49,14 @@ def test_explore_copies_the_notebook_here_and_opens_it(
     assert main(["explore"]) == 0
     assert (tmp_path / "explorer.py").read_text() == explorer.NOTEBOOK.read_text()
     assert "Wrote explorer.py" in capsys.readouterr().out
-    assert ran[-1] == [sys.executable, "-m", "marimo", "edit", "explorer.py"]
+    assert ran[-1] == [
+        sys.executable,
+        "-m",
+        "marimo",
+        "edit",
+        "--no-sandbox",
+        "explorer.py",
+    ]
 
 
 def test_explore_leaves_an_existing_notebook_as_it_is(tmp_path, capsys, ran):

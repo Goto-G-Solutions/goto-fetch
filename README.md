@@ -357,7 +357,7 @@ def read(page):
 uvx --from "goto-fetch[explorer,duckdb]" gtfetch explore
 ```
 
-That copies the notebook to `explorer.py` in the current folder, if there isn't one, and opens it in marimo; your edits stay in your copy. In a project, `uv add "goto-fetch[explorer,duckdb]"` then `uv run gtfetch explore`. To try it without installing anything, marimo can open the file straight from the repository, in an environment of its own:
+That copies the notebook to `explorer.py` in the current folder, if there isn't one, and opens it in marimo; your edits stay in your copy. In a project, `uv add "goto-fetch[explorer,duckdb]"` then `uv run gtfetch explore`; with pip, `pip install "goto-fetch[explorer,duckdb]"` then `gtfetch explore`. Any installer works: the command runs marimo from the environment the package is in. To try it without installing anything, marimo can open the file straight from the repository, in an environment of its own:
 
 ```bash
 uvx marimo edit --sandbox https://raw.githubusercontent.com/Goto-G-Solutions/goto-fetch/main/src/goto_fetch/explorer/notebook.py

@@ -41,5 +41,8 @@ def open_notebook(path: Path, run: Callable[[list[str]], int] | None = None) -> 
         raise ImportError(
             "The explorer needs marimo: install the extra, goto-fetch[explorer]"
         )
-    command = [sys.executable, "-m", "marimo", "edit", str(path)]
+    # --no-sandbox: this environment already holds the package and marimo;
+    # a sandbox would resolve goto-fetch again, from PyPI, and marimo would
+    # otherwise prompt for one whenever uv is installed.
+    command = [sys.executable, "-m", "marimo", "edit", "--no-sandbox", str(path)]
     return (subprocess.call if run is None else run)(command)
