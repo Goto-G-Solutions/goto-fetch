@@ -17,7 +17,6 @@ pages = {
 }
 client = Client(
     "http://shop.test",
-    trailing_slash=False,
     transport=FakeApi(lambda r: http.Response(200, text=pages[r.url.path])),
 )
 

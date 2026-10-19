@@ -14,18 +14,26 @@ OK = http.Response(200, json={"ok": True})
 @pytest.mark.parametrize(
     ("endpoint", "url"),
     [
-        ("/items", "http://api.test/api/items/"),
-        ("items?page=2", "http://api.test/api/items/?page=2"),
+        ("/items", "http://api.test/api/items"),
+        ("items/?page=2", "http://api.test/api/items/?page=2"),
         ("http://other.test/x?a=1", "http://other.test/x?a=1"),
     ],
 )
-def test_endpoints_join_the_base_url_with_a_trailing_slash(mock_client, endpoint, url):
+def test_endpoints_join_the_base_url_as_written(mock_client, endpoint, url):
     assert mock_client(replies(OK)).url(endpoint) == url
 
 
-def test_the_trailing_slash_can_be_turned_off(mock_client):
-    client = mock_client(replies(OK), trailing_slash=False)
-    assert client.url("/items") == "http://api.test/api/items"
+@pytest.mark.parametrize(
+    ("endpoint", "url"),
+    [
+        ("/items", "http://api.test/api/items/"),
+        ("items?page=2", "http://api.test/api/items/?page=2"),
+    ],
+)
+def test_the_trailing_slash_can_be_turned_on_for_django_rest_framework(
+    mock_client, endpoint, url
+):
+    assert mock_client(replies(OK), trailing_slash=True).url(endpoint) == url
 
 
 def test_request_returns_the_response_on_success(mock_client):

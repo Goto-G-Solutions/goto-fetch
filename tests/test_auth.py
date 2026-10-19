@@ -182,11 +182,11 @@ def test_token_fields_can_have_other_names(mock_client):
 def test_auth_urls_resolve_against_the_base_url_like_endpoints(mock_client):
     # Regression: "token/" used to resolve against the request URL, giving
     # /api/items/token/.
-    server = TokenServer()
+    server = TokenServer()  # a DRF-style server: its routes end in "/"
     auth = TokenRefresh(
         "token/refresh", refresh="expired", login=PasswordLogin("token", "me", "pw")
     )
-    list(mock_client(server, auth=auth).records("/items/"))
+    list(mock_client(server, auth=auth, trailing_slash=True).records("/items/"))
     assert server.paths == ["/api/token/refresh/", "/api/token/", "/api/items/"]
 
 
@@ -202,7 +202,7 @@ def test_auth_urls_follow_the_trailing_slash_setting(mock_client):
     auth = TokenRefresh(
         "/token/refresh", login=PasswordLogin("/token/pair", "me", "pw")
     )
-    list(mock_client(handler, auth=auth, trailing_slash=False).records("/items"))
+    list(mock_client(handler, auth=auth).records("/items"))
     assert seen == ["/api/token/pair", "/api/items"]
 
 
@@ -292,7 +292,7 @@ def test_a_custom_auth_with_its_own_urls_opts_in_to_endpoint_rules():
     assert isinstance(auth, ResolvesUrls)
     replies(200).client(auth=auth)
     assert auth.resolve is not None
-    assert auth.resolve("keys") == "http://api.test/api/keys/"
+    assert auth.resolve("keys") == "http://api.test/api/keys"
 
 
 def test_a_temporary_failure_at_the_token_endpoint_is_retried():

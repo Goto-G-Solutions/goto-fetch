@@ -28,6 +28,7 @@ from .limits import RateLimit
 from .logs import client_context, log_event
 from .models import converter
 from .paging import (
+    RESULTS,
     Fetched,
     NextLink,
     Page,
@@ -63,8 +64,8 @@ class Client:
     Relative endpoints join onto `base_url`: "/items/" under
     "https://host/api" is "https://host/api/items/". Absolute URLs, such as
     the next-page links APIs return, are used as given. With
-    `trailing_slash`, a relative endpoint gets a "/" before any query, as
-    Django REST Framework expects.
+    `trailing_slash=True`, a relative endpoint gets a "/" before any query,
+    as Django REST Framework expects; by default it is sent as written.
 
     `timeout` is seconds to wait at each stage of a request, connecting
     and each read (20 by default), or a Timeout for separate limits, such
@@ -118,7 +119,7 @@ class Client:
         timeout: float | Timeout | None = 20.0,
         retry: RetryPolicy | None = None,
         decode: Decoder | None = None,
-        trailing_slash: bool = True,
+        trailing_slash: bool = False,
         auth: Auth | None = None,
         transport: Transport | None = None,
         name: str | None = None,
@@ -426,7 +427,7 @@ class Client:
         method: str = "GET",
         json: Any = None,
         params: Mapping[str, Any] | None = None,
-        results_key: str | None = "results",
+        results_key: str | None = RESULTS,
         count_key: str | None = None,
         paging: Paging | None = None,
         max_pages: int | None = None,
@@ -437,8 +438,10 @@ class Client:
         """Yield every record from a paginated JSON endpoint.
 
         `results_key` is the path to each page's list of records, with
-        fallbacks such as "results|data|items". results_key=None means the
-        body itself is the list. `count_key` is the optional path to the
+        fallbacks such as "results|data.rows". The default, RESULTS, tries
+        "results", "items" and "data", and takes a body that is itself a
+        list; name one key to be strict, and pass None when the body is
+        always the list. `count_key` is the optional path to the
         total record count, such as "count". It goes in each "page" event,
         and lets Offset stop exactly at the end. `paging` says how to reach
         the next page: NextLink() (the default) follows a next-page URL in

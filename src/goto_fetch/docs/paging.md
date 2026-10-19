@@ -28,14 +28,12 @@ from goto_fetch.testing import cursor_api, link_header_api, offset_api
 
 # limit/offset, with a server that caps pages at 25 whatever is asked
 api = offset_api(120, cap=25)
-records = api.client().records(
-    "/items/", results_key="items", count_key="count", paging=Offset(limit=100)
-)
+records = api.client().records("/items", count_key="count", paging=Offset(limit=100))
 assert list(records) == list(range(120))
 
 # a bare list, with the next page in the Link header
 api = link_header_api(30, page_size=10)
-repos = api.client().records("/repos/", results_key=None, paging=HeaderLink())
+repos = api.client().records("/repos", paging=HeaderLink())
 assert len(list(repos)) == 30
 
 # a POST search with the cursor in the body

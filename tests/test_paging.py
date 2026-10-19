@@ -14,6 +14,7 @@ import re
 import pytest
 
 from goto_fetch import (
+    RESULTS,
     ApiError,
     Cursor,
     HeaderLink,
@@ -109,9 +110,7 @@ def test_records_follow_a_link_header_with_header_link(mock_client):
         headers = {"Link": '<?page=2>; rel="next"'} if page == "1" else {}
         return http.Response(200, json=[int(page)], headers=headers)
 
-    records = mock_client(handler).records(
-        "/repos/", results_key=None, paging=HeaderLink()
-    )
+    records = mock_client(handler).records("/repos/", paging=HeaderLink())
     assert list(records) == [1, 2]
 
 
@@ -253,6 +252,10 @@ def test_records_stop_at_max_pages(mock_client):
         ({"results": None}, "results", None, Page([], None)),
         ({"results": [], "count": "9"}, "results", "count", Page([], 9)),
         ({"results": [], "count": True}, "results", "count", Page([], None)),
+        # The default finds the usual names, and takes a bare list.
+        ({"items": [3]}, RESULTS, None, Page([3], None)),
+        ({"data": [4], "count": 1}, RESULTS, "count", Page([4], 1)),
+        ([5, 6], RESULTS, None, Page([5, 6], None)),
     ],
     ids=[
         "results-and-count",
@@ -261,6 +264,9 @@ def test_records_stop_at_max_pages(mock_client):
         "null-results",
         "count-as-text",
         "count-as-bool",
+        "default-items",
+        "default-data",
+        "default-bare-list",
     ],
 )
 def test_read_page_finds_the_records_and_a_whole_number_count(
@@ -270,25 +276,44 @@ def test_read_page_finds_the_records_and_a_whole_number_count(
 
 
 @pytest.mark.parametrize(
-    ("page", "message"),
+    ("page", "results_key", "message"),
     [
-        ({"data": [1]}, "No 'results' in the response"),
-        ({"results": {"a": 1}}, "'results' holds a dict, not a list"),
+        ({"payload": [1]}, RESULTS, "No 'results|items|data' in the response"),
+        ({"data": [1]}, "results", "No 'results' in the response"),
+        # A bare list passes only for the default: a key you name is strict.
+        ([1, 2], "results", "No 'results' in the response"),
+        ({"results": {"a": 1}}, "results", "'results' holds a dict, not a list"),
+        ({"data": {"rows": []}}, RESULTS, "holds a dict, not a list"),
     ],
-    ids=["missing-results", "results-not-a-list"],
+    ids=[
+        "none-of-the-usual-names",
+        "named-key-missing",
+        "named-key-but-bare-list",
+        "results-not-a-list",
+        "default-finds-an-object",
+    ],
 )
-def test_read_page_refuses_a_page_of_the_wrong_shape(page, message):
+def test_read_page_refuses_a_page_of_the_wrong_shape(page, results_key, message):
     with pytest.raises(ApiError, match=re.escape(message)) as raised:
-        read_page(page, url="http://h/items/")
+        read_page(page, results_key, url="http://h/items/")
     assert raised.value.url == "http://h/items/"
 
 
 def test_records_read_pages_with_read_page_and_name_the_url(mock_client):
     # Overlaps the read_page tests on purpose: this checks records() uses it
     # and passes its URL, so a bad page names where it came from.
-    with pytest.raises(ApiError, match="No 'results'") as raised:
-        list(mock_client(json_pages({BASE: {"data": []}})).records("/items/"))
+    with pytest.raises(ApiError, match="No 'results|items|data'") as raised:
+        list(mock_client(json_pages({BASE: {"payload": []}})).records("/items/"))
     assert raised.value.url == BASE
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"items": [1, 2], "next": None}, {"data": [1, 2], "next": None}, [1, 2]],
+    ids=["items", "data", "bare-list"],
+)
+def test_records_find_the_records_by_the_usual_names_by_default(mock_client, body):
+    assert list(mock_client(json_pages({BASE: body})).records("/items/")) == [1, 2]
 
 
 def test_records_follow_a_next_link_at_any_path(mock_client):

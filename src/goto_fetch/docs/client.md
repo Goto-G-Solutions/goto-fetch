@@ -8,7 +8,7 @@ Always: make one `Client` per API and reuse it. It keeps one connection pool, an
 
 ## What it handles for you
 
-- Joining endpoints to the base URL, with or without a trailing slash (`trailing_slash=True` adds one, as Django REST Framework expects; turn it off for routes that don't end in one).
+- Joining endpoints to the base URL, as written; `trailing_slash=True` adds a "/" before any query, as Django REST Framework expects.
 - Retrying temporary failures (see [retries](retries.md)), and raising one `ApiError` for anything final, with the URL and status, secrets hidden.
 - Merging `params=` into a query the endpoint already has.
 - Reading JSON: an empty 200 is an error, 204 and 205 are empty, gzip sent without saying so is unpacked, and a non-JSON body names its content type.
@@ -40,7 +40,7 @@ assert api.queries == [{}, {"page": "2"}, {"page": "3"}]
 
 `records()` follows the pages and yields each record. Its main arguments:
 
-- `results_key`: where the records are in each page, a path with fallbacks such as `"results|data|items"`; `None` when the body itself is the list.
+- `results_key`: where the records are in each page. By default (`RESULTS`, `"results|items|data"`) the usual names are tried, and a body that is itself a list is the records. Name one key, or a path with fallbacks such as `"payload|data.rows"`, to be strict: a key you name and the page lacks is an error, never an empty page. `None` says the body is always the list.
 - `count_key`: the total count, if the API gives one, for progress and an exact end.
 - `paging`: how to reach the next page (see [paging](paging.md)); next-page links by default.
 - `method` and `json`: for a search sent as a POST body. A POST isn't retried unless you pass `retry=True`, since repeating it could repeat a change.

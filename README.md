@@ -57,14 +57,12 @@ with Client(
 df = to_frame(select(records, ["id", "name", "owner.email"]), "polars")
 ```
 
-For a Django Ninja style API (no next link, a `count`, and routes without a trailing slash):
+Endpoints are sent as written, and the records are found under `results`, `items` or `data`, or taken from a body that is a bare list; name `results_key` when an API uses another, and pass `trailing_slash=True` for Django REST Framework, whose routes end in one. For a Django Ninja style API (no next link, a `count`):
 
 ```python
-with Client("https://host/api", trailing_slash=False) as client:
+with Client("https://host/api") as client:
     records = list(
-        client.records(
-            "/items", results_key="items", count_key="count", paging=Offset(limit=100)
-        )
+        client.records("/items", count_key="count", paging=Offset(limit=100))
     )
 ```
 

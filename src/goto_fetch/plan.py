@@ -15,7 +15,7 @@ from .duckdb_warehouse import DuckDBWarehouse
 from .errors import redact_url
 from .incremental import Changes, Incremental, ReportsDeletions, Tracker
 from .limits import RateLimit
-from .paging import Cursor, HeaderLink, Keyset, NextLink, Offset, Paging
+from .paging import RESULTS, Cursor, HeaderLink, Keyset, NextLink, Offset, Paging
 from .sqlite_warehouse import SqliteWarehouse
 from .state import StateStore, tracked_run
 from .warehouse import Warehouse
@@ -62,7 +62,7 @@ class FetchPlan:
     method: str = "GET"
     body: Any = None
     retry: bool | None = None
-    trailing_slash: bool = True
+    trailing_slash: bool = False
     timeout: float = 20.0
     rate_limit: float = 0.0
     auth: Literal["none", "header", "refresh", "client"] = "none"
@@ -79,7 +79,7 @@ class FetchPlan:
     client_secret: str = field(default="", repr=False)
     scope: str = ""
     credentials_in: Literal["header", "body"] = "header"
-    results_key: str | None = "results"
+    results_key: str | None = RESULTS
     count_key: str | None = None
     error_path: str = ""
     paging: Literal["next", "offset", "header", "cursor", "keyset"] = "next"
@@ -156,8 +156,8 @@ class FetchPlan:
         options["timeout"] = self.timeout
         if self.rate_limit:
             options["rate_limit"] = Call(RateLimit, (self.rate_limit,))
-        if not self.trailing_slash:
-            options["trailing_slash"] = False
+        if self.trailing_slash:
+            options["trailing_slash"] = True
         if self.error_path:
             options["check"] = Call(error_at, (self.error_path,))
         return Call(Client, (self.base_url,), options)
@@ -212,7 +212,8 @@ class FetchPlan:
             options["json"] = self.body
         if self.retry is not None:
             options["retry"] = self.retry
-        options["results_key"] = self.results_key
+        if self.results_key != RESULTS:
+            options["results_key"] = self.results_key
         if self.count_key:
             options["count_key"] = self.count_key
         paging = self.paging_call()

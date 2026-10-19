@@ -101,6 +101,14 @@ def paginate(
         request = None if following == "" else following
 
 
+RESULTS = "results|items|data"
+"""The default results path: the names most APIs use, tried in order.
+
+With it, a page that is itself a list is the records. Name one key to be
+strict: a key you name and the page lacks is an error, not an empty page.
+"""
+
+
 class Page(NamedTuple):
     """One page as records() reads it.
 
@@ -114,7 +122,7 @@ class Page(NamedTuple):
 
 def read_page(
     page: Any,
-    results_key: str | None = "results",
+    results_key: str | None = RESULTS,
     count_key: str | None = None,
     *,
     url: str | None = None,
@@ -122,10 +130,12 @@ def read_page(
     """Read one page of a paginated JSON API: its records, and its count if any.
 
     `results_key` is the path to the records (see get_path), with fallbacks
-    such as "results|items"; None means the page itself is the list. An
-    explicit null there is an empty page, and so is an empty body (page
-    None, such as a 204). `count_key` is the path to the total record count:
-    a whole number, or digits as text; anything else counts as no count.
+    such as "results|items"; the default, RESULTS, tries the usual names
+    and also takes a page that is itself a list; None means the page is the
+    list. An explicit null at the path is an empty page, and so is an empty
+    body (page None, such as a 204). `count_key` is the path to the total
+    record count: a whole number, or digits as text; anything else counts
+    as no count.
 
     Raises ApiError, naming `url` if given, when the results path is missing
     or doesn't hold a list. Missing is an error, not an empty page, so a
@@ -133,7 +143,10 @@ def read_page(
     """
     if page is None:
         return Page([], None)  # an empty body, such as a 204 No Content
-    items = page if results_key is None else get_path(page, results_key, MISSING)
+    if results_key is None or (results_key == RESULTS and isinstance(page, list)):
+        items = page
+    else:
+        items = get_path(page, results_key, MISSING)
     if items is MISSING:
         raise ApiError(f"No {results_key!r} in the response", url=url)
     if items is None:
