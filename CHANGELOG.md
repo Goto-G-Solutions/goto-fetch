@@ -12,6 +12,14 @@ Each release lists what changed for people using the package. The format follows
 
 - The `gtfetch` command: `gtfetch explore` copies the explorer notebook next to you, if there isn't one, and opens it in marimo; `gtfetch docs [page]` prints a guide. The notebook now ships inside the package (`goto_fetch/explorer/notebook.py`), so it matches the installed version, and its header no longer pins a local checkout, so `uvx marimo edit --sandbox <raw url>` works on the file alone. `uvx --from "goto-fetch[explorer,duckdb]" gtfetch explore` runs it with nothing installed.
 
+### Fixed
+
+- `to_frame` turned an integer beside floats into a float even when a float can't hold it exactly: `2**53 + 1` came back as `9007199254740992.0`. Such a column is now text, with a "text" warning, as the warehouses already did.
+- A next link that isn't a URL, such as one with a port that isn't a number, raised a bare `ValueError`; it is now an `ApiError`. An `ApiError` naming such a URL raised while it was being built, hiding the real failure; `redact_url` now never raises, and shows a URL it can't read as `***`.
+- `redact_url` left two secrets in view: a token written as the username (`https://token@host/`, now `https://***@host/`) and a sensitive value in a fragment (`#access_token=...`).
+- `records(max_pages=..., incremental=...)` was refused only when the first record was asked for. `records()` now checks its arguments, and starts its paging style and tracker, at the call; requests are still sent only as records are read.
+- A warehouse `write` with no records, deletions to remove and a `key` the table lacks raised a bare `KeyError`; it is now a `ValueError` that names the table and the key.
+
 ## [0.1.1] - 2026-10-18
 
 ### Fixed

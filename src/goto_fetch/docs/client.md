@@ -106,4 +106,4 @@ A transport you pass stays open when the client closes, so several clients can s
 
 - Endpoints are joined to the base URL: `"/items/"` and `"items/"` both work. An absolute URL is used as given.
 - `max_pages` and `incremental` can't be used together: a run cut short looks complete to a tracker.
-- Keep secrets out of URLs (`?api_key=`): they are hidden in errors and logs, but prefer a header ([auth](auth.md)).
+- Keep secrets out of URLs (`?api_key=`, `token@host`): they are hidden in errors and logs, but prefer a header ([auth](auth.md)). A URL that can't be read at all shows as `***`.

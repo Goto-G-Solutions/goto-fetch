@@ -87,6 +87,20 @@ def test_to_frame_turns_ints_beside_floats_into_floats(backend):
     assert [r["n"] for r in rows[1:]] == [1.0, 2.5]
 
 
+def test_to_frame_stores_integers_a_float_cant_hold_beside_floats_as_text(
+    backend, caplog
+):
+    # Regression: 2**53 + 1 beside 1.5 became 9007199254740992.0, a digit
+    # lost without a word.
+    big = 2**53 + 1
+    rows = rows_of(to_frame([{"v": big}, {"v": 1.5}], backend))
+    assert [r["v"] for r in rows] == [str(big), "1.5"]
+    assert (
+        "Column 'v' holds integers too large for a float beside floats; "
+        "storing it as text" in caplog.messages
+    )
+
+
 def test_to_frame_stores_integers_beyond_64_bits_as_text(backend, caplog):
     # Regression: pyarrow raised OverflowError on these.
     big = 2**70

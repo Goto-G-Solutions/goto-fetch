@@ -225,3 +225,15 @@ def test_the_urllib3_transport_asks_for_compressed_replies():
     with serve(answer) as base:
         Client(base).get_json("/x/")
     assert "gzip" in seen[0]
+
+
+@pytest.mark.parametrize("link", ["http://api.test:abc/x", "http://[bad/x"])
+def test_a_next_link_that_cant_be_read_is_an_api_error(link):
+    # Regression: a malformed next link escaped as a bare ValueError from
+    # urlsplit, which code catching ApiError never saw.
+    api = FakeApi(
+        lambda request: http.Response(200, json={"results": [1], "next": link})
+    )
+    with pytest.raises(ApiError, match="isn't a URL this client can read"):
+        list(api.client().records("/items"))
+    assert len(api.calls) == 1

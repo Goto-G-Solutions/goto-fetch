@@ -194,7 +194,13 @@ class Client:
         method = method.upper()
         url = _with_params(self.url(endpoint), kwargs.pop("params", None))
         own = kwargs.pop("headers", None) or {}
-        at_home = not self.base_url or keeps_credentials(self.base_url, url)
+        try:
+            at_home = not self.base_url or keeps_credentials(self.base_url, url)
+        except ValueError as exc:
+            # A next link is the server's own text, and may not be a URL.
+            raise ApiError(
+                f"{method} {url} isn't a URL this client can read: {exc}", url=url
+            ) from exc
         if at_home:
             # Merged by name without regard to case, the call's own winning.
             headers = Headers(self.headers)
@@ -535,15 +541,18 @@ class Client:
         if incremental is not None:
             stream = self._in_context(incremental.track(stream))
         if convert is None:
-            yield from stream
-            return
-        for index, item in enumerate(stream):
-            try:
-                yield convert(item)
-            except (ValueError, TypeError) as exc:
-                raise ApiError(
-                    f"Record {index} doesn't fit {name}: {exc}", url=url
-                ) from exc
+            return stream
+
+        def converted() -> Iterator[Any]:
+            for index, item in enumerate(stream):
+                try:
+                    yield convert(item)
+                except (ValueError, TypeError) as exc:
+                    raise ApiError(
+                        f"Record {index} doesn't fit {name}: {exc}", url=url
+                    ) from exc
+
+        return converted()
 
     def _page_reader(
         self, results_key: str | None, count_key: str | None

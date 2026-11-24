@@ -20,7 +20,10 @@ BACKENDS = ("polars", "pandas", "pyarrow")
 """The dataframe libraries default_backend chooses from, in order."""
 
 INT64 = range(-(2**63), 2**63)
-"""The integers every dataframe library can hold as integers."""
+"""The integers every dataframe library, and every database, can hold as integers."""
+
+FLOAT_EXACT = 2**53
+"""The largest integer a float holds exactly: beyond it, a float would lose digits."""
 
 
 def default_backend() -> str:
@@ -58,7 +61,9 @@ def to_frame(records: Sequence[Any], backend: str | ModuleType | None = None) ->
     top-level columns. Values of mixed types become text, and a warning
     names where, such as "meta.size" or "tags[*]". Ints and floats count as
     one type, numbers: ints beside floats become floats. Integers too large
-    for 64 bits become text, with a warning, so no digit is lost.
+    for 64 bits become text, with a warning, and so do integers beside
+    floats that a float can't hold exactly (beyond 2**53), so no digit is
+    lost.
     """
 
     def kinds(values: Iterable[Any]) -> set[type]:
@@ -133,7 +138,23 @@ def to_frame(records: Sequence[Any], backend: str | ModuleType | None = None) ->
                 data={"column": where, "reason": "integers too large for 64 bits"},
             )
             return [as_text(v) for v in values]
-        if ints and len(ints) < sum(v is not None for v in values):
+        beside_floats = ints and len(ints) < sum(v is not None for v in values)
+        if beside_floats and any(abs(v) > FLOAT_EXACT for v in ints):
+            # As floats these would lose digits; text keeps every one.
+            log_event(
+                logger,
+                logging.WARNING,
+                "text",
+                "Column %r holds integers too large for a float beside floats; "
+                "storing it as text",
+                where,
+                data={
+                    "column": where,
+                    "reason": "integers too large for a float beside floats",
+                },
+            )
+            return [as_text(v) for v in values]
+        if beside_floats:
             # Ints beside floats become floats, as the libraries do themselves;
             # inside a list some of them refuse the mix.
             return [float(v) if isinstance(v, int) else v for v in values]

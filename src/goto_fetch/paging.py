@@ -44,6 +44,21 @@ def with_query(url: str, name: str, value: object) -> str:
     return set_param(url, name, value)
 
 
+def _resolve(current: str, link: str) -> str:
+    """`link` as an absolute URL, a relative one resolved against `current`.
+
+    A link is the server's own text and may not be a URL at all; that is
+    an ApiError, like any other answer that can't be used.
+    """
+    try:
+        return urljoin(current, link)
+    except ValueError as exc:
+        raise ApiError(
+            f"The next link {link} isn't a URL this client can read: {exc}",
+            url=current,
+        ) from exc
+
+
 def request_key(request: Any) -> Hashable:
     """Tell requests apart for paginate's loop check: by default, by value.
 
@@ -96,7 +111,7 @@ def paginate(
         yield page
         following = next_request(page, request)
         if isinstance(following, str) and isinstance(request, str) and following:
-            following = urljoin(request, following)
+            following = _resolve(request, following)
         # Only None and "" end the run: a cursor of 0 is a request like any.
         request = None if following == "" else following
 
@@ -232,7 +247,7 @@ def follow(
         if isinstance(following, str):
             if not following:
                 return None
-            return dataclasses.replace(request, url=urljoin(request.url, following))
+            return dataclasses.replace(request, url=_resolve(request.url, following))
         return following
 
     return next_request

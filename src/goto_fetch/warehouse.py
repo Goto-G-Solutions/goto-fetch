@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from .errors import ApiError
+from .frames import FLOAT_EXACT, INT64
 from .incremental import ReportsDeletions
 from .logs import log_event
 from .models import as_dict
@@ -84,10 +85,6 @@ class Warehouse(Protocol):
 
 Kind = Literal["boolean", "integer", "float", "text", "json"]
 """What a column holds, whatever the database calls it."""
-
-INT64 = range(-(2**63), 2**63)
-FLOAT_EXACT = 2**53
-"""The largest integer a float holds exactly: beyond it, a float would lose digits."""
 
 
 def kind_of(values: Iterable[Any]) -> Kind | None:
@@ -506,6 +503,12 @@ def write_run(
                     tables.load(connection, table, part, fields, after, key)
                 if gone:
                     column = matching(after, key or "")
+                    if column not in after:
+                        # A caller's mistake, like check_write's.
+                        raise ValueError(
+                            f"{table!r} has no column {key!r}, so deleted_by "
+                            "can't find the rows to remove"
+                        )
                     if keys := keys_of_kind(gone, after[column]):
                         tables.delete(connection, table, column, keys)
     _log_stored(table, run.count)

@@ -6,7 +6,7 @@ Records are parsed JSON: lists of dicts. These functions reshape them without a 
 ## What it handles for you
 
 - **Paths:** `get_path` reads nested values with fallbacks (`"user.email|contact.email"`), wildcards (`"tags[*].name"`) and quoted keys (`'["@odata.id"]'`); a missing value is `None`, never an error.
-- **Messy types:** `to_frame` evens out mixed types at every depth before building the frame, so polars, pandas and pyarrow all take the same records. Mixed values become text with a warning naming the column; integers too large for 64 bits become text, so no digit is lost.
+- **Messy types:** `to_frame` evens out mixed types at every depth before building the frame, so polars, pandas and pyarrow all take the same records. Mixed values become text with a warning naming the column; integers too large for 64 bits become text, and so do integers beside floats that a float can't hold exactly (beyond 2**53), so no digit is lost.
 
 ## Examples
 
