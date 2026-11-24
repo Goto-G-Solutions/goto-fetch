@@ -48,7 +48,7 @@ assert api.queries == [{}, {"page": "2"}, {"page": "3"}]
 - `max_pages`: stop early, to look at the first few pages.
 - `incremental`: fetch only what changed (see [incremental](incremental.md)).
 
-A client's headers and `auth` stay on its API's host. A request to another host, such as an absolute next link an API returns, goes out with the call's own headers only and unsigned, and a `withheld` warning says so; if an API really pages across hosts, pass the credential to that host yourself. A client made without a `base_url` has no home host, and sends them everywhere.
+A client stays on its API's host. A request to another host (another host name or port, or a step down from https to http), such as an absolute next link an API returns, raises `ApiError` before anything is sent: the client's credentials don't go there, and that host's records don't come back among this API's. If an API really pages across hosts, pass `Client(off_host="unsigned")`: such a request then goes out with the call's own headers only, without the client's headers and `auth`, and a `withheld` warning says so. A client made without a `base_url` has no home host: it goes anywhere, and sends its headers and `auth` everywhere.
 
 `Client(rate_limit=RateLimit(2))` keeps every request to two a second, retries and token requests included, for a server that can't take a fast run; `RateLimit(2, burst=5)` lets five go at once after a quiet spell, and one `RateLimit` passed to several clients is one budget between them. The timeout is 20 seconds at each stage (connecting, and each read) unless `timeout=` says otherwise: a number for both, or `Timeout(connect=5, read=60)` to set them apart.
 

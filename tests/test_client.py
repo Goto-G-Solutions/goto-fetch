@@ -142,6 +142,7 @@ def test_a_client_s_headers_and_auth_stay_on_its_own_host():
         headers={"Authorization": "Bearer s"},
         auth=Signs(),
         transport=FakeApi(answer),
+        off_host="unsigned",
     )
     assert list(client.records("/items/")) == [1, 2]
     assert seen == [("api.test", "Bearer s", "yes"), ("other.test", None, None)]
@@ -149,7 +150,12 @@ def test_a_client_s_headers_and_auth_stay_on_its_own_host():
 
 def test_a_request_to_another_host_keeps_the_call_s_own_headers():
     transport = Recording()
-    client = Client("http://h", headers={"Authorization": "A"}, transport=transport)
+    client = Client(
+        "http://h",
+        headers={"Authorization": "A"},
+        transport=transport,
+        off_host="unsigned",
+    )
     client.request("GET", "https://other/x", headers={"X-Trace": "1"})
     sent = transport.sent[0][0].headers
     assert "Authorization" not in sent and sent["X-Trace"] == "1"
@@ -237,3 +243,27 @@ def test_a_next_link_that_cant_be_read_is_an_api_error(link):
     with pytest.raises(ApiError, match="isn't a URL this client can read"):
         list(api.client().records("/items"))
     assert len(api.calls) == 1
+
+
+def test_a_next_link_on_another_host_is_refused_before_it_is_sent():
+    # Regression: records() followed a next link to another host and
+    # mixed that host's records in with the API's own (issue #26).
+    def answer(request):
+        if request.url.host == "api.test":
+            return http.Response(
+                200, json={"results": [1], "next": "http://other.test/items?page=2"}
+            )
+        return http.Response(200, json={"results": [2], "next": None})
+
+    api = FakeApi(answer)
+    records = api.client().records("/items")
+    assert next(records) == 1
+    with pytest.raises(ApiError, match="refuses to leave its API's host") as raised:
+        next(records)
+    assert raised.value.url == "http://other.test/items?page=2"
+    assert [call.url.host for call in api.calls] == ["api.test"]
+
+
+def test_off_host_takes_only_refuse_or_unsigned():
+    with pytest.raises(ValueError, match="off_host must be 'refuse' or 'unsigned'"):
+        Client("http://api.test", off_host="sign")

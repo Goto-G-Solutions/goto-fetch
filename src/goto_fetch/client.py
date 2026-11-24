@@ -4,7 +4,7 @@ import gzip
 import logging
 import time
 from collections.abc import Callable, Iterator, Mapping
-from typing import Any, NamedTuple, Protocol, Self, runtime_checkable
+from typing import Any, Literal, NamedTuple, Protocol, Self, runtime_checkable
 
 from .checks import ResponseCheck, as_problem
 from .decode import Decoder, json_decoder
@@ -81,11 +81,18 @@ class Client:
     `auth` signs every request, for tokens that change, such as
     TokenRefresh: any Auth (see goto_fetch.http). Its own URLs (login,
     refresh) follow the endpoint rules. A fixed token can go in `headers`
-    instead (token_headers). Both stay on the API's own host: a request to
-    another host, such as an absolute next link elsewhere, goes out with
-    the call's own headers only and unsigned, and a "withheld" warning
-    says so. A client with no `base_url` has no home host, and sends them
-    everywhere.
+    instead (token_headers).
+
+    `off_host` says what happens to a request for another host than
+    `base_url`'s (another host name or port, or a step down from https to
+    http), such as an absolute next link that leads elsewhere. "refuse"
+    (the default) raises ApiError before anything is sent: neither the
+    client's credentials go there, nor that host's records come back into
+    this API's results. "unsigned" sends it with the call's own headers
+    only, without the client's headers and auth, and a "withheld" warning
+    says so, for an API that really pages across hosts. A client with no
+    `base_url` has no home host: it goes anywhere, and sends its headers
+    and auth everywhere.
 
     `transport` sends the requests: Urllib3Transport by default, or any
     Transport, such as Httpx2Transport for HTTP/2 or an httpx2.Client of
@@ -125,7 +132,13 @@ class Client:
         name: str | None = None,
         check: ResponseCheck | None = None,
         rate_limit: RateLimit | None = None,
+        off_host: Literal["refuse", "unsigned"] = "refuse",
     ) -> None:
+        if off_host not in ("refuse", "unsigned"):
+            raise ValueError(
+                f"off_host must be 'refuse' or 'unsigned', got {off_host!r}"
+            )
+        self.off_host = off_host
         self.base_url = base_url
         self.headers = dict(headers or {})
         self.timeout = Timeout.of(timeout)
@@ -205,6 +218,16 @@ class Client:
             # Merged by name without regard to case, the call's own winning.
             headers = Headers(self.headers)
             headers.update(own)
+        elif self.off_host == "refuse":
+            # Before anything is sent: what that host answered would pass
+            # for this API's own data.
+            raise ApiError(
+                f"{method} {url} is on another host than {self.base_url}, and "
+                "this client refuses to leave its API's host; if the API "
+                "really pages across hosts, pass Client(off_host='unsigned') "
+                "to send it without this client's headers and auth",
+                url=url,
+            )
         else:
             # The client's headers and auth belong to its API's host; a URL
             # elsewhere, such as a next link, must not carry them.

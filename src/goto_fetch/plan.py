@@ -53,6 +53,9 @@ class FetchPlan:
     paging="keyset" pages by the same `change_field`, `change_param` and
     `change_in`, with `limit` records a page.
 
+    `off_host` is Client's: "refuse" (the default) stops a next link that
+    leads to another host, and "unsigned" follows it without credentials.
+
     `rate_limit` keeps every request to that many a second (0, the default,
     for no limit), for servers that can't take a fast run.
     """
@@ -63,6 +66,7 @@ class FetchPlan:
     body: Any = None
     retry: bool | None = None
     trailing_slash: bool = False
+    off_host: Literal["refuse", "unsigned"] = "refuse"
     timeout: float = 20.0
     rate_limit: float = 0.0
     auth: Literal["none", "header", "refresh", "client"] = "none"
@@ -158,6 +162,8 @@ class FetchPlan:
             options["rate_limit"] = Call(RateLimit, (self.rate_limit,))
         if self.trailing_slash:
             options["trailing_slash"] = True
+        if self.off_host != "refuse":
+            options["off_host"] = self.off_host
         if self.error_path:
             options["check"] = Call(error_at, (self.error_path,))
         return Call(Client, (self.base_url,), options)

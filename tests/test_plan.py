@@ -540,7 +540,13 @@ def test_an_incremental_plan_without_a_filter_is_written_without_one():
 def test_a_script_writes_only_the_settings_that_differ_from_the_defaults():
     plain = FetchPlan("http://h/api", "/a").script()
     assert "results_key" not in plain and "trailing_slash" not in plain
+    assert "off_host" not in plain
     strict = FetchPlan(
-        "http://h/api", "/a/", trailing_slash=True, results_key="rows"
+        "http://h/api",
+        "/a/",
+        trailing_slash=True,
+        results_key="rows",
+        off_host="unsigned",
     ).script()
     assert "trailing_slash=True" in strict and "results_key='rows'" in strict
+    assert "off_host='unsigned'" in strict

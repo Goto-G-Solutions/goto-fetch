@@ -138,7 +138,7 @@ def test_a_request_to_another_host_logs_that_credentials_were_withheld():
     collect = Collect()
     api = replies(http.Response(200, json={}))
     with logging_to(collect, "WARNING"):
-        api.client(headers={"Authorization": "x"}).request(
+        api.client(headers={"Authorization": "x"}, off_host="unsigned").request(
             "GET", "https://other.test/x"
         )
     [(_, data)] = [e for e in collect.events() if e[0] == "withheld"]
