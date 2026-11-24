@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from .docs.__main__ import main as docs_main
-from .explorer import copy_notebook, open_notebook
+from .explorer import copy_notebook, open_notebook, require_marimo
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -42,13 +42,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "docs":
         return docs_main(["--path"] if args.path else [args.page] if args.page else [])
-    if copy_notebook(args.path):
-        print(f"Wrote {args.path}; edit it as you like")
     try:
-        return open_notebook(args.path)
+        # Before anything is written: a notebook that can't be opened
+        # shouldn't be left behind.
+        require_marimo()
+        if copy_notebook(args.path):
+            print(f"Wrote {args.path}; edit it as you like")
     except ImportError as error:
         print(error, file=sys.stderr)
         return 2
+    except OSError as error:
+        print(f"Can't write {args.path}: {error}", file=sys.stderr)
+        return 2
+    return open_notebook(args.path)
 
 
 if __name__ == "__main__":

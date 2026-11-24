@@ -77,6 +77,9 @@ def test_explore_without_marimo_names_the_extra(tmp_path, monkeypatch, capsys):
     )
     assert main(["explore"]) == 2
     assert "goto-fetch[explorer]" in capsys.readouterr().err
+    # Regression: the notebook was written first, so a run that couldn't
+    # open it still left explorer.py behind and said "Wrote".
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_the_shipped_notebook_runs_on_its_own():
@@ -91,3 +94,20 @@ def test_help_exits_cleanly():
     with pytest.raises(SystemExit) as left:
         main(["explore", "--help"])
     assert left.value.code == 0
+
+
+def test_explore_says_why_it_cant_write_the_notebook(tmp_path, capsys, ran):
+    # Regression: a folder that isn't there gave a bare traceback.
+    assert main(["explore", str(tmp_path / "missing" / "explorer.py")]) == 2
+    assert "Can't write" in capsys.readouterr().err
+    assert ran == []
+
+
+def test_explore_doesnt_write_through_a_dangling_link(tmp_path, ran):
+    # Regression: exists() is false for a link that points nowhere, so the
+    # notebook was written to wherever the link led.
+    target = tmp_path / "elsewhere.py"
+    link = tmp_path / "explorer.py"
+    link.symlink_to(target)
+    assert main(["explore", str(link)]) == 0
+    assert not target.exists()

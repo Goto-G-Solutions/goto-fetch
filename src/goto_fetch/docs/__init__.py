@@ -37,10 +37,10 @@ def read(page: str = INDEX) -> str:
     """The text of one page, by name ("paging"), or the index.
 
     "skill" gives SKILL.md, the Agent Skill. Raises ValueError, listing the
-    pages, for a name that isn't one.
+    pages, for a name that isn't one. Only the pages shipped here can be
+    read: a name is looked up in pages(), never used as a path.
     """
     name = "SKILL" if page.lower() == "skill" else page.removesuffix(".md")
-    found = path() / f"{name}.md"
-    if not found.is_file():
+    if name != "SKILL" and name not in pages():
         raise ValueError(f"No page {page!r}; the pages are: {', '.join(pages())}")
-    return found.read_text(encoding="utf-8")
+    return (path() / f"{name}.md").read_text(encoding="utf-8")
