@@ -1,6 +1,7 @@
 """to_frame and latest_per_key, run once for each installed dataframe library."""
 
 import math
+import subprocess
 import sys
 from typing import Any
 
@@ -204,3 +205,15 @@ def test_a_warning_names_a_nested_key_holding_a_dot_in_quotes(backend, caplog):
     with caplog.at_level("WARNING", logger="goto_fetch"):
         to_frame(records, backend)
     assert "Column 'meta[\"a.b\"]' mixes" in caplog.text
+
+
+def test_importing_the_package_doesnt_load_narwhals():
+    # Regression: frames imported narwhals at the top, so every
+    # `import goto_fetch` paid for it (about half the import time), even
+    # in code that only fetches. A fresh interpreter, since this one has
+    # already built frames.
+    code = "import sys, goto_fetch; print('narwhals' in sys.modules)"
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.strip() == "False"
