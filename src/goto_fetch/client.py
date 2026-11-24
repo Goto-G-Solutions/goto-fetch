@@ -4,6 +4,7 @@ import gzip
 import logging
 import time
 from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from typing import Any, Literal, NamedTuple, Protocol, Self, runtime_checkable
 
 from .checks import ResponseCheck, as_problem
@@ -116,6 +117,10 @@ class Client:
     from pieces you build that log during its requests: useful when one
     pipeline talks to several APIs. See enable_logging.
 
+    `sleep` waits between retries: time.sleep unless given. Tests pass a
+    function that records the waits instead (FakeApi.client() does), so
+    they can check what the retry policy asked for without waiting.
+
     Use it in a `with` block, or call close() when done.
     """
 
@@ -134,12 +139,14 @@ class Client:
         check: ResponseCheck | None = None,
         rate_limit: RateLimit | None = None,
         off_host: Literal["refuse", "unsigned"] = "refuse",
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if off_host not in ("refuse", "unsigned"):
             raise ValueError(
                 f"off_host must be 'refuse' or 'unsigned', got {off_host!r}"
             )
         self.off_host = off_host
+        self.sleep = sleep
         self.base_url = base_url
         self.headers = dict(headers or {})
         self.timeout = Timeout.of(timeout)
@@ -199,7 +206,7 @@ class Client:
         whatever the method. Other keyword arguments build the Request:
         params=, headers=, json=, data= (a form, or bytes) or content=.
         """
-        with client_context(self.name):
+        with client_context(self.name), self._stamping(method.upper()):
             return self._send(method, endpoint, retry, kwargs)
 
     def _send(
@@ -319,7 +326,7 @@ class Client:
                 wait,
                 data={**details, "wait": wait},
             )
-            time.sleep(wait)
+            self.sleep(wait)
 
     def _exchange(self, request: Request, auth: Auth | None) -> Response:
         """Send `request` through `auth`, if any, and the transport.
@@ -388,6 +395,27 @@ class Client:
                 },
             )
 
+    @contextmanager
+    def _stamping(self, method: str) -> Iterator[None]:
+        """Give an ApiError leaving the block the `method` and this client's name.
+
+        Only where it has none: an auth names its own token request, and a
+        piece of your own may name what it likes.
+        """
+        try:
+            yield
+        except ApiError as error:
+            if error.method is None:
+                error.method = method
+            if error.client is None:
+                error.client = self.name
+            raise
+
+    def _stamped(self, records: Iterator[Any], method: str) -> Iterator[Any]:
+        """Yield from `records`, stamping an ApiError they raise (see _stamping)."""
+        with self._stamping(method):
+            yield from records
+
     def _in_context(self, records: Iterator[Any]) -> Iterator[Any]:
         """Yield from `records`, stamping their log lines with this client's name.
 
@@ -430,6 +458,8 @@ class Client:
                 f"{where} returned HTTP {response.status_code} with an empty body ({kind})",
                 url=str(response.url),
                 status=response.status_code,
+                method=response.request.method,
+                client=self.name,
             )
         if content[:2] == b"\x1f\x8b":
             try:
@@ -439,6 +469,8 @@ class Client:
                     f"{where} sent a gzip body that won't unpack: {exc}",
                     url=str(response.url),
                     status=response.status_code,
+                    method=response.request.method,
+                    client=self.name,
                 ) from exc
         try:
             return self.decode(content)
@@ -448,6 +480,8 @@ class Client:
                 f"{content[:120]!r}",
                 url=str(response.url),
                 status=response.status_code,
+                method=response.request.method,
+                client=self.name,
             ) from exc
 
     def records(
@@ -554,9 +588,10 @@ class Client:
             )
 
         start = PageRequest(url, method.upper(), json)
-        if incremental is not None:
-            start = incremental.apply(start)
-        first, next_link = (paging or NextLink()).begin(start, read)
+        with self._stamping(start.method):
+            if incremental is not None:
+                start = incremental.apply(start)
+            first, next_link = (paging or NextLink()).begin(start, read)
         step = follow(next_link)
 
         def next_request(timed: _Timed, request: PageRequest) -> PageRequest | None:
@@ -594,7 +629,7 @@ class Client:
         if incremental is not None:
             stream = self._in_context(incremental.track(stream))
         if convert is None:
-            return stream
+            return self._stamped(stream, start.method)
 
         def converted() -> Iterator[Any]:
             for index, item in enumerate(stream):
@@ -605,7 +640,7 @@ class Client:
                         f"Record {index} doesn't fit {name}: {exc}", url=url
                     ) from exc
 
-        return converted()
+        return self._stamped(converted(), start.method)
 
     def _page_reader(
         self, results_key: str | None, count_key: str | None

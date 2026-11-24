@@ -61,6 +61,12 @@ def test_a_fake_api_s_client_retries_without_waiting_unless_told_otherwise():
     )
 
 
+def test_a_fake_api_records_the_waits_its_client_s_retries_asked_for():
+    api = replies(http.Response(429, headers={"Retry-After": "3"}), 503, 200)
+    api.client().request("GET", "/x")
+    assert api.waits == [3.0, 0.0]
+
+
 def test_replies_take_responses_status_codes_and_exceptions_in_order():
     api = replies(
         http.ConnectError("refused"), 503, http.Response(200, json={"ok": True})

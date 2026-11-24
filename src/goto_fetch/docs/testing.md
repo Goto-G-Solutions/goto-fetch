@@ -18,7 +18,7 @@
 
 `records` is a list, or a number n for the records 0 to n-1; `changes_api` and `keyset_api` take a list of dicts, since they read a field of each. Both read their list on every request, so a test can change the data between runs, or during one.
 
-Each returns a `FakeApi`, which remembers every request (`.calls`, `.paths`, `.queries`, `.bodies`). `.client()` gives a `Client` wired to it, whose retries don't wait.
+Each returns a `FakeApi`, which remembers every request (`.calls`, `.paths`, `.queries`, `.bodies`). `.client()` gives a `Client` wired to it, whose retries don't wait: the seconds its retry policy asked for go to `.waits` instead, so a test can check them (`assert api.waits == [2.0]` after a `Retry-After: 2`).
 
 ## Examples
 

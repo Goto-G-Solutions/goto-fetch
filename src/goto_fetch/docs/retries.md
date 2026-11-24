@@ -57,3 +57,4 @@ assert time.monotonic() - started >= 0.1  # three requests, at most 20 a second
 
 - Retries multiply time: 3 tries with growing waits can turn one slow endpoint into minutes. Watch the "retry" warnings ([logging](logging.md)).
 - A POST that only reads (a search) needs `retry=True`, or it fails on the first hiccup.
+- To test the waits themselves, don't sleep: `FakeApi.client()` records them in `api.waits`, and `Client(sleep=...)` takes any function in place of `time.sleep`.

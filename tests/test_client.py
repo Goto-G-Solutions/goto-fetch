@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from goto_fetch import ApiError, Client, http
+from goto_fetch import ApiError, Client, Retry, http
 from goto_fetch.testing import FakeApi, replies, serve
 
 OK = http.Response(200, json={"ok": True})
@@ -267,3 +267,58 @@ def test_a_next_link_on_another_host_is_refused_before_it_is_sent():
 def test_off_host_takes_only_refuse_or_unsigned():
     with pytest.raises(ValueError, match="off_host must be 'refuse' or 'unsigned'"):
         Client("http://api.test", off_host="sign")
+
+
+# What an ApiError says about the request that failed
+
+
+def test_a_failed_request_names_its_method_and_its_client():
+    api = replies(503)
+    with pytest.raises(ApiError) as raised:
+        api.client(name="crm").request("patch", "/items/1")
+    assert (raised.value.method, raised.value.client) == ("PATCH", "crm")
+
+
+def test_a_client_without_a_name_leaves_the_error_s_client_empty():
+    with pytest.raises(ApiError) as raised:
+        replies(404).client().get_json("/items/1")
+    assert (raised.value.method, raised.value.client) == ("GET", None)
+
+
+@pytest.mark.parametrize(
+    ("body", "options"),
+    [
+        ({"rows": [1]}, {"results_key": "results"}),
+        ({"results": [{"id": "x"}]}, {"model": lambda record: int(record["id"])}),
+        ({"results": [1], "next": 5}, {}),
+    ],
+    ids=["no-results-key", "record-doesnt-fit", "paging-finds-a-bad-link"],
+)
+def test_an_error_from_reading_pages_names_the_method_and_client_too(body, options):
+    # These are raised by the pieces records() is built from, not by a
+    # request, so they are named on their way out of the client.
+    api = replies(http.Response(200, json=body))
+    client = api.client(name="crm")
+    with pytest.raises(ApiError) as raised:
+        list(client.records("/search", method="POST", json={"q": 1}, **options))
+    assert (raised.value.method, raised.value.client) == ("POST", "crm")
+
+
+def test_an_error_keeps_the_method_and_client_a_piece_gave_it():
+    def check(response):
+        raise ApiError("refused", method="PUT", client="billing")
+
+    api = replies(http.Response(200, json={}))
+    with pytest.raises(ApiError) as raised:
+        api.client(name="crm", check=check).get_json("/x")
+    assert (raised.value.method, raised.value.client) == ("PUT", "billing")
+
+
+def test_a_client_waits_between_retries_with_the_sleep_it_was_given():
+    waited = []
+    api = replies(http.Response(503, headers={"Retry-After": "2"}), 200)
+    client = Client(
+        "http://api.test", transport=api, retry=Retry(backoff=0), sleep=waited.append
+    )
+    assert client.request("GET", "/x").status_code == 200
+    assert waited == [2.0]

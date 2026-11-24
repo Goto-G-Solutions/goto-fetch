@@ -12,6 +12,8 @@ Each release lists what changed for people using the package. The format follows
 
 ### Added
 
+- `ApiError` says which request failed: `error.method`, and `error.client`, the name of the `Client` it went through. A `Client` fills them in for every `ApiError` that leaves it, those from paging styles, trackers and pieces of your own included.
+- `Client(sleep=...)` takes the function that waits between retries (`time.sleep` by default). `FakeApi.client()` passes one that records, so `api.waits` holds the seconds each retry would have waited.
 - `records(count_key=..., strict_count=True)` checks a run against the API's count: the count must stay the same on every page and equal the records received, or `CountMismatch` (an `ApiError`, with `count` and `records`) is raised. It is how to notice a page-number or offset API skipping a record because the data changed during the run.
 - The `gtfetch` command: `gtfetch explore` copies the explorer notebook next to you, if there isn't one, and opens it in marimo; `gtfetch docs [page]` prints a guide. The notebook now ships inside the package (`goto_fetch/explorer/notebook.py`), so it matches the installed version, and its header no longer pins a local checkout, so `uvx marimo edit --sandbox <raw url>` works on the file alone. `uvx --from "goto-fetch[explorer,duckdb]" gtfetch explore` runs it with nothing installed.
 

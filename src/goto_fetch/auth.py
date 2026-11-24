@@ -309,6 +309,9 @@ class TokenRefresh:
                 "login to fall back on. Paste new tokens.",
                 url=failed_at,
                 status=status,
+                # The refresh request's, if one was sent; else the Client
+                # fills in the method of the request that needed the token.
+                method=None if status is None else "POST",
             )
         url = self._url(self.login.token_url, against)
         _renewing("login", why if self._refresh is None else failure)
@@ -319,6 +322,7 @@ class TokenRefresh:
                 f"{response.text[:300]}",
                 url=url,
                 status=response.status_code,
+                method=response.request.method,
             )
         self._take(response)
 
@@ -328,13 +332,16 @@ class TokenRefresh:
             body = response.json()
         except ValueError as exc:
             raise ApiError(
-                f"{response.url} did not return JSON", url=str(response.url)
+                f"{response.url} did not return JSON",
+                url=str(response.url),
+                method=response.request.method,
             ) from exc
         access = get_path(body, self.access_key)
         if not isinstance(access, str):
             raise ApiError(
                 f"No access token at {self.access_key!r} in the reply",
                 url=str(response.url),
+                method=response.request.method,
             )
         lifetime = _seconds(get_path(body, self.expires_key))
         expires_at = None if lifetime is None else self.now() + lifetime

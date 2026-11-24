@@ -66,7 +66,12 @@ class ApiError(Exception):
 
     Raised after the retries run out, or at once for a failure that retrying
     can't fix, such as a 404. `url` is the URL that failed, and `status` is
-    the HTTP status code when there was a response.
+    the HTTP status code when there was a response. `method` is the HTTP
+    method of the request that failed, and `client` the name of the Client
+    it went through (Client(name=...)), so code that catches the error can
+    tell a failed write from a failed read, and one API from another. Each
+    is None when unknown; a Client fills in the two for every ApiError
+    that leaves it, including those raised by pieces of your own.
 
     Secrets in URLs, such as an API key passed as ?api_key=..., are
     redacted in the message and in `url`, so an error can be logged or
@@ -79,10 +84,14 @@ class ApiError(Exception):
         *,
         url: str | None = None,
         status: int | None = None,
+        method: str | None = None,
+        client: str | None = None,
     ) -> None:
         super().__init__(redact(message))
         self.url = None if url is None else redact_url(url)
         self.status = status
+        self.method = method
+        self.client = client
 
 
 @dataclass(frozen=True)

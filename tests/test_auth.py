@@ -149,6 +149,15 @@ def test_a_failed_login_names_the_url_and_its_status(mock_client):
     assert raised.value.status == 401
 
 
+def test_a_failed_login_names_its_own_method_not_the_request_s(mock_client):
+    # The request was a GET; what failed was the login it needed, a POST.
+    server = TokenServer(accept_logins=False)
+    auth = TokenRefresh("/token/refresh/", login=LOGIN)
+    with pytest.raises(ApiError) as raised:
+        mock_client(server, auth=auth, name="crm").get_json("/items/")
+    assert (raised.value.method, raised.value.client) == ("POST", "crm")
+
+
 def test_a_401_that_survives_renewal_fails_without_looping(mock_client):
     server = TokenServer(deny_all=True)
     auth = TokenRefresh("/token/refresh/", refresh="r0")
