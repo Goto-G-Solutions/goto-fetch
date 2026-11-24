@@ -62,7 +62,7 @@ def html_at(pages: dict[str, str]):
 def test_scrape_yields_one_row_per_item(mock_client):
     handler, _ = html_at({"/page/1": PAGE_1})
     client = mock_client(handler)
-    rows = list(scrape(client, "http://site.test/page/1", CONFIG, max_pages=1))
+    rows = list(scrape(client, "http://api.test/page/1", CONFIG, max_pages=1))
     assert rows == [
         {"title": "First", "url": "/post/1", "author": "Ann"},
         {"title": "Second", "url": "/post/2", "author": None},
@@ -72,7 +72,7 @@ def test_scrape_yields_one_row_per_item(mock_client):
 def test_scrape_follows_next_links_until_there_are_none(mock_client):
     handler, calls = html_at({"/page/1": PAGE_1, "/page/2": PAGE_2})
     client = mock_client(handler)
-    rows = list(scrape(client, "http://site.test/page/1", CONFIG))
+    rows = list(scrape(client, "http://api.test/page/1", CONFIG))
     assert [r["title"] for r in rows] == ["First", "Second", "Third"]
     assert calls == ["/page/1", "/page/2"]
 
@@ -96,5 +96,5 @@ def test_scrape_can_select_a_value_by_its_sibling_label(mock_client):
         },
     )
     handler, _ = html_at({"/": html})
-    rows = list(scrape(mock_client(handler), "http://site.test/", config))
+    rows = list(scrape(mock_client(handler), "http://api.test/", config))
     assert rows == [{"author": "Ann", "date": "2024-01"}]
