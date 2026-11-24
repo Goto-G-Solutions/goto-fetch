@@ -60,5 +60,6 @@ Its fields fill from `$API_BASE_URL`, `$API_CLIENT_ID` and the secret variables 
 
 ## Traps
 
+- A choice the plan doesn't know (`auth="bearer"`, `paging="ofset"`) is a `ValueError` naming the ones it does; `goto_fetch.plan.CHOICES` lists them all.
 - URLs are written into scripts as given: keep secrets out of them and use header auth.
 - `store()` keeps a tracked plan's state under the table's name, in the warehouse unless you pass `state=`.

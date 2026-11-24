@@ -5,7 +5,7 @@ import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from importlib import metadata
-from typing import Any, Literal
+from typing import Any, Literal, get_args, get_origin, get_type_hints
 
 from .auth import ClientCredentials, PasswordLogin, TokenRefresh, token_headers
 from .calls import LINE, Call, Name, Secret, build, names, reads_environment
@@ -104,6 +104,15 @@ class FetchPlan:
     table: str = ""
 
     def __post_init__(self) -> None:
+        for name, allowed in CHOICES.items():
+            value = getattr(self, name)
+            if value not in allowed:
+                # A value the plan doesn't know would otherwise fall
+                # through to a default: no auth, the first paging style.
+                raise ValueError(
+                    f"{name} must be one of {', '.join(map(repr, allowed))}; "
+                    f"got {value!r}"
+                )
         if (self.warehouse or self.track != "none") and not self.table:
             raise ValueError(
                 "A plan that stores or tracks needs a table name: where its "
@@ -420,6 +429,16 @@ class FetchPlan:
             # f-string, where a brace or quote in it would break the script.
             f'print(f"Stored {{count:,}} records in", {self.table!r})',
         ], used
+
+
+CHOICES: dict[str, tuple[str, ...]] = {
+    name: get_args(hint)
+    for name, hint in get_type_hints(FetchPlan).items()
+    if get_origin(hint) is Literal
+}
+"""The values each of FetchPlan's choices takes, read from its own type hints:
+{"auth": ("none", "header", "refresh", "client"), ...}. A plan refuses any
+other."""
 
 
 def _import_line(imported: list[str]) -> str:

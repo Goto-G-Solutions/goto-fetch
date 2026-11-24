@@ -25,6 +25,10 @@ Each release lists what changed for people using the package. The format follows
 - `redact_url` left two secrets in view: a token written as the username (`https://token@host/`, now `https://***@host/`) and a sensitive value in a fragment (`#access_token=...`).
 - `records(max_pages=..., incremental=...)` was refused only when the first record was asked for. `records()` now checks its arguments, and starts its paging style and tracker, at the call; requests are still sent only as records are read.
 - A warehouse `write` with no records, deletions to remove and a `key` the table lacks raised a bare `KeyError`; it is now a `ValueError` that names the table and the key.
+- `FetchPlan` took a choice it didn't know and fell back to a default in silence: `auth="bearer"` with a token built a client that sent no token. An unknown `auth`, `paging`, `track`, `warehouse_kind`, `cursor_in`, `change_in`, `credentials_in` or `off_host` is now a `ValueError` naming the allowed values.
+- `gtfetch explore` wrote the notebook before finding marimo missing, leaving a file it couldn't open; it now checks first. It no longer writes through a link that leads nowhere, and says why when it can't write.
+- `gtfetch docs <page>` (and `python -m goto_fetch.docs`) joined the page name to the guides' folder as typed, so `../../x` read any `.md` file; only the shipped pages can be read now.
+- The explorer's progress line showed the endpoint as typed, a key in its query included; its secrets are now hidden.
 
 ## [0.1.1] - 2026-10-18
 

@@ -6,6 +6,8 @@ the plans refused because they could lose records. goto_fetch.calls,
 which keeps the two in step, has its own tests in test_calls.
 """
 
+import ast
+import dataclasses
 import functools
 import json
 import sys
@@ -21,6 +23,7 @@ from goto_fetch import (
     Keyset,
     Retry,
     SqliteWarehouse,
+    explorer,
     http,
     package_requirement,
     select,
@@ -550,3 +553,52 @@ def test_a_script_writes_only_the_settings_that_differ_from_the_defaults():
     ).script()
     assert "trailing_slash=True" in strict and "results_key='rows'" in strict
     assert "off_host='unsigned'" in strict
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("auth", "bearer"),
+        ("paging", "ofset"),
+        ("track", "incrementl"),
+        ("warehouse_kind", "postgres"),
+        ("cursor_in", "header"),
+        ("change_in", "path"),
+        ("credentials_in", "query"),
+        ("off_host", "sign"),
+    ],
+)
+def test_a_choice_the_plan_doesnt_know_is_refused(field, value):
+    # Regression: an unknown choice fell through to the default, so
+    # auth="bearer" with a token built a client that sent no token.
+    with pytest.raises(ValueError, match=f"{field} must be one of .*got '{value}'"):
+        FetchPlan("http://h/api", "/a", **{field: value})
+
+
+def test_the_explorer_offers_exactly_the_choices_the_plan_knows():
+    # The notebook maps its labels to the plan's values in tables of its
+    # own, and no check presses Fetch: this reads the tables from its
+    # source, so a renamed value fails here and not for a user.
+    tree = ast.parse(explorer.NOTEBOOK.read_text(encoding="utf-8"))
+    [call] = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "FetchPlan"
+    ]
+    given = {keyword.arg: keyword.value for keyword in call.keywords}
+    assert set(given) <= {f.name for f in dataclasses.fields(FetchPlan)}
+
+    def values(expression: ast.expr) -> set[str]:
+        """The plan values a label-to-value table, its default, or an if-else can give."""
+        found: list[ast.expr] = []
+        for node in ast.walk(expression):
+            if isinstance(node, ast.Dict):
+                found += node.values
+            elif isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "get":
+                found.append(node.args[1])
+            elif isinstance(node, ast.IfExp):
+                found += [node.body, node.orelse]
+        return {ast.literal_eval(node) for node in found}
+
+    for field in ("auth", "paging", "track", "warehouse_kind"):
+        assert values(given[field]) == set(plan_module.CHOICES[field]), field

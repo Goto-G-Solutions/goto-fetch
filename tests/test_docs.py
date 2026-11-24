@@ -75,3 +75,14 @@ def test_the_skill_names_itself_and_says_when_to_use_it():
     front = skill.split("---")[1]
     assert "name: goto-fetch" in front
     assert "description:" in front
+
+
+@pytest.mark.parametrize("name", ["../docs/paging", "/etc/hosts", "PAGING", ""])
+def test_only_a_shipped_page_can_be_read(name, tmp_path):
+    # Regression: the name was joined to the guides' folder as typed, so
+    # "../../x" read any .md file on disk.
+    (tmp_path / "x.md").write_text("private")
+    with pytest.raises(ValueError, match="No page"):
+        docs.read(name)
+    with pytest.raises(ValueError, match="No page"):
+        docs.read(str(tmp_path / "x"))

@@ -26,6 +26,7 @@ with app.setup:
         FetchPlan,
         logging_to,
         package_requirement,
+        redact_url,
         select,
     )
 
@@ -599,7 +600,7 @@ def _(
 
     _started = time.monotonic()
     with (
-        mo.status.spinner(title="Fetching", subtitle=f"{method.value} {endpoint.value}") as _spin,
+        mo.status.spinner(title="Fetching", subtitle=f"{method.value} {redact_url(endpoint.value)}") as _spin,
         logging_to(_Spinner(_spin), "INFO"),
         logging_to(level="DEBUG" if verbose.value else "WARNING", http=verbose.value),
         plan.client() as _client,
