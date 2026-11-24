@@ -265,7 +265,7 @@ def test_changes_delivers_exactly_what_differs_from_the_last_run(runs):
 
     state, before = None, {}
     for source in runs:
-        changes = Changes("id", state=state)
+        changes = Changes("id", state=state, max_deleted=1.0)
         records = [{"id": k, "v": v} for k, v in source.items()]
         got = list(changes.track(records))
         assert got == [r for r in records if before.get(r["id"]) != r["v"]]

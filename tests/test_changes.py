@@ -63,7 +63,7 @@ def test_the_order_of_keys_in_a_record_doesnt_count_as_a_change():
 def test_keys_of_different_types_are_different_records():
     first = Changes("id")
     list(first.track([product(1)]))
-    second = again(first)
+    second = again(first, max_deleted=1.0)
     assert list(second.track([product("1")])) == [product("1")]
     assert second.deleted == [1]
 
@@ -151,6 +151,60 @@ def test_a_run_that_stops_early_keeps_the_old_state_and_knows_no_deletions():
     stream.close()
     assert second.state == first.state
     assert second.deleted is None
+
+
+def test_a_run_that_saw_none_of_the_last_runs_records_is_refused():
+    # Regression: an API answering a fault with an empty page looked like a
+    # complete run, so `deleted` listed every record and a warehouse write
+    # removed every row (issue #11).
+    first = Changes("id")
+    list(first.track([product(1), product(2)]))
+    second = again(first)
+    with pytest.raises(ApiError, match="saw none of the 2 records"):
+        list(second.track([]))
+    assert second.deleted is None
+    assert second.state == first.state
+
+
+def test_max_deleted_of_all_lets_every_record_go():
+    first = Changes("id")
+    list(first.track([product(1), product(2)]))
+    second = again(first, max_deleted=1.0)
+    assert list(second.track([])) == []
+    assert second.deleted == [1, 2]
+    assert second.state == {"hashes": {}}
+
+
+@pytest.mark.parametrize(
+    ("max_deleted", "kept", "allowed"),
+    [(1, 3, True), (1, 2, False), (0.5, 2, True), (0.5, 1, False), (0, 4, True)],
+    ids=["count-met", "count-passed", "share-met", "share-passed", "none-gone"],
+)
+def test_max_deleted_is_a_count_or_a_share_of_the_last_run(max_deleted, kept, allowed):
+    first = Changes("id")
+    list(first.track([product(i) for i in range(4)]))
+    second = again(first, max_deleted=max_deleted)
+    run = second.track([product(i) for i in range(kept)])
+    if allowed:
+        assert list(run) == []
+        assert second.deleted == list(range(kept, 4))
+    else:
+        with pytest.raises(ApiError, match=f"{4 - kept} of the 4 records"):
+            list(run)
+        assert second.deleted is None
+
+
+def test_a_first_run_with_no_records_is_not_refused():
+    # Nothing was held before, so nothing can be wrongly called deleted.
+    changes = Changes("id")
+    assert list(changes.track([])) == []
+    assert changes.deleted == []
+
+
+@pytest.mark.parametrize("bad", [-1, 1.5, -0.1, True, "half"])
+def test_max_deleted_takes_only_a_count_or_a_share(bad):
+    with pytest.raises(ValueError, match="max_deleted must be a count"):
+        Changes("id", max_deleted=bad)
 
 
 def test_a_record_without_the_key_stops_the_run():
