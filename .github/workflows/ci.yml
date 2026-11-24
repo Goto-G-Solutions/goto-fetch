@@ -25,6 +25,23 @@ jobs:
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - run: uv run --python ${{ matrix.python }} pytest
 
+  systems:
+    name: Tests on ${{ matrix.os }}
+    # The package writes SQLite and DuckDB files, temporary files and
+    # paths, which each system handles in its own way. One Python here:
+    # the versions are covered above, on Linux.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # no job pushes; keep the token out of .git
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - run: uv run --python 3.13 pytest
+
   core:
     name: Tests, with only the core dependencies
     # Proves the core works without the optional extras. Tests that need an

@@ -7,6 +7,7 @@ promises (staging a run in batches, names that differ only in case,
 refusing bad arguments), through read(), so the same test runs on both.
 """
 
+import dataclasses
 import math
 
 import pytest
@@ -14,26 +15,9 @@ import pytest
 from goto_fetch import (
     ApiError,
     Changes,
-    DuckDBWarehouse,
-    SqliteWarehouse,
-    Warehouse,
 )
 from goto_fetch.testing import MemoryWarehouse, check_warehouse
 from goto_fetch.warehouse import write_run
-
-
-@pytest.fixture(params=["duckdb", "sqlite"])
-def database(request, tmp_path):
-    """A database warehouse in a fresh file: DuckDB (if installed) and SQLite."""
-
-    def make() -> Warehouse:
-        path = tmp_path / f"shop-{len(list(tmp_path.iterdir()))}"
-        if request.param == "duckdb":
-            pytest.importorskip("duckdb")
-            return DuckDBWarehouse(path.with_suffix(".duckdb"))
-        return SqliteWarehouse(path.with_suffix(".db"))
-
-    return make
 
 
 def test_the_database_warehouses_keep_every_warehouse_promise(database):
@@ -195,7 +179,8 @@ def test_a_field_lands_in_an_existing_column_whatever_its_case(database):
 
 def test_a_negative_limit_is_refused_the_same_way_everywhere(database):
     # Regression: SQLite read -1 as no limit, DuckDB raised its own error,
-    # and MemoryWarehouse sliced off the last row.
+    # and MemoryWarehouse sliced off the last row. check_warehouse checks
+    # this too; it stays here as the named regression, with the message.
     for shop in (database(), MemoryWarehouse()):
         shop.write("t", [{"id": 1}, {"id": 2}])
         with pytest.raises(ValueError, match="limit can't be negative"):
@@ -275,9 +260,10 @@ def test_integers_joining_a_float_column_become_floats(database):
 
 
 def test_a_record_with_no_fields_is_refused(database):
-    # Regression: {} made a table with no columns impossible (the write
-    # reported records stored and stored none) and an INSERT with no
-    # columns fail in one with.
+    # Regression: a write holding {} either reported the record stored
+    # and stored nothing, or failed inside the database on an INSERT with
+    # no columns. check_warehouse checks this too; it stays here as the
+    # named regression, with the message.
     shop = database()
     shop.write("t", [{"id": 1}])
     with pytest.raises(ApiError, match="no fields"):
@@ -335,3 +321,31 @@ def test_an_empty_run_after_a_full_one_removes_no_row(database):
     with pytest.raises(ApiError, match="saw none of the 2 records"):
         shop.write("t", second.track([]), key="id", deleted_by=second)
     assert sorted(row["id"] for row in shop.read("t")) == [1, 2]
+
+
+def test_typed_records_are_stored_like_dicts(database):
+    @dataclasses.dataclass
+    class Order:
+        id: int
+        total: float
+
+    shop = database()
+    shop.write("orders", [Order(1, 2.5)])
+    assert shop.read("orders") == [{"id": 1, "total": 2.5}]
+
+
+class Gone:
+    """A finished tracker that lists `deleted`, whatever was fetched."""
+
+    def __init__(self, deleted):
+        self.deleted = deleted
+
+
+def test_deletions_are_removed_after_the_rows_are_stored(database):
+    # write_run stores the rows, then removes deleted_by's keys. No real
+    # tracker lists a key it also delivered, so only a key in both shows
+    # the order: removed last, it is gone. Stored last, it would stay.
+    shop = database()
+    shop.write("t", [{"id": 1}, {"id": 2}], key="id")
+    shop.write("t", [{"id": 2, "v": "new"}], key="id", deleted_by=Gone([2]))
+    assert shop.read("t") == [{"id": 1, "v": None}]
