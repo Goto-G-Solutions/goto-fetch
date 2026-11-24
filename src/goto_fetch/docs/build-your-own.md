@@ -15,6 +15,7 @@ Every piece you might replace sits behind a small interface, and the built-in on
 | how requests are sent | `Transport`: `send(request, timeout)`, `close()` | `check_transport` |
 | how requests are signed | `Auth`: `auth_flow(request)` | |
 | an auth's own URLs, resolved like endpoints | `ResolvesUrls`: `bind(resolve)` | |
+| an auth that can get its token up front, for `client.authenticate()` | `Renews`: `renew(against)` | |
 | what a record becomes | `model`: a class or function `records(model=...)` calls | |
 | which dataframe library | `backend`: a name or module for `to_frame` | |
 | what counts as a failed 200 | `ResponseCheck`: a function | |

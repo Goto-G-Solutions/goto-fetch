@@ -42,7 +42,7 @@ from .auth import (
     token_headers,
 )
 from .checks import ResponseCheck, error_at
-from .client import Client, ResolvesUrls
+from .client import Client, Renews, ResolvesUrls
 from .decode import Decoder, json_decoder
 from .duckdb_warehouse import DuckDBWarehouse
 from .errors import ApiError, Problem, redact_url
@@ -121,6 +121,7 @@ __all__ = [
     "Problem",
     "RateLimit",
     "RedactFilter",
+    "Renews",
     "ReportsDeletions",
     "Request",
     "ResolvesUrls",

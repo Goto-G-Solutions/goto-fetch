@@ -12,6 +12,7 @@ Each release lists what changed for people using the package. The format follows
 
 ### Added
 
+- `TokenRefresh(renew_on={401, 412})` names the statuses that mean "renew the token and send again", for an API that answers an expired session with something other than 401. `client.authenticate()` gets the token up front, so a wrong password fails before any other work; an auth of your own joins in with a `renew` method (`Renews`). `TokenServer(stale_status=...)` fakes such an API. The auth guide now states how a token request is retried: by the rule of the request that needed it.
 - `ApiError` says which request failed: `error.method`, and `error.client`, the name of the `Client` it went through. A `Client` fills them in for every `ApiError` that leaves it, those from paging styles, trackers and pieces of your own included.
 - `Client(sleep=...)` takes the function that waits between retries (`time.sleep` by default). `FakeApi.client()` passes one that records, so `api.waits` holds the seconds each retry would have waited.
 - `records(count_key=..., strict_count=True)` checks a run against the API's count: the count must stay the same on every page and equal the records received, or `CountMismatch` (an `ApiError`, with `count` and `records`) is raised. It is how to notice a page-number or offset API skipping a record because the data changed during the run.

@@ -6,7 +6,7 @@ import json
 import logging
 import threading
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Collection, Generator
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 from urllib.parse import urljoin
@@ -163,7 +163,10 @@ class TokenRefresh:
     `leeway` seconds), going by the reply's `expires_in` or, failing that,
     the token's own JWT expiry. A request that still gets a 401 renews the
     token once and is sent again. That is safe even for POST, because a 401
-    means the server refused the request before acting on it.
+    means the server refused the request before acting on it. `renew_on`
+    names the statuses that mean "renew and send again", for an API that
+    answers an expired session with another one: renew_on={401, 412}. Add
+    only statuses the server sends before it acts on the request.
 
     Renewing POSTs the refresh token to `refresh_url`, if there is a refresh
     token and a `refresh_url`. If the reply holds a new refresh token
@@ -199,6 +202,7 @@ class TokenRefresh:
         scheme: str | None = "Bearer",
         header: str = "Authorization",
         leeway: float = 30.0,
+        renew_on: Collection[int] = frozenset({401}),
         now: Callable[[], float] = time.time,
     ) -> None:
         if refresh is None and login is None:
@@ -214,6 +218,7 @@ class TokenRefresh:
         self.scheme = scheme
         self.header = header
         self.leeway = leeway
+        self.renew_on = frozenset(renew_on)
         self.now = now
         self._token = None if access is None else _Token(access)
         self._refresh = refresh
@@ -242,12 +247,25 @@ class TokenRefresh:
         used = self._token
         request.headers.update(self._headers(used))
         response = yield request
-        if response.status_code == 401:
+        if response.status_code in self.renew_on:
             yield from self._renew_unless_done(
-                str(request.url), "the server answered 401", used
+                str(request.url), f"the server answered {response.status_code}", used
             )
             request.headers.update(self._headers(self._token))
             yield request
+
+    def renew(self, against: str = "") -> Generator[Request, Response, None]:
+        """Get a new access token now, whatever the state of the one held.
+
+        A flow like auth_flow: it yields the token requests to send and
+        receives their responses. Client.authenticate() runs it, for a
+        script that should find a wrong password or a server that is down
+        before it starts its work, not inside its first request. Raises
+        ApiError as a renewal inside a request does. Outside a Client,
+        `against` is the URL the refresh and login URLs resolve against.
+        """
+        with self._lock:
+            yield from self._renew(against, "asked to")
 
     def _headers(self, token: "_Token | None") -> dict[str, str]:
         return token_headers(token.access if token else "", self.scheme, self.header)

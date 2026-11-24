@@ -60,10 +60,29 @@ auth = TokenRefresh(
 
 Reply fields are paths: the defaults read simplejwt's names and OAuth's (`"access|access_token"`, `"refresh|refresh_token"`, `"expires_in"`). Change them with `access_key=`, `refresh_key=` and `expires_key=`, and the header with `scheme=` and `header=`. `access=` starts from an access token you already hold, `leeway=` is how many seconds before expiry a token is renewed (30, and never more than half a token's life), and `refresh_field=` names the field the refresh token is posted under. `ClientCredentials(credentials_in="body")` sends the client ID and secret in the form instead of a Basic header.
 
+`renew_on=` names the statuses that mean "renew the token and send again". It is `{401}` by default; an API that answers an expired session another way needs its status added, such as `renew_on={401, 412}`. Add only statuses the server sends before acting on the request, since the request is sent a second time.
+
+`client.authenticate()` gets the token now, before any other work, so a wrong password or a server that is down fails at the start of a script and not inside its first request:
+
+```python
+from goto_fetch import PasswordLogin, TokenRefresh
+from goto_fetch.testing import TokenServer
+
+server = TokenServer(stale_status=412)  # this API answers a stale session with 412
+auth = TokenRefresh(login=PasswordLogin("/token/", "me", "pw"), renew_on={401, 412})
+client = server.client(auth=auth)
+client.authenticate()  # raises ApiError here if the login is refused
+assert server.paths == ["/api/token/"]
+
+server.expire_access_tokens()
+assert client.get_json("/items/")["results"] == [{"id": 1}]  # 412, login, sent again
+```
+
 Through a `Client`, the refresh and login URLs resolve like endpoints: the client calls `bind(resolve)` on an auth that has it (`ResolvesUrls`). On its own, `TokenRefresh` resolves them against each request's URL, so give absolute URLs there.
 
 ## Traps
 
 - Keep secrets in environment variables, not in code or URLs. Generated scripts read them from `$API_TOKEN`, `$API_REFRESH_TOKEN`, `$API_ACCESS_TOKEN`, `$API_USERNAME`, `$API_PASSWORD` and `$API_CLIENT_SECRET`.
+- A token request is retried by the rule of the request that needed it, not its own: a login inside a GET is tried again as a GET would be (so `Retry(attempts=4)` can send it 4 times), and one inside a POST is not, unless that call says `retry=True`. `client.authenticate()` sends each token request once.
 - A login of your own is any object with `token_url` and `build_request(url)`; see [build-your-own](build-your-own.md).
 - A credential never leaves the API's host. The transports drop `Authorization`, `Cookie` and any header whose name says it carries a secret (`X-API-Key`, `X-Auth-Token` and the like, see `http.credential_headers`) before following a redirect to another host; a header named otherwise, such as `X-Team`, is kept, so name credential headers for what they are. And `Client` sends its headers and `auth` only to its `base_url`'s host: a next link on another host is refused with an `ApiError`, or, with `Client(off_host="unsigned")`, goes unsigned with a `withheld` warning.
