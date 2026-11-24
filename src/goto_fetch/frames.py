@@ -8,8 +8,6 @@ from importlib.util import find_spec
 from types import ModuleType
 from typing import Any, Literal, cast
 
-import narwhals.stable.v2 as nw
-
 from .logs import log_event
 from .models import as_dict
 from .paths import extend_path
@@ -169,6 +167,10 @@ def to_frame(records: Sequence[Any], backend: str | ModuleType | None = None) ->
         )
     columns = list(dict.fromkeys(key for record in records for key in record))
     data = {c: even_out(c, [r.get(c) for r in records]) for c in columns}
+    # Imported here, not at the top: code that only fetches shouldn't pay
+    # for narwhals each time the package is imported.
+    import narwhals.stable.v2 as nw
+
     # narwhals types `backend` with names of its own; any library name or
     # module it accepts is fine here, and it reports one it doesn't know.
     chosen = cast("Any", backend or default_backend())
@@ -198,6 +200,8 @@ def latest_per_key(
     """
     if keep not in ("latest", "earliest"):
         raise ValueError(f"keep must be 'latest' or 'earliest', got {keep!r}")
+    import narwhals.stable.v2 as nw  # when used, as in to_frame
+
     df = nw.from_native(frame, eager_only=True)
     return (
         df.sort(by, descending=keep == "latest", nulls_last=True)

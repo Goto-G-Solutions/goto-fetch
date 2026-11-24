@@ -73,6 +73,10 @@ requires = ["uv_build>=0.13.1,<0.14"]
 build-backend = "uv_build"
 
 [tool.pyright]
+# So pyright finds the packages however it is run: `uv run pyright` is
+# already inside .venv, but `uvx pyright` and an editor are not.
+venvPath = "."
+venv = ".venv"
 # tests/test_protocols.py proves each piece fits its interface, so it is
 # type checked too; the other tests are not.
 include = ["src", "tests/test_protocols.py"]
