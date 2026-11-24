@@ -9,7 +9,7 @@ Always: make one `Client` per API and reuse it. It keeps one connection pool, an
 ## What it handles for you
 
 - Joining endpoints to the base URL, as written; `trailing_slash=True` adds a "/" before any query, as Django REST Framework expects.
-- Retrying temporary failures (see [retries](retries.md)), and raising one `ApiError` for anything final, with the URL and status, secrets hidden.
+- Retrying temporary failures (see [retries](retries.md)), and raising one `ApiError` for anything final, with the URL and status, secrets hidden, and the `method` and the `client` (the `Client`'s `name`), so code that catches it can tell a failed write from a failed read and one API from another.
 - Merging `params=` into a query the endpoint already has.
 - Reading JSON: an empty 200 is an error, 204 and 205 are empty, gzip sent without saying so is unpacked, and a non-JSON body names its content type.
 

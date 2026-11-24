@@ -282,7 +282,7 @@ def test_my_pipeline_survives_a_capped_server_and_a_hiccup():
 | `json_pages`, `replies` | fixed pages by URL, or fixed responses in turn |
 | `flaky(api, 503, ...)` | any of these, failing first as told |
 
-Each returns a `FakeApi`, which remembers every request (`.calls`, `.paths`, `.queries`, `.bodies`). `.client()` gives a `Client` wired to it, whose retries don't wait.
+Each returns a `FakeApi`, which remembers every request (`.calls`, `.paths`, `.queries`, `.bodies`). `.client()` gives a `Client` wired to it, whose retries don't wait: the seconds its retry policy asked for go to `.waits` instead, so a test can check them (`assert api.waits == [2.0]` after a `Retry-After: 2`).
 
 ### Testing your own pieces
 

@@ -86,12 +86,14 @@ class FakeApi:
     client() gives one wired to it. serve(api) puts it behind a real HTTP
     server, to test a real transport. `calls` holds every request in order;
     `paths`, `queries` and `bodies` read the same requests in the forms
-    tests usually check.
+    tests usually check. `waits` holds the seconds each client made by
+    client() would have waited between retries, in order.
     """
 
     def __init__(self, answer: Answer) -> None:
         self._answer = answer
         self.calls: list[http.Request] = []
+        self.waits: list[float] = []
 
     def __call__(self, request: http.Request) -> http.Response:
         self.calls.append(request)
@@ -129,8 +131,15 @@ class FakeApi:
         return found
 
     def client(self, base_url: str = "http://api.test/api", **options: Any) -> Client:
-        """A Client whose requests come here. Retries don't wait, unless `retry` says otherwise."""
+        """A Client whose requests come here, and whose retries never really wait.
+
+        The waits its retry policy asks for go to `waits` instead of
+        time.sleep (pass `sleep=` to change that). The default policy is
+        Retry(backoff=0), so they are 0 unless a Retry-After header or a
+        `retry` of your own asks for more.
+        """
         options.setdefault("retry", Retry(backoff=0))
+        options.setdefault("sleep", self.waits.append)
         return Client(base_url, transport=self, **options)
 
 
