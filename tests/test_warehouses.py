@@ -317,8 +317,21 @@ def test_deleting_by_a_key_the_table_lacks_is_refused(database):
     # that is no column raised a bare KeyError.
     shop = database()
     shop.write("t", [{"id": 1}], key="id")
-    tracker = Changes("id", state={"hashes": {"1": "x"}})
+    tracker = Changes("id", state={"hashes": {"1": "x"}}, max_deleted=1.0)
     assert list(tracker.track([])) == []
     with pytest.raises(ValueError, match="'t' has no column 'idd'"):
         shop.write("t", [], key="idd", deleted_by=tracker)
     assert shop.read("t") == [{"id": 1}]
+
+
+def test_an_empty_run_after_a_full_one_removes_no_row(database):
+    # Regression: after a run that saw nothing, deleted_by removed every
+    # row (issue #11). The tracker now refuses the run while the records
+    # are staged, before the database is opened.
+    shop = database()
+    first = Changes("id")
+    shop.write("t", first.track([{"id": 1}, {"id": 2}]), key="id")
+    second = Changes("id", state=first.state)
+    with pytest.raises(ApiError, match="saw none of the 2 records"):
+        shop.write("t", second.track([]), key="id", deleted_by=second)
+    assert sorted(row["id"] for row in shop.read("t")) == [1, 2]

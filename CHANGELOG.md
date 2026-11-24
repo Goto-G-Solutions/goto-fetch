@@ -7,7 +7,7 @@ Each release lists what changed for people using the package. The format follows
 ### Changed
 
 - Two defaults were Django REST Framework's; now the simplest shape is the default and DRF's conventions opt in. `Client(trailing_slash=...)` defaults to `False`: an endpoint is sent as written, and `trailing_slash=True` adds the "/" DRF wants. `results_key` defaults to `RESULTS` (`"results|items|data"`), which also takes a body that is a bare list; name one key to be strict, since a key you name and the page lacks is still an error. `FetchPlan` and the explorer follow.
-
+- **Breaking:** `Changes` now refuses, with an `ApiError`, a run that saw none of the records the last run held. An API answering a fault with an empty page looked like a complete run, so `deleted` listed every record and a warehouse write removed every row. Pass `Changes(max_deleted=1.0)` when everything may really go; `max_deleted` also takes a count, or a share of the last run, as a tighter limit.
 - **Breaking:** a `Client` now refuses a request to another host than its `base_url`'s, raising `ApiError` before sending. `records()` used to follow a next link to another host, unsigned, and mix that host's records in with the API's own. For an API that really pages across hosts, pass `Client(off_host="unsigned")` (or `FetchPlan(off_host="unsigned")`) for the old behaviour. A client with no `base_url` is unchanged.
 
 ### Added

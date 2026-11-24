@@ -139,7 +139,7 @@ with tracked_run(state, "orders", Incremental, "updated_at", "updated_since") as
 
 Keyset pages overlap at each page's last value, and `Incremental` passes the repeats over. When more records share one value than a page holds, Keyset stops with an error rather than skip any; raise `limit`.
 
-When an API has no such field, or doesn't always update it, `Changes` fetches everything and passes on only new and changed records, by a fingerprint (a hash) of each. It also lists the records that disappeared, which a timestamp never shows. Leave out fields that change on every fetch, or every record looks changed. For an API that gives each record a version or ETag, `fingerprint=lambda r: str(r["version"])` replaces the hash:
+When an API has no such field, or doesn't always update it, `Changes` fetches everything and passes on only new and changed records, by a fingerprint (a hash) of each. It also lists the records that disappeared, which a timestamp never shows; a run that would call every record deleted is refused unless you allow it (`max_deleted=1.0`), since a fault that answers with an empty page looks the same. Leave out fields that change on every fetch, or every record looks changed. For an API that gives each record a version or ETag, `fingerprint=lambda r: str(r["version"])` replaces the hash:
 
 ```python
 from goto_fetch import Changes

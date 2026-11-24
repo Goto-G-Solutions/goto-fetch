@@ -113,5 +113,6 @@ assert [r["id"] for r in records] == [0, 1, 2, 3, 4, 5]
 - `Incremental`'s `key=` recognises the records seen at the last value by a field; without it, by their whole content, which also notices a record edited twice in the same instant. `Changes` always matches records by its `key`.
 - A record without the tracked field stops the run (`missing="raise"`); pass `missing="keep"` or `"drop"` to allow it.
 - `Changes` needs a run that fetches every record: on a filtered fetch, the records not fetched would look deleted.
+- An API that answers a fault with an empty page looks like one whose data is all gone. So `Changes` refuses, with an `ApiError`, a run that saw none of the records the last run held: the state stays, `deleted` stays `None`, and nothing is removed. `Changes(max_deleted=1.0)` allows it when everything may really go. `max_deleted` also sets a tighter limit: a whole number is a count (`max_deleted=100`), and a fraction a share of the last run's records (`max_deleted=0.2`). Mind the difference between `1` (one record) and `1.0` (all of them).
 - Make one tracker per run, or let `tracked_run` make it.
 - Read the records inside the `with tracked_run(...)` block, by storing them or with `list()`. `records()` is lazy: records read after the block ends were never part of the tracked run, so its state doesn't move and the next run fetches them again.

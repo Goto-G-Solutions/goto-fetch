@@ -317,6 +317,16 @@ class Changes:
       fingerprint=lambda record: str(record["version"]). Give `ignore` or
       `fingerprint`, not both.
     - `state`: what `state` held after the last run.
+    - `max_deleted`: how many of the last run's records may be gone before
+      the run is refused. A whole number is a count, and a fraction from
+      0.0 to 1.0 a share of the last run's records (so 1 is one record,
+      and 1.0 all of them). None, the default, allows any number short of
+      all: a run that saw none of the records the last run held is
+      refused, because an API that answers a fault with an empty page
+      looks exactly like one whose data is gone. Pass max_deleted=1.0
+      when everything may really go. A refused run raises ApiError at its
+      end, and leaves `state` as it was and `deleted` None, so nothing is
+      removed.
 
     Only for runs that fetch every record: with a filtered fetch (such as
     Incremental's), the records not fetched would look deleted.
@@ -329,7 +339,17 @@ class Changes:
         ignore: Iterable[str] = (),
         fingerprint: Fingerprint | None = None,
         state: dict[str, Any] | None = None,
+        max_deleted: float | None = None,
     ) -> None:
+        if max_deleted is not None:
+            whole = isinstance(max_deleted, int) and not isinstance(max_deleted, bool)
+            share = isinstance(max_deleted, float) and 0.0 <= max_deleted <= 1.0
+            if not (whole and max_deleted >= 0) and not share:
+                raise ValueError(
+                    "max_deleted must be a count (0 or more) or a share from "
+                    f"0.0 to 1.0, got {max_deleted!r}"
+                )
+        self.max_deleted = max_deleted
         self.key = key
         self.ignore = [parse_path(path) for path in ignore]
         if fingerprint is not None and self.ignore:
@@ -374,6 +394,8 @@ class Changes:
         A record seen twice in one run (pages that overlap) is passed on
         once, unless it changed in between. If the loop stops early, by an
         error or a break, `state` stays as it was and `deleted` stays None.
+        The same holds when more records are gone than `max_deleted`
+        allows: ApiError is raised once every record has been passed on.
         """
         seen: dict[str, str] = {}
         new = changed = unchanged = 0
@@ -397,6 +419,7 @@ class Changes:
                 changed += 1
             yield record
         gone = [json.loads(name) for name in self._hashes if name not in seen]
+        self._refuse_too_many(len(gone))
         self._state = {"hashes": seen}
         self._deleted = gone
         log_event(
@@ -415,6 +438,28 @@ class Changes:
                 "deleted": len(gone),
             },
         )
+
+    def _refuse_too_many(self, gone: int) -> None:
+        """Raise ApiError if more records are gone than `max_deleted` allows."""
+        known = len(self._hashes)
+        if self.max_deleted is None:
+            if known and gone == known:
+                raise ApiError(
+                    f"This run saw none of the {known:,} records the last run "
+                    "held, so every one would count as deleted. An API that "
+                    "answers a fault with an empty page looks like this; if "
+                    "the records are really gone, pass max_deleted=1.0"
+                )
+            return
+        if isinstance(self.max_deleted, float):
+            allowed = self.max_deleted * known
+        else:
+            allowed = self.max_deleted
+        if gone > allowed:
+            raise ApiError(
+                f"{gone:,} of the {known:,} records the last run held are "
+                f"gone, more than max_deleted={self.max_deleted!r} allows"
+            )
 
     def _fingerprint(self, record: Any) -> str:
         if self.fingerprint is not None:
