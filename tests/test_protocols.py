@@ -31,6 +31,7 @@ from goto_fetch import (
     PageRequest,
     Paging,
     PasswordLogin,
+    Renews,
     ReportsDeletions,
     ResolvesUrls,
     Response,
@@ -109,6 +110,7 @@ def test_built_in_pieces_fit_their_interfaces(tmp_path):
         ClientCredentials("/token/", "id", "secret"),
     ]
     resolves: ResolvesUrls = TokenRefresh("/token/refresh/", refresh="r")
+    renews: Renews = TokenRefresh("/token/refresh/", refresh="r")
     auths: list[Auth] = [TokenRefresh("/token/refresh/", refresh="r")]
     transports: list[Transport] = [
         Urllib3Transport(),
@@ -139,6 +141,7 @@ def test_built_in_pieces_fit_their_interfaces(tmp_path):
     assert all(isinstance(w, StateStore) for w in warehouses)
     assert isinstance(reports, ReportsDeletions)
     assert isinstance(resolves, ResolvesUrls)
+    assert isinstance(renews, Renews)
     assert all(isinstance(t, Transport) for t in transports)
     assert all(isinstance(a, Auth) for a in auths)
     del paging, policy, logins, check, decode, fingerprint, tables  # for pyright

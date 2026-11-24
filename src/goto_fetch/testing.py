@@ -404,6 +404,12 @@ class TokenServer(FakeApi):
     `refresh_tokens` are the tokens it accepts; expire_access_tokens()
     makes every access token stale, as time passing would. With
     `expires_in`, every token reply says how many seconds it lasts.
+    `stale_status` is what a request without a good access token gets:
+    401, or another for an API that answers an expired session its own
+    way (ArchivesSpace sends 412).
+
+    To change what it answers (a slow refresh, a token endpoint that
+    fails once), wrap it: FakeApi(lambda request: ... server(request)).
     """
 
     def __init__(
@@ -421,6 +427,7 @@ class TokenServer(FakeApi):
         client_id: str = "client",
         client_secret: str = "secret",
         expires_in: int | None = None,
+        stale_status: int = 401,
     ) -> None:
         self.access_tokens: set[str] = set()
         self.refresh_tokens: set[str] = {"r0"}
@@ -485,7 +492,7 @@ class TokenServer(FakeApi):
                 return http.Response(200, json=lasting(reply))
             token = request.headers.get("Authorization", "").removeprefix("Bearer ")
             if deny_all or token not in self.access_tokens:
-                return http.Response(401, json={"detail": "Not authenticated"})
+                return http.Response(stale_status, json={"detail": "Not authenticated"})
             results = [body] if body is not None else list(records)
             return http.Response(200, json={"results": results, "next": None})
 

@@ -3,7 +3,7 @@
 import gzip
 import logging
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any, Literal, NamedTuple, Protocol, Self, runtime_checkable
 
@@ -58,6 +58,19 @@ class ResolvesUrls(Protocol):
     """
 
     def bind(self, resolve: Callable[[str], str]) -> None: ...
+
+
+@runtime_checkable
+class Renews(Protocol):
+    """An auth that can get its token on request, such as TokenRefresh.
+
+    renew(against) is a flow like Auth.auth_flow, without a request of its
+    own to sign: it yields the token requests to send and receives each
+    response. Client.authenticate() runs it. A custom auth opts in by
+    having this method.
+    """
+
+    def renew(self, against: str = "") -> Generator[Request, Response, None]: ...
 
 
 class Client:
@@ -328,6 +341,27 @@ class Client:
             )
             self.sleep(wait)
 
+    def authenticate(self) -> None:
+        """Get the auth's token now, so a wrong password or a server that is down fails here.
+
+        Without it, the first login happens inside the first request,
+        perhaps after other work has started. Needs an auth that can renew
+        (Renews, as TokenRefresh does); raises TypeError for any other, and
+        ApiError when the token can't be had. The token requests are sent
+        once each: a failure is raised, not retried.
+        """
+        auth = self.auth
+        if not isinstance(auth, Renews):
+            raise TypeError(
+                "authenticate() needs an auth that can renew its token, such as "
+                f"TokenRefresh; this client's auth is {auth!r}"
+            )
+        with client_context(self.name), self._stamping("POST"):
+            try:
+                self._run(auth.renew(self.url("")))
+            except TransportError as exc:
+                raise ApiError(f"The token request failed: {exc}") from exc
+
     def _exchange(self, request: Request, auth: Auth | None) -> Response:
         """Send `request` through `auth`, if any, and the transport.
 
@@ -337,23 +371,27 @@ class Client:
         """
         if auth is None:
             return self._one(request)
-        flow = auth.auth_flow(request)
+        response = self._run(auth.auth_flow(request))
+        if response is None:
+            raise TypeError(
+                f"{type(auth).__name__}.auth_flow yielded no request to send"
+            )
+        return response
+
+    def _run(self, flow: Generator[Request, Response, None]) -> Response | None:
+        """Send each request `flow` yields, and return the last response, if any."""
+        response: Response | None = None
         # Closed whatever happens: a flow paused mid-renewal holds its lock
         # (TokenRefresh does), and a send that raises would leave it held,
         # so the retry after it would wait on that lock for ever.
         try:
             try:
                 outgoing = next(flow)
-            except StopIteration:
-                raise TypeError(
-                    f"{type(auth).__name__}.auth_flow yielded no request to send"
-                ) from None
-            while True:
-                response = self._one(outgoing)
-                try:
+                while True:
+                    response = self._one(outgoing)
                     outgoing = flow.send(response)
-                except StopIteration:
-                    return response
+            except StopIteration:
+                return response
         finally:
             flow.close()
 

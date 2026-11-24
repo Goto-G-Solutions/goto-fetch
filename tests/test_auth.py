@@ -229,15 +229,15 @@ def test_concurrent_requests_renew_a_rotating_token_only_once():
     # requests succeeded. Renewal is one at a time, and a request that
     # finds the token already renewed uses it.
     server = TokenServer(rotate=True)
-    answer = server._answer
 
     def slow_refresh(request):
         if request.url.path == "/api/token/refresh/":
             time.sleep(0.3)  # long enough for every thread to be waiting
-        return answer(request)
+        return server(request)
 
-    server._answer = slow_refresh
-    client = server.client(auth=TokenRefresh("/token/refresh/", refresh="r0"))
+    client = FakeApi(slow_refresh).client(
+        auth=TokenRefresh("/token/refresh/", refresh="r0")
+    )
     start = threading.Barrier(8)
 
     def fetch(_):
@@ -307,18 +307,17 @@ def test_a_custom_auth_with_its_own_urls_opts_in_to_endpoint_rules():
 def test_a_temporary_failure_at_the_token_endpoint_is_retried():
     # Guard (meltano #1038): a 503 from the token endpoint failed the run.
     server = TokenServer()
-    answer = server._answer
     failures = [http.Response(503)]
 
     def answer_flaky(request):
         if request.url.path == "/api/token/" and failures:
             return failures.pop()
-        return answer(request)
+        return server(request)
 
-    server._answer = answer_flaky
+    api = FakeApi(answer_flaky)
     auth = TokenRefresh(login=ClientCredentials("/token/", "client", "secret"))
-    assert list(server.client(auth=auth).records("/items/")) == [{"id": 1}]
-    assert server.paths.count("/api/token/") == 2
+    assert list(api.client(auth=auth).records("/items/")) == [{"id": 1}]
+    assert api.paths.count("/api/token/") == 2
 
 
 def test_a_refused_login_is_not_retried():
@@ -332,21 +331,19 @@ def test_a_refused_login_is_not_retried():
 def token_requests(expires_in, leeway=30.0, calls=3):
     """How many token requests `calls` requests make, given the reply's expires_in."""
     server = TokenServer()
-    answer = server._answer
 
     def with_expiry(request):
-        response = answer(request)
+        response = server(request)
         if request.url.path == "/api/token/":
             return http.Response(
                 200, json={**response.json(), "expires_in": expires_in}
             )
         return response
 
-    server._answer = with_expiry
     auth = TokenRefresh(
         login=ClientCredentials("/token/", "client", "secret"), leeway=leeway
     )
-    client = server.client(auth=auth)
+    client = FakeApi(with_expiry).client(auth=auth)
     for _ in range(calls):
         client.request("GET", "/items/")
     return server.paths.count("/api/token/")
@@ -409,3 +406,59 @@ def test_an_auth_that_yields_no_request_is_refused_clearly():
 
     with pytest.raises(TypeError, match="Silent.auth_flow yielded no request"):
         replies(200).client(auth=Silent()).request("GET", "/x/")
+
+
+# Statuses that mean "renew", and logging in up front (issue #28)
+
+
+def test_renew_on_names_the_statuses_that_renew_and_resend():
+    server = TokenServer(stale_status=412)
+    auth = TokenRefresh(
+        "/token/refresh/", refresh="r0", access="stale", renew_on={401, 412}
+    )
+    assert server.client(auth=auth).get_json("/items/")["results"] == [{"id": 1}]
+    assert server.paths == ["/api/items/", "/api/token/refresh/", "/api/items/"]
+
+
+def test_a_status_not_in_renew_on_fails_the_request_without_renewing():
+    server = TokenServer(stale_status=412)
+    auth = TokenRefresh("/token/refresh/", refresh="r0", access="stale")
+    with pytest.raises(ApiError) as raised:
+        server.client(auth=auth).get_json("/items/")
+    assert raised.value.status == 412
+    assert server.paths == ["/api/items/"]
+
+
+def test_authenticate_logs_in_before_any_request_is_made():
+    server = TokenServer()
+    client = server.client(auth=TokenRefresh(login=LOGIN))
+    client.authenticate()
+    assert server.paths == ["/api/token/"]
+    client.get_json("/items/")
+    assert server.paths == ["/api/token/", "/api/items/"]
+
+
+def test_authenticate_fails_at_once_on_a_refused_login():
+    server = TokenServer(accept_logins=False)
+    client = server.client(auth=TokenRefresh(login=LOGIN), name="crm")
+    with pytest.raises(ApiError, match="Logging in at .* returned HTTP 401") as raised:
+        client.authenticate()
+    assert (raised.value.status, raised.value.method) == (401, "POST")
+    assert raised.value.client == "crm"
+    assert server.paths == ["/api/token/"]
+
+
+def test_authenticate_reports_a_token_server_that_cant_be_reached():
+    client = replies(http.ConnectError("refused")).client(
+        auth=TokenRefresh(login=LOGIN)
+    )
+    with pytest.raises(ApiError, match="The token request failed: refused"):
+        client.authenticate()
+
+
+@pytest.mark.parametrize("auth", [None, object()], ids=["no-auth", "cant-renew"])
+def test_authenticate_needs_an_auth_that_can_renew(auth):
+    api = replies(200)
+    with pytest.raises(TypeError, match="needs an auth that can renew"):
+        api.client(auth=auth).authenticate()
+    assert api.calls == []
