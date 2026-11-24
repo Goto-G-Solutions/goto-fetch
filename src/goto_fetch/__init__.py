@@ -66,6 +66,7 @@ from .logs import (
 )
 from .paging import (
     RESULTS,
+    CountMismatch,
     Cursor,
     Fetched,
     HeaderLink,
@@ -98,6 +99,7 @@ __all__ = [
     "Client",
     "ClientCredentials",
     "ClientFilter",
+    "CountMismatch",
     "Cursor",
     "Decoder",
     "DuckDBWarehouse",

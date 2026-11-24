@@ -29,6 +29,7 @@ from .logs import client_context, log_event
 from .models import converter
 from .paging import (
     RESULTS,
+    CountMismatch,
     Fetched,
     NextLink,
     Page,
@@ -463,6 +464,7 @@ class Client:
         model: Any = None,
         retry: bool | None = None,
         incremental: Tracker | None = None,
+        strict_count: bool = False,
     ) -> Iterator[Any]:
         """Yield every record from a paginated JSON endpoint.
 
@@ -496,6 +498,17 @@ class Client:
         moves on only when every page has been read, so it can't be
         used with `max_pages`.
 
+        `strict_count` checks the run against `count_key`'s count, for a
+        run that reads a whole listing from its start: the count must be
+        the same on every page, and the records received must equal it at
+        the end, or CountMismatch (an ApiError) is raised. Paging by page
+        number or offset skips or repeats a record when the data changes
+        during a run, and this is how to notice: catch it and read again.
+        It is raised after the last record is delivered, so store nothing
+        for good until records() ends (a warehouse write does this). A
+        page without a count is an ApiError. With `max_pages` only the
+        pages are compared, since the run stops short of the count.
+
         Each page logs a "page" event at INFO, such as "Page 44: 100 records
         in 0.62s, 4,400 so far of 61,203", and the end a "done" event, so a
         long run can be watched; record.data carries the numbers. Retries log
@@ -520,6 +533,10 @@ class Client:
             raise ValueError(
                 "max_pages can't be used with incremental: a run cut short "
                 "would skip the records it didn't fetch"
+            )
+        if strict_count and count_key is None:
+            raise ValueError(
+                "strict_count needs a count_key, the count to check against"
             )
         url = _with_params(self.url(endpoint), params)
         convert = None if model is None else converter(model)
@@ -548,6 +565,7 @@ class Client:
 
         def every_record() -> Iterator[Any]:
             received = pages = 0
+            count: int | None = None  # the first page's, for strict_count
             started = time.monotonic()
             for pages, timed in enumerate(
                 paginate(fetch, first, next_request, max_pages=max_pages), start=1
@@ -556,9 +574,21 @@ class Client:
                     items, total = read(timed.fetched)
                     received += len(items)
                     _log_page(pages, len(items), received, total, timed.seconds)
+                    if strict_count:
+                        where = str(timed.fetched.response.url)
+                        count = _same_count(count, total, received, count_key, where)
                 yield from items
             with client_context(self.name):
                 _log_done(pages, received, time.monotonic() - started, max_pages)
+            if count is not None and max_pages is None and received != count:
+                raise CountMismatch(
+                    f"The pages held {received:,} records, but the count at "
+                    f"{count_key!r} is {count:,}; the data probably changed "
+                    "during the run, so read again",
+                    count=count,
+                    records=received,
+                    url=url,
+                )
 
         stream = every_record()
         if incremental is not None:
@@ -616,6 +646,35 @@ class _Timed(NamedTuple):
 
     fetched: Fetched
     seconds: float
+
+
+def _same_count(
+    count: int | None,
+    total: int | None,
+    received: int,
+    count_key: str | None,
+    url: str,
+) -> int:
+    """strict_count's check of one page: its count, which must be the run's.
+
+    `count` is the first page's count (None on the first page), `total`
+    this page's, and `received` the records read so far.
+    """
+    if total is None:
+        raise ApiError(
+            f"strict_count needs a count on every page, and there is none at "
+            f"{count_key!r}",
+            url=url,
+        )
+    if count is not None and total != count:
+        raise CountMismatch(
+            f"The count at {count_key!r} changed from {count:,} to {total:,} "
+            "between pages; the data changed during the run, so read again",
+            count=count,
+            records=received,
+            url=url,
+        )
+    return total
 
 
 def _with_params(url: str, params: Mapping[str, Any] | None) -> str:

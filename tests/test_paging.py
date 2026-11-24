@@ -16,6 +16,8 @@ import pytest
 from goto_fetch import (
     RESULTS,
     ApiError,
+    Changes,
+    CountMismatch,
     Cursor,
     HeaderLink,
     NextLink,
@@ -29,7 +31,14 @@ from goto_fetch import (
     with_query,
 )
 from goto_fetch.paging import Page, request_key
-from goto_fetch.testing import FakeApi, cursor_api, json_pages, offset_api, replies
+from goto_fetch.testing import (
+    FakeApi,
+    cursor_api,
+    json_pages,
+    next_link_api,
+    offset_api,
+    replies,
+)
 
 BASE = "http://api.test/api/items/"
 
@@ -590,3 +599,82 @@ def test_follow_turns_a_style_s_answer_into_the_next_request():
     assert step(None, post) is None
     assert step(None, post) == PageRequest("http://h/other/")
     assert step(None, post) is None
+
+
+# strict_count: the pages must add up to the count
+
+
+def shifting_api(pages: list[dict]) -> FakeApi:
+    """Pages served in order by ?page=, each as given: for data that changes mid-run."""
+
+    def answer(request):
+        number = int(request.url.params.get("page", 1))
+        body = dict(pages[number - 1])
+        if number < len(pages):
+            body["next"] = str(request.url.copy_set_param("page", number + 1))
+        return http.Response(200, json=body)
+
+    return FakeApi(answer)
+
+
+def test_strict_count_passes_a_run_whose_pages_add_up():
+    api = next_link_api(5, page_size=2)
+    records = api.client().records("/items", count_key="count", strict_count=True)
+    assert list(records) == [0, 1, 2, 3, 4]
+
+
+def test_strict_count_notices_a_record_skipped_between_pages():
+    # A record deleted before page 1 was read again shifts one from page 2
+    # back onto page 1: the run ends a record short of the count.
+    api = shifting_api([{"count": 4, "results": [1, 2]}, {"count": 4, "results": [4]}])
+    records = api.client().records("/items", count_key="count", strict_count=True)
+    assert [next(records) for _ in range(3)] == [1, 2, 4]
+    with pytest.raises(CountMismatch, match="held 3 records, but the count") as raised:
+        next(records)
+    assert (raised.value.count, raised.value.records) == (4, 3)
+    assert raised.value.url == "http://api.test/api/items"
+
+
+def test_strict_count_notices_a_count_that_changes_between_pages():
+    api = shifting_api([{"count": 4, "results": [1, 2]}, {"count": 3, "results": [3]}])
+    records = api.client().records("/items", count_key="count", strict_count=True)
+    with pytest.raises(CountMismatch, match="changed from 4 to 3") as raised:
+        list(records)
+    assert (raised.value.count, raised.value.records) == (4, 3)
+
+
+def test_without_strict_count_a_run_that_doesnt_add_up_ends_normally():
+    api = shifting_api([{"count": 4, "results": [1, 2]}, {"count": 4, "results": [4]}])
+    assert list(api.client().records("/items", count_key="count")) == [1, 2, 4]
+
+
+def test_strict_count_needs_a_count_key_and_a_count_on_every_page():
+    api = shifting_api([{"results": [1]}])
+    with pytest.raises(ValueError, match="strict_count needs a count_key"):
+        api.client().records("/items", strict_count=True)
+    assert api.calls == []
+    with pytest.raises(ApiError, match="needs a count on every page"):
+        list(api.client().records("/items", count_key="count", strict_count=True))
+
+
+def test_strict_count_with_max_pages_compares_only_the_pages():
+    api = next_link_api(5, page_size=2)
+    records = api.client().records(
+        "/items", count_key="count", strict_count=True, max_pages=1
+    )
+    assert list(records) == [0, 1]
+
+
+def test_a_count_mismatch_leaves_a_trackers_state_where_it_was():
+    api = shifting_api(
+        [{"count": 3, "results": [{"id": 1}]}, {"count": 3, "results": [{"id": 3}]}]
+    )
+    changes = Changes("id")
+    with pytest.raises(CountMismatch):
+        list(
+            api.client().records(
+                "/items", count_key="count", strict_count=True, incremental=changes
+            )
+        )
+    assert changes.state == {"hashes": {}}
+    assert changes.deleted is None
