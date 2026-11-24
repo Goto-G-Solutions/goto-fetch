@@ -41,7 +41,7 @@ assert api.queries == [{}, {"page": "2"}, {"page": "3"}]
 `records()` follows the pages and yields each record. Its main arguments:
 
 - `results_key`: where the records are in each page. By default (`RESULTS`, `"results|items|data"`) the usual names are tried, and a body that is itself a list is the records. Name one key, or a path with fallbacks such as `"payload|data.rows"`, to be strict: a key you name and the page lacks is an error, never an empty page. `None` says the body is always the list.
-- `count_key`: the total count, if the API gives one, for progress and an exact end.
+- `count_key`: the total count, if the API gives one, for progress and an exact end. With `strict_count=True`, the pages must add up to it, or `CountMismatch` is raised (see [paging](paging.md)).
 - `paging`: how to reach the next page (see [paging](paging.md)); next-page links by default.
 - `method` and `json`: for a search sent as a POST body. A POST isn't retried unless you pass `retry=True`, since repeating it could repeat a change.
 - `model`: turns each record into a typed object, a pydantic model, msgspec Struct, dataclass or function.

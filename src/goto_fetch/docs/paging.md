@@ -15,6 +15,7 @@ A paging style tells `client.records()` how to reach the next page. Pick the one
 ## What it handles for you
 
 - **The end:** an empty page ends a run, even when the API keeps sending a next link (`NextLink`, `HeaderLink` and `Cursor` turn that off with `stop_on_empty=False`); `Offset` stops at the count, or at an empty or short page when there is none; `Keyset` at an empty page, or one that moves nowhere.
+- **A run that doesn't add up:** with `count_key` and `strict_count=True`, a count that changes between pages, or records that don't add up to it, raise `CountMismatch`.
 - **Loops:** asking for a page already fetched raises `PaginationLoop`, rather than looping forever.
 - **Server caps:** `Offset` keeps going when the server sends fewer records than asked.
 - **Relative links** resolve against the current page, and a link keeps a POST's method and body.
@@ -79,6 +80,24 @@ A style of your own is any object with `begin(first, read)`; see [build-your-own
 
 ## Traps
 
-- **Page numbers and offsets over changing data** skip a record when one before it is edited or deleted during the run, as the rest shift a place. That matters most with incremental fetching: prefer a cursor, `Keyset`, or `Changes`.
+- **Page numbers and offsets over changing data** skip a record when one before it is edited or deleted during the run, as the rest shift a place. That matters most with incremental fetching: prefer a cursor, `Keyset`, or `Changes`. When the API offers none of those but gives a count, `strict_count=True` at least notices, and the remedy is to read again:
+
+  ```python
+  from goto_fetch import CountMismatch
+  from goto_fetch.testing import next_link_api
+
+  api = next_link_api(250)
+  for attempt in range(3):
+      try:
+          records = list(
+              api.client().records("/items", count_key="count", strict_count=True)
+          )
+          break
+      except CountMismatch:
+          continue  # the data changed mid-run: read it all again
+  assert len(records) == 250
+  ```
+
+  The error comes after the last record, so keep nothing for good until `records()` ends: collect into a list, or let a warehouse `write` do it (it stores all or nothing). It suits a run that reads a whole listing from its start; a run that starts at an offset, or whose count covers more than its filter, won't add up.
 - **A key holding dots**, such as `@odata.nextLink`, goes in quotes: `NextLink('["@odata.nextLink"]')`.
 - `Keyset` needs `limit` of at least 2, since each page repeats the last record of the one before, and no higher than the server allows: until a short page turns out not to be the last, a short page that moves nowhere counts as the end. `send_in="body"` and `send_as=` work as for `Incremental`.

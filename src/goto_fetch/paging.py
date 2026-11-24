@@ -28,6 +28,23 @@ class PaginationLoop(ApiError):
     """Raised when paging asks for a page it already fetched, which would loop forever."""
 
 
+class CountMismatch(ApiError):
+    """Raised when a run's pages don't add up to the count the API gave.
+
+    records(strict_count=True) raises it, either when a later page gives
+    another count than the first, or at the end when the records received
+    differ from the count. `count` is the count the first page gave, and
+    `records` how many records had been received when the check failed.
+    The usual cause is data that changed during a run paged by number or
+    offset, so reading again is the usual remedy.
+    """
+
+    def __init__(self, message: str, *, count: int, records: int, url: str) -> None:
+        super().__init__(message, url=url)
+        self.count = count
+        self.records = records
+
+
 R = TypeVar("R")
 """What paginate fetches by: a URL, a request body, a cursor."""
 P = TypeVar("P")

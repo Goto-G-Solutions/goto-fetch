@@ -12,6 +12,7 @@ Each release lists what changed for people using the package. The format follows
 
 ### Added
 
+- `records(count_key=..., strict_count=True)` checks a run against the API's count: the count must stay the same on every page and equal the records received, or `CountMismatch` (an `ApiError`, with `count` and `records`) is raised. It is how to notice a page-number or offset API skipping a record because the data changed during the run.
 - The `gtfetch` command: `gtfetch explore` copies the explorer notebook next to you, if there isn't one, and opens it in marimo; `gtfetch docs [page]` prints a guide. The notebook now ships inside the package (`goto_fetch/explorer/notebook.py`), so it matches the installed version, and its header no longer pins a local checkout, so `uvx marimo edit --sandbox <raw url>` works on the file alone. `uvx --from "goto-fetch[explorer,duckdb]" gtfetch explore` runs it with nothing installed.
 
 ### Fixed
