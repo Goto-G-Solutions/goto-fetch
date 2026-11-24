@@ -44,6 +44,32 @@ def test_redact_url_hides_only_sensitive_values_and_keeps_the_rest_exact(url, sa
     assert redact_url(url) == safe
 
 
+@pytest.mark.parametrize(
+    ("url", "safe"),
+    [
+        ("https://ghp_S3@h/x", "https://***@h/x"),
+        (
+            "https://h/cb#access_token=S3&state=1",
+            "https://h/cb#access_token=***&state=1",
+        ),
+        ("https://h/docs#section-2", "https://h/docs#section-2"),
+    ],
+    ids=["lone-username", "fragment", "plain-fragment"],
+)
+def test_redact_url_hides_a_lone_username_and_secrets_in_a_fragment(url, safe):
+    # Regression: a token used as the username, and an OAuth token in the
+    # fragment, came back as written.
+    assert redact_url(url) == safe
+
+
+@pytest.mark.parametrize("url", ["http://[bad/x?token=S3", "https://S3@h:abc/x"])
+def test_a_url_that_cant_be_read_is_hidden_whole(url):
+    # Regression: redact_url raised ValueError on these, so an ApiError
+    # naming one raised while being built and hid the real failure.
+    assert redact_url(url) == "***"
+    assert "S3" not in str(ApiError(f"GET {url} failed", url=url))
+
+
 def test_api_errors_redact_their_message_and_url():
     # Regression: an API key in the query string appeared in errors.
     error = ApiError("GET http://h/x?api_key=S3 failed", url="http://h/x?api_key=S3")

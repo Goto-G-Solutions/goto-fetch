@@ -256,8 +256,10 @@ def test_a_tracked_run_cant_be_cut_short_by_max_pages():
     # tracker moved past the pages it never fetched.
     since = orders()
     api = changes_api([rec(i, i) for i in range(1, 6)], page_size=2)
+    # Refused at the call, not on the first record: a generator handed on
+    # unread would carry the mistake with it.
     with pytest.raises(ValueError, match="max_pages can't be used with incremental"):
-        list(api.client().records("/orders/", incremental=since, max_pages=1))
+        api.client().records("/orders/", incremental=since, max_pages=1)
     assert api.calls == []
     assert since.state == {"last": None, "seen": []}
 

@@ -310,3 +310,15 @@ def test_large_integers_beside_floats_keep_every_digit(database, one_run):
         shop.write("t", rows[1:])
     values = {r["id"]: r["v"] for r in shop.read("t")}
     assert values == {1: str(big), 2: "1.5"}
+
+
+def test_deleting_by_a_key_the_table_lacks_is_refused(database):
+    # Regression: a run with no records, deletions to remove and a key
+    # that is no column raised a bare KeyError.
+    shop = database()
+    shop.write("t", [{"id": 1}], key="id")
+    tracker = Changes("id", state={"hashes": {"1": "x"}})
+    assert list(tracker.track([])) == []
+    with pytest.raises(ValueError, match="'t' has no column 'idd'"):
+        shop.write("t", [], key="idd", deleted_by=tracker)
+    assert shop.read("t") == [{"id": 1}]
