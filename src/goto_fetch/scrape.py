@@ -11,8 +11,7 @@ try:
     from parsel import Selector
 except ImportError as exc:
     raise ImportError(
-        'goto_fetch.scrape needs the "scrape" extra; install it with: '
-        'pip install "goto-fetch[scrape]"'
+        "goto_fetch.scrape needs parsel: install the extra, goto-fetch[scrape]"
     ) from exc
 
 from .client import Client

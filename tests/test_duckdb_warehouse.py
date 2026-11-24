@@ -6,7 +6,6 @@ column types it makes, JSON that DuckDB can query, widening in place,
 and the transaction order a regression taught.
 """
 
-import dataclasses
 import sys
 
 import pytest
@@ -113,16 +112,6 @@ def test_widening_a_column_is_logged_as_a_warning(shop):
     events = dict(collect.events())
     assert events["widen"] == {"table": "t", "column": "v", "type": "text"}
     assert events["stored"] == {"table": "t", "records": 1}
-
-
-def test_typed_records_are_stored_like_dicts(shop):
-    @dataclasses.dataclass
-    class Order:
-        id: int
-        total: float
-
-    shop.write("orders", [Order(1, 2.5)])
-    assert rows(shop, "orders") == [(1, 2.5)]
 
 
 def test_a_duckdb_warehouse_keeps_state_in_the_same_file(shop):

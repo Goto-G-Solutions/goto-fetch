@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   build:
-    name: Test and build
+    name: Check and build
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -30,7 +30,13 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME doesn't match version $version in pyproject.toml."
             exit 1
           fi
+      # What CI checks on every pull request, again on the commit that is
+      # published: a tag can be pushed on any commit, checked or not.
       - run: uv run pytest
+      - run: uvx ruff check
+      - run: uvx ruff format --check
+      - run: uv run pyright
+      - run: uvx --with pytest marimo check --strict src/goto_fetch/explorer/notebook.py
       - run: uv build
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

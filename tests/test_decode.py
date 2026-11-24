@@ -38,10 +38,22 @@ def test_the_default_is_the_standard_library_without_msgspec(monkeypatch):
     assert json_decoder() is json.loads
 
 
-def test_asking_for_a_parser_that_isnt_installed_says_how_to_install_it(monkeypatch):
-    monkeypatch.setitem(sys.modules, "orjson", None)
-    with pytest.raises(ImportError, match="pip install orjson"):
-        json_decoder("orjson")
+@pytest.mark.parametrize(
+    ("parser", "how"),
+    [
+        ("orjson", "json_decoder needs orjson: install it, with pip install orjson"),
+        (
+            "msgspec",
+            r"json_decoder needs msgspec: install the extra, goto-fetch\[fast\]",
+        ),
+    ],
+)
+def test_asking_for_a_parser_that_isnt_installed_says_how_to_install_it(
+    monkeypatch, parser, how
+):
+    monkeypatch.setitem(sys.modules, parser, None)
+    with pytest.raises(ImportError, match=how):
+        json_decoder(parser)
 
 
 def test_bad_json_still_raises_value_error():

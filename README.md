@@ -40,7 +40,7 @@ The core needs only `urllib3` and `narwhals`. Optional extras add more, and comb
 | `duckdb` | storing records and run state in a DuckDB file with `DuckDBWarehouse` |
 | `scrape` | HTML scraping with `goto_fetch.scrape` (parsel) |
 | `httpx2` | sending with httpx2 (`Httpx2Transport`): HTTP/2, an `httpx2.Client` of your own |
-| `explorer` | marimo, to run the explorer notebook from a clone of this repository |
+| `explorer` | marimo, to run the explorer notebook (`gtfetch explore`) |
 
 ## Quick start
 

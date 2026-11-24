@@ -235,7 +235,7 @@ Often you (the driver) know more about the code than I do (the navigator). Your 
 
 **Purpose.** `goto_fetch` pulls data from paginated JSON APIs safely, keeps only what changed if asked, and stores it for analysis, with a marimo notebook for exploring an API and copying the fetch as a script.
 
-**Layers.** Each module imports only from modules in the layers before it. Dependencies point inward, as in section 2.
+**Layers.** Each module imports only from modules listed before it: in an earlier layer, or earlier in its own. Dependencies point inward, as in section 2, and never in a circle. `tests/test_layers.py` reads this list and checks every module against it, so a new module must be given its place here.
 
 1. `errors`, `paths`, `decode`, `models`, `calls`, `http`: the exception and redaction, reading values by path, parsing JSON, typed records, calls described once, and the HTTP vocabulary (requests, responses, the `Transport` and `Auth` interfaces).
 2. `logs`, `records`, `retry`, `checks`: logging events, reshaping records, the retry policy, and response checks.

@@ -26,6 +26,10 @@ def copy_notebook(to: Path) -> bool:
     included. Raises OSError when the file can't be written, such as into
     a folder that isn't there.
     """
+    if to.is_symlink():
+        # Asked for by name: Windows follows a link that leads nowhere and
+        # writes its target, even with "x".
+        return False
     try:
         # "x" makes the file only if the name is free, in one step.
         with to.open("x", encoding="utf-8") as file:

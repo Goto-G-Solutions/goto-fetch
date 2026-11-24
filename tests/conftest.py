@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from goto_fetch import Client
+from goto_fetch import Client, DuckDBWarehouse, SqliteWarehouse, Warehouse
 from goto_fetch.testing import FakeApi
 
 # A deeper search for the property tests, for occasional runs:
@@ -32,6 +32,23 @@ BACKENDS = [
 def backend(request: pytest.FixtureRequest) -> str:
     """The name of one installed dataframe library."""
     return request.param
+
+
+@pytest.fixture(params=["duckdb", "sqlite"])
+def database(request, tmp_path):
+    """Make a database warehouse in a fresh file: DuckDB (if installed) and SQLite.
+
+    Warehouse tests take this, so each runs on both databases.
+    """
+
+    def make() -> Warehouse:
+        path = tmp_path / f"shop-{len(list(tmp_path.iterdir()))}"
+        if request.param == "duckdb":
+            pytest.importorskip("duckdb")
+            return DuckDBWarehouse(path.with_suffix(".duckdb"))
+        return SqliteWarehouse(path.with_suffix(".db"))
+
+    return make
 
 
 class Collect(logging.Handler):

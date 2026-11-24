@@ -103,7 +103,9 @@ def test_a_sqlite_state_outlives_the_object_that_saved_it(tmp_path):
 def test_a_sqlite_state_refuses_what_isnt_json_and_keeps_the_old_value(tmp_path, value):
     store = SqliteState(tmp_path / "state.db")
     store.put("orders", {"last": 5})
-    with pytest.raises((TypeError, ValueError)):
+    # json.dumps says it its own way for each: an object it can't write
+    # (TypeError), a NaN it won't (ValueError).
+    with pytest.raises((TypeError, ValueError), match="JSON"):
         store.put("orders", value)
     assert store.get("orders") == {"last": 5}
 

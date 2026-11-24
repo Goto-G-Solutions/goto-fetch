@@ -57,7 +57,7 @@ Releases go to PyPI from GitHub Actions (`.github/workflows/release.yml`), with 
 3. Commit both as `chore(release): 0.2.0`, through a pull request like any other change.
 4. Tag the merged commit and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
 
-The workflow checks the tag matches the version, runs the tests, builds, and publishes.
+The workflow checks the tag matches the version, runs the tests, the lint, the type check and the notebook check, builds, and publishes.
 
 **Once, before the first release:**
 

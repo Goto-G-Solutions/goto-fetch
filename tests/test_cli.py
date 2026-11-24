@@ -10,6 +10,8 @@ from goto_fetch.cli import main
 from goto_fetch.docs import pages
 
 
+# test_docs checks the same pages through `python -m goto_fetch.docs`; these
+# two check the gtfetch command hands its arguments on to it.
 def test_docs_prints_a_page_and_the_index(capsys):
     assert main(["docs", "paging"]) == 0
     assert capsys.readouterr().out.startswith("# Paging")
@@ -108,6 +110,9 @@ def test_explore_doesnt_write_through_a_dangling_link(tmp_path, ran):
     # notebook was written to wherever the link led.
     target = tmp_path / "elsewhere.py"
     link = tmp_path / "explorer.py"
-    link.symlink_to(target)
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("this system doesn't let the test make a link")
     assert main(["explore", str(link)]) == 0
     assert not target.exists()
